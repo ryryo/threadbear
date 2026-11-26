@@ -378,11 +378,11 @@ impl Threadbear {
                 }))
                 .into_any_element();
         }
-        if matches!(
-            self.bots.editor.as_ref().map(|editor| &editor.kind),
-            Some(Edit::New)
-        ) {
-            return page.child(self.render_bot_editor(cx)).into_any_element();
+        let editor = self.bots.editor.as_ref();
+        if let Some(editor) = editor.filter(|editor| matches!(editor.kind, Edit::New)) {
+            return page
+                .child(self.render_bot_editor(editor, cx))
+                .into_any_element();
         }
         let Some(detail) = &self.bots.detail else {
             let prompt = if self.bots.list.is_empty() {
@@ -407,8 +407,8 @@ impl Threadbear {
                 )
             })
             .child(self.render_bot_tabs(cx));
-        if self.bots.editor.is_some() {
-            page = page.child(self.render_bot_editor(cx));
+        if let Some(editor) = editor {
+            page = page.child(self.render_bot_editor(editor, cx));
         } else {
             page = page.child(match self.bots.tab {
                 Tab::Conversations => self.render_bot_conversations(detail, cx),
@@ -446,12 +446,7 @@ impl Threadbear {
             .into_any_element()
     }
 
-    fn render_bot_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let editor = self
-            .bots
-            .editor
-            .as_ref()
-            .expect("editor is shown while open");
+    fn render_bot_editor(&self, editor: &Editor, cx: &mut Context<Self>) -> AnyElement {
         let busy = self.bots.busy;
         v_flex()
             .id("bot-edit-form")
@@ -729,6 +724,7 @@ impl Threadbear {
                 div()
                     .id(SharedString::from(format!("bot-note-{note_id}")))
                     .test_support()
+                    .a11y_role(gpui_kit::Role::GenericContainer)
                     .aria_label(note.text.clone())
                     .child(note.text.clone()),
             )
