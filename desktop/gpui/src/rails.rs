@@ -489,6 +489,7 @@ impl Threadbear {
             SidebarMode::Projects => "rail-projects",
             SidebarMode::Librarian => "rail-librarian",
             SidebarMode::Recipes => "rail-recipes",
+            SidebarMode::Bots => "rail-bots",
         }
         .into();
         let sliding = lit(Some(lit_id.clone()), cx.reduce_motion());
@@ -580,6 +581,16 @@ impl Threadbear {
                 },
                 cx,
             ));
+        }
+        if self.bots_on() {
+            let mut button = view_button(RailButton::new(
+                "rail-bots",
+                "person.2",
+                "Bots",
+                mode == SidebarMode::Bots,
+            ));
+            button.tip = "Bots: assistants with their own settings and notes".into();
+            views.push(rail_button(button, |this, _, cx| this.open_bots(cx), cx));
         }
         // Recipes, with its experiment on (recipes.rs): how many are on.
         if self.recipes_on() {

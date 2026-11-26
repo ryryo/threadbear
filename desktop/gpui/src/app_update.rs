@@ -1319,6 +1319,7 @@ impl Threadbear {
             "projects" => crate::shell::SidebarMode::Projects,
             "librarian" => crate::shell::SidebarMode::Librarian,
             "recipes" => crate::shell::SidebarMode::Recipes,
+            "bots" => crate::shell::SidebarMode::Bots,
             _ => crate::shell::SidebarMode::Inbox,
         };
         if self.mode != mode {

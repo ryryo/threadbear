@@ -54,6 +54,7 @@ pub(crate) enum SidebarMode {
     Librarian,
     /// The `recipes` experiment's view (recipes.rs).
     Recipes,
+    Bots,
 }
 
 impl SidebarMode {
@@ -64,6 +65,7 @@ impl SidebarMode {
             SidebarMode::Projects => "projects",
             SidebarMode::Librarian => "librarian",
             SidebarMode::Recipes => "recipes",
+            SidebarMode::Bots => "bots",
         }
     }
 }
@@ -677,6 +679,7 @@ impl Threadbear {
             SidebarMode::Projects => tr!("Projects").into(),
             SidebarMode::Librarian => tr!("Librarian").into(),
             SidebarMode::Recipes => tr!("Recipes").into(),
+            SidebarMode::Bots => "Bots".into(),
             SidebarMode::Scheduled => tr!(context "sidebar view", "Scheduled").into(),
             SidebarMode::Inbox => match self.open_thread() {
                 Some(t) if t.title.is_empty() => tr!("Untitled").into(),
@@ -2312,6 +2315,7 @@ impl Threadbear {
             SidebarMode::Librarian => self.render_librarian_list(cx),
             SidebarMode::Recipes => self.render_recipes_list(cx),
             SidebarMode::Projects => self.render_projects_list(cx),
+            SidebarMode::Bots => self.render_bots_list(cx),
         };
         // A view the activity bar's just switched to fades up into place
         // (SidebarView's transition; Mike picked it, 13 Nov). Under a wrapper
@@ -2372,6 +2376,7 @@ impl Threadbear {
             (_, Some(SidebarMode::Scheduled)) => self.render_scheduled_home(cx),
             (_, Some(SidebarMode::Librarian)) => self.render_librarian_home(cx),
             (_, Some(SidebarMode::Recipes)) => self.render_recipes_home(cx),
+            (_, Some(SidebarMode::Bots)) => self.render_bots_page(window, cx),
             (_, Some(_)) => self.render_projects_home(window, cx),
             // An archived session read-only in the thread's place (archive_search.rs).
             (None, None) if self.archive_page_showing() => self.render_archive_page(cx),

@@ -187,6 +187,7 @@ impl Threadbear {
         let hover = style::primary_opacity(cx, 0.06);
         let header_size = px(style::size::HEADER);
         let projects = self.render_project_chips(&thread, cx);
+        let bot = self.render_bot_chip(&thread, cx);
         let title_el: AnyElement = if self.renaming.as_deref() == Some(thread.id.as_str()) {
             self.render_rename_field(cx)
         } else {
@@ -244,6 +245,7 @@ impl Threadbear {
             .gap(px(6.))
             .text_size(header_size)
             .child(projects)
+            .children(bot)
             .child(title_el)
             .when(thread.is_archived(), |s| s.child(div().flex_none().text_color(faint).child("·  Archived")))
             .when(thread.on_old_runner == Some(true), |s| {

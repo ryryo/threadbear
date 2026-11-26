@@ -261,6 +261,7 @@ pub struct Threadbear {
     /// The projects themselves, the page that's open and the views' own
     /// state (projects.rs).
     pub(crate) projects: crate::projects::ProjectsState,
+    pub(crate) bots: crate::bots::BotsState,
 
     /// The new-thread page's box and what it's set to (new_thread.rs).
     pub(crate) new_thread: crate::new_thread::NewThreadState,
@@ -649,6 +650,7 @@ impl Threadbear {
             projects_supported: false,
             all_projects: Vec::new(),
             projects: crate::projects::ProjectsState::default(),
+            bots: crate::bots::BotsState::default(),
             new_thread: crate::new_thread::NewThreadState::new(),
             remote: Default::default(),
             runners_panel: Default::default(),
@@ -1076,6 +1078,7 @@ impl Threadbear {
                     self.load_list(cx);
                     self.refresh_restart(cx);
                     self.load_projects(cx);
+                    self.discover_bots(cx);
                     self.runner_settings_state
                         .on_connected("The runner disconnected before your change was saved.");
                     self.coordinators.generation += 1;

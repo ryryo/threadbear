@@ -60,11 +60,22 @@ pub struct QuietlyArchived {
     pub why: String,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BotLink {
+    #[serde(deserialize_with = "crate::wire::id")]
+    pub bot_id: String,
+    #[serde(deserialize_with = "crate::wire::id")]
+    pub conversation_id: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
     #[serde(deserialize_with = "crate::wire::id")]
     pub id: String,
+    #[serde(default, deserialize_with = "crate::wire::field")]
+    pub bot_link: Option<BotLink>,
     #[serde(default, deserialize_with = "crate::wire::field")]
     pub title: String,
     #[serde(default, deserialize_with = "crate::wire::field")]

@@ -1762,6 +1762,7 @@ fn shell_step(
                 "projects" => shell::SidebarMode::Projects,
                 "librarian" => shell::SidebarMode::Librarian,
                 "recipes" => shell::SidebarMode::Recipes,
+                "bots" => shell::SidebarMode::Bots,
                 "archive" => {
                     app.update(cx, |t, cx| {
                         t.run_command(shell::Command::ShowArchived, window, cx)

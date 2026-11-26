@@ -48,6 +48,11 @@ The shared files most features hook into:
 - `runner/src/main.ts`: builds every service, holds the RPC method table
   (`const methods = {...}`), and stops each service in `stop()` and
   `handOver()`.
+- **Bots**: `runner/src/bots/` owns the roster and notes, and the desktop
+  app's `gpui/src/bots.rs` owns the workspace view. `third_party/dsbot/`
+  records the pinned DS-Bot code, original licences and ported files. Keep
+  the release compatibility checks when taking the UI out of a fork with
+  Bot-linked data on disk.
 - `runner/src/threadbear-mcp.ts`: the agent tools (`buildThreadbearTools`)
   and the instructions agents get (`SHOWING_THE_USER`, `FILING_PROJECTS`).
 - `runner/src/runner.ts`: the thread engine. `runner/src/rpc.ts`: method

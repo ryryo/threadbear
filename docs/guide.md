@@ -2050,6 +2050,19 @@ The ones there are now, and what each does, are in
 themselves so it stays true.
 <!-- experiments:end -->
 
+### Bots
+
+With `nativeBots` on, the desktop app's **Bots** page gives each Bot its own
+name, role, instructions and notes. Create a Bot, then start a conversation.
+Open **Notes** from that conversation or click the Bot in its header. A note
+you add is pinned and shared with the Bot's other conversations. **History**
+shows edits, removals and the option to undo a change. Each conversation
+keeps its own messages and can reopen after the Runner restarts.
+
+The owning Runner needs its updated supervisor running before it can create a
+Bot. Its Bot controls are on the local desktop connection. The conversations
+use the same model, permission and approval controls as ordinary threads.
+
 ## Connectors
 <!-- slug: connectors -->
 

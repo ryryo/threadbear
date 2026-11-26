@@ -29,6 +29,7 @@ import { reviewDraft, reviewReply, sameDraft } from '../runner/src/reviews.ts';
 import { authProof, isNonce, newNonce } from '../runner/src/rpc-auth.ts';
 import { wellFormedJson } from '../runner/src/well-formed-json.ts';
 import { coordinatorDemo } from './coordinators.mjs';
+import { botDemo } from './bots.mjs';
 
 // Outgoing JSON must have no lone UTF-16 surrogates (serde_json drops the
 // whole WebSocket message), and text cuts / streaming deltas shouldn't split
@@ -510,6 +511,21 @@ const coordinatorRequest = process.env.TB_MOCK_COORDINATORS ? coordinatorDemo({
     return id;
   },
 }) : undefined;
+const botRequest = process.env.TB_MOCK_BOTS ? botDemo({
+  dataDir, error: rpcError,
+  createThread(bot, link) {
+    const now = iso();
+    const summary = {
+      id: link.threadId, title: bot.name, cwd: defaults.cwd, accountId: defaults.accountId,
+      provider: providerOf(defaults.accountId), permissionMode: 'ask', status: 'idle', live: false, needsYou: false,
+      botLink: { botId: bot.id, conversationId: link.id },
+      createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+    };
+    threads.set(summary.id, { summary, events: [], inProgress: new Map(), timers: [] });
+    broadcastSummary(summary.id);
+    return summary;
+  },
+}) : undefined;
 if (process.env.TB_MOCK_LIVE_PAGES) addLivePageDemo(process.env.TB_MOCK_LIVE_PAGES);
 // The experiments the mock's hello says are on: nested threads with
 // TB_MOCK_NESTED, and the done card's Archive menu with TB_MOCK_INBOX_GUESS.
@@ -523,6 +539,7 @@ function mockExperiments() {
     // The Recipes view, with TB_MOCK_RECIPES (addRecipesDemo).
     ...(process.env.TB_MOCK_RECIPES ? ['recipes'] : []),
     ...(process.env.TB_MOCK_COORDINATORS ? ['coordinators'] : []),
+    ...(process.env.TB_MOCK_BOTS ? ['nativeBots'] : []),
     // Agent Archive in the sidebar's search, with TB_MOCK_ARCHIVE (ARCHIVE_SESSIONS).
     ...(process.env.TB_MOCK_ARCHIVE ? ['archive'] : []),
   ];
@@ -981,6 +998,7 @@ async function dispatch(client, method, p) {
     if (method.startsWith('coordinators.') && !settings.experiments.find((e) => e.id === 'coordinators')?.on) throw rpcError(-32602, 'The coordinator experiment is off.');
     return coordinatorRequest(method, p);
   }
+  if (botRequest && method.startsWith('bots.')) return botRequest(method, p);
   switch (method) {
     case 'hello':
       // The Mac mini has two logins of its own and no pools, as the real one does,
