@@ -53,7 +53,7 @@ export class BotConversations {
   private conversationRecord(botId: string, threadId: string): ThreadRecord {
     const rec = this.runner.store.load(threadId);
     const saved = rec?.botLink;
-    if (!rec || saved?.botId !== botId || !this.repo.conversations(botId).some(link => link.threadId === threadId && link.id === saved.conversationId)) {
+    if (!rec || rec.copied || saved?.botId !== botId || !this.repo.matchesConversation(botId, saved.conversationId, threadId)) {
       throw new Error('This Thread does not belong to this Bot');
     }
     return rec;
@@ -110,12 +110,16 @@ export class BotConversations {
     return this.repo.archive(botId, expectedRevision, this.runner.isoNow());
   }
 
-  context(rec: ThreadRecord): string {
+  context(rec: ThreadRecord, task?: { id: string; botId: string; threadId: string }): string {
     const link = rec.botLink;
     if (!link) throw new Error('This Thread has no Bot link');
     const bot = this.repo.get(link.botId);
     if (bot.archivedAt) throw new Error('This Bot is archived');
-    this.conversationRecord(bot.id, rec.id);
+    if (task) {
+      if (task.id !== link.taskId || task.botId !== bot.id || task.threadId !== rec.id) throw new Error('This Thread does not match the Bot task');
+    } else {
+      this.conversationRecord(bot.id, rec.id);
+    }
     const memory = this.scopedMemory.open({ kind: 'bot', id: bot.id }, { kind: 'bot', id: bot.id, private: Boolean(bot.privacy), grants: [] }, 'read');
     const notes = memory.list(this.runner.isoNow().slice(0, 10)).filter(note => !note.topic);
     return [

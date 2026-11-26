@@ -24,7 +24,7 @@ test('the ported DS-Bot request and delivery tests pass in the Runner', () => {
   runPorted([
     'request-receipts.test.js', 'request-ledger.test.ts', 'request-dispatch.test.ts', 'request-events.test.ts',
     'request-graph.test.ts', 'request-return.test.ts', 'request-state.test.ts', 'handoff-result.test.ts',
-  ], 12);
+  ], 13);
 });
 
 test('the pinned DS-Bot baseline and direct ports match their recorded source', () => {

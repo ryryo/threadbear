@@ -8,8 +8,13 @@ import { BotRequestReturn } from './request-return.ts';
 import { RequestStateStore, type RequestRow } from './request-state.ts';
 import { RequestThreadEvidence } from './request-thread-evidence.ts';
 import { resultText } from './handoff-result.ts';
+import type { SavedTask } from './task-journal.ts';
 
-type Options = { root: string; runner: Runner; repo: BotRepository; owns: () => boolean; protect: () => void; warn: () => void };
+type Options = { root: string; runner: Runner; repo: BotRepository; owns: () => boolean; protect: () => void; warn: () => void;
+  task?: (id: string) => SavedTask | undefined;
+  childTasks?: (requestId: string) => readonly SavedTask[];
+  onCancel?: (row: RequestRow) => void;
+};
 type Correlation = NonNullable<BotInputRef['request']>;
 type PublicDraft = Omit<RequestDraft, 'parentRequestId' | 'rerunOf'>;
 
@@ -35,7 +40,7 @@ export class BotRequests {
     });
     this.delivery = new BotRequestReturn({
       requests: this.requests,
-      inspectInput: row => this.evidence.input(row, this.requests.children(row.id)),
+      inspectInput: row => this.evidence.input(row, this.requests.children(row.id), this.options.childTasks?.(row.id)),
       inspectReply: (row, id) => {
         if (!row.sourceBotId) return 'sent';
         const proof = this.evidence.reply(row, id);
@@ -64,9 +69,12 @@ export class BotRequests {
     const { repo, runner } = this.options;
     const st = this.current(threadId);
     const link = st.rec.botLink;
-    if (!link || !repo.conversations(link.botId).some(saved => saved.id === link.conversationId && saved.threadId === threadId)) {
-      throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
-    }
+    if (!link) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
+    const task = link.taskId ? this.options.task?.(link.taskId) : undefined;
+    const matched = task
+      ? task.threadId === threadId && task.botId === link.botId && task.id === link.conversationId && (!writable || !('outcome' in task.state))
+      : repo.matchesConversation(link.botId, link.conversationId, threadId);
+    if (!matched) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
     const bot = repo.get(link.botId);
     if (bot.privacy?.moving || (writable && (bot.archivedAt || st.rec.archivedAt))) throw new RpcError(ErrorCode.notAllowed, 'This Bot conversation cannot receive requests right now.');
     return { ...link, threadId, privateBotId: runner.privateBotOf(threadId) };
@@ -115,13 +123,23 @@ export class BotRequests {
 
   // A request belongs to the current authenticated input on the source
   // turn. Tool arguments can't provide the authority or the parent link.
-  private currentParent(threadId: string): string | undefined {
+  currentParent(threadId: string): string | undefined {
     const st = this.current(threadId);
     const turnId = st.rt.turn?.turnId;
     if (!turnId) return undefined;
     const log = this.options.runner.store.log(threadId);
     const input = log.read(1, log.lastSeq).findLast(event => event.type === 'user.message' && event.turnId === turnId);
-    if (input?.type !== 'user.message' || !input.botInput?.request) return undefined;
+    if (input?.type !== 'user.message') return undefined;
+    if (!input.botInput?.request) {
+      const reference = input.botInput?.task;
+      const id = reference?.id ?? st.rec.botLink?.taskId;
+      if (!id) return undefined;
+      const task = this.options.task?.(id);
+      if (!task || !task.originRequestId || (reference?.role === 'result' ? task.sourceThreadId !== threadId : task.threadId !== threadId)) return undefined;
+      const parent = this.requests.get(task.originRequestId);
+      if (parent.state.status === 'cancelled') throw new RpcError(ErrorCode.notAllowed, 'The parent request was cancelled.');
+      return parent.id;
+    }
     const ref = input.botInput.request;
     const request = this.requests.get(ref.id);
     if (ref.role === 'result') {
@@ -173,7 +191,7 @@ export class BotRequests {
       if (threadId && row.targetThreadId !== threadId && row.sourceThreadId !== threadId) continue;
       try {
         if (this.requests.cancelledAncestor(row) && !['returned', 'failed', 'cancelled'].includes(row.state.status)) {
-          this.delivery.cancel(row.id, row.revision);
+          this.cancelRequest(row, row.revision);
         } else {
           this.delivery.settle(row.id, true);
         }
@@ -183,6 +201,27 @@ export class BotRequests {
       if (threadId && st.rec.id !== threadId) continue;
       if (st.rec.queue.some(item => item.botInput?.request)) runner.kickQueue(st);
     }
+  }
+
+  private openFrom(threadId: string): RequestRow[] {
+    return this.requests.list().filter(row => row.sourceThreadId === threadId &&
+      !['returned', 'failed', 'cancelled'].includes(row.state.status));
+  }
+
+  pendingFrom(threadId: string): boolean {
+    return this.openFrom(threadId).length > 0;
+  }
+
+  cancelFrom(threadId: string): void {
+    for (const row of this.openFrom(threadId)) {
+      try { this.cancelRequest(row, row.revision); }
+      catch { this.options.warn(); }
+    }
+  }
+
+  cancelled(id: string): boolean {
+    const row = this.requests.get(id);
+    return row.state.status === 'cancelled' || this.requests.cancelledAncestor(row);
   }
 
   ownerGet(threadId: string, id: string) {
@@ -206,8 +245,14 @@ export class BotRequests {
   }
 
   ownerCancel(threadId: string, id: string, revision: number) {
-    this.ownerGet(threadId, id);
-    return this.delivery.cancel(id, revision);
+    return this.cancelRequest(this.ownerGet(threadId, id), revision);
+  }
+
+  private cancelRequest(row: RequestRow, revision: number): RequestRow {
+    try { return this.delivery.cancel(row.id, revision); }
+    finally {
+      if (this.requests.get(row.id).state.status === 'cancelled') this.options.onCancel?.(row);
+    }
   }
 
   ownerRetry(threadId: string, id: string, revision: number) {

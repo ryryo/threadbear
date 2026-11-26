@@ -15,6 +15,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use threadbear_core::inbox::ThreadSummary;
 
+mod tasks;
+use tasks::TaskCard;
+
 const EXPERIMENT: &str = "nativeBots";
 
 #[derive(Clone, Deserialize)]
@@ -191,6 +194,7 @@ enum Tab {
     Memory,
     Reviews,
     Requests,
+    Tasks,
     Settings,
 }
 
@@ -204,6 +208,9 @@ enum Edit {
     Privacy,
     Review(String, usize),
     RequestRerun(String, u64),
+    TaskStart,
+    TaskWrite(String),
+    TaskRetry(String, u64),
 }
 
 impl Edit {
@@ -216,6 +223,9 @@ impl Edit {
             Self::Privacy => "Dedicated work folder",
             Self::Review(_, _) => "Proposed note",
             Self::RequestRerun(_, _) => "Instructions for the new run",
+            Self::TaskStart => "Task title on the first line, then the brief",
+            Self::TaskWrite(_) => "Instruction for the task",
+            Self::TaskRetry(_, _) => "Brief for the new task run",
         }
     }
 }
@@ -233,6 +243,7 @@ pub(crate) struct BotsState {
     offered: bool,
     available: bool,
     requests_available: bool,
+    tasks_available: bool,
     reason: Option<String>,
     list: Vec<Profile>,
     selected: Option<String>,
@@ -249,6 +260,9 @@ pub(crate) struct BotsState {
     review_unavailable: Option<String>,
     requests: Vec<RequestCard>,
     request_result: Option<(String, RequestResult)>,
+    tasks: Vec<TaskCard>,
+    task_more: Option<String>,
+    task_result: Option<(String, RequestResult)>,
     editor: Option<Editor>,
     pending_conversation: Option<(String, String)>,
     pending_write: Option<(&'static str, Value, String)>,
@@ -273,6 +287,7 @@ impl Threadbear {
                 this.bots.offered = value["enabled"].as_bool().unwrap_or(false);
                 this.bots.available = value["available"].as_bool().unwrap_or(false);
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
+                this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
                     this.load_bot_list(cx);
@@ -376,6 +391,8 @@ impl Threadbear {
                                 this.load_bot_reviews(cx);
                             } else if this.bots.tab == Tab::Requests {
                                 this.load_bot_requests(cx);
+                            } else if this.bots.tab == Tab::Tasks {
+                                this.load_bot_tasks(false, cx);
                             }
                         }
                         Err(_) => {
@@ -715,6 +732,7 @@ impl Threadbear {
                 Tab::Memory => self.render_bot_memory(detail, cx),
                 Tab::Reviews => self.render_bot_reviews(detail, cx),
                 Tab::Requests => self.render_bot_requests(detail, cx),
+                Tab::Tasks => self.render_bot_tasks(detail, cx),
                 Tab::Settings => self.render_bot_settings(detail, cx),
             });
         }
@@ -731,12 +749,14 @@ impl Threadbear {
                     (Tab::Memory, "bot-tab-memory", "Memory"),
                     (Tab::Reviews, "bot-tab-reviews", "Memory review"),
                     (Tab::Requests, "bot-tab-requests", "Requests"),
+                    (Tab::Tasks, "bot-tab-tasks", "Background tasks"),
                     (Tab::Settings, "bot-tab-settings", "Settings"),
                 ]
                 .into_iter()
                 .filter(|(tab, _, _)| match tab {
                     Tab::Reviews => capabilities.reviews,
                     Tab::Requests => capabilities.requests,
+                    Tab::Tasks => self.bots.tasks_available,
                     _ => true,
                 })
                 .map(|(tab, id, label)| {
@@ -751,6 +771,8 @@ impl Threadbear {
                                 this.load_bot_reviews(cx);
                             } else if tab == Tab::Requests {
                                 this.load_bot_requests(cx);
+                            } else if tab == Tab::Tasks {
+                                this.load_bot_tasks(false, cx);
                             }
                             cx.notify();
                         }))
@@ -1740,6 +1762,8 @@ impl Threadbear {
         let link = thread.bot_link.as_ref()?;
         let (bot_id, thread_id) = (link.bot_id.clone(), thread.id.clone());
         let (request_bot, request_source) = (bot_id.clone(), thread_id.clone());
+        let task = link.task_id.is_some();
+        let task_action = self.render_task_thread_action(thread, link, cx);
         let label = self
             .bots
             .list
@@ -1747,7 +1771,11 @@ impl Threadbear {
             .find(|bot| bot.id == bot_id)
             .map_or("Bot", |bot| bot.name.as_str())
             .to_owned();
-        let tip = "Show the Bot’s notes and settings";
+        let tip = if task {
+            "Show this Bot’s background tasks"
+        } else {
+            "Show the Bot’s notes and settings"
+        };
         let chip = div()
             .id("thread-bot-chip")
             .flex_none()
@@ -1761,14 +1789,19 @@ impl Threadbear {
             .aria_label(tip)
             .tip(tip)
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_bot_from_thread(bot_id.clone(), thread_id.clone(), cx)
+                this.open_bot_from_thread(bot_id.clone(), thread_id.clone(), cx);
+                if task {
+                    this.bots.tab = Tab::Tasks;
+                    cx.notify();
+                }
             }))
             .child(label);
         Some(
             h_flex()
                 .gap(px(4.))
                 .child(chip)
-                .when(self.bots.requests_available, |row| {
+                .children(task_action)
+                .when(self.bots.requests_available && !task, |row| {
                     row.child(
                         bot_button(
                             "thread-bot-requests",
@@ -1793,6 +1826,7 @@ impl Threadbear {
 
 enum After {
     Requests,
+    Tasks,
     Profile,
     Conversation,
     Memory,
@@ -1853,6 +1887,29 @@ impl Threadbear {
                 "bots.reviews.approve",
                 json!({ "botId": id, "threadId": self.bots.source, "reportId": report_id, "index": index, "text": text }),
                 After::Reviews,
+            ),
+            Edit::TaskStart => {
+                let Some((title, brief)) = text.split_once('\n') else {
+                    self.bots.error =
+                        Some("Write the task title on the first line, then add a brief.".into());
+                    cx.notify();
+                    return;
+                };
+                (
+                    "bots.tasks.start",
+                    json!({ "threadId": self.bots.source, "title": title.trim(), "brief": brief.trim() }),
+                    After::Tasks,
+                )
+            }
+            Edit::TaskWrite(task_id) => (
+                "bots.tasks.send",
+                json!({ "taskId": task_id, "text": text }),
+                After::Tasks,
+            ),
+            Edit::TaskRetry(task_id, revision) => (
+                "bots.tasks.retry",
+                json!({ "taskId": task_id, "expectedRevision": revision, "brief": text }),
+                After::Tasks,
             ),
             Edit::RequestRerun(request_id, expected_revision) => (
                 "bots.requests.rerun",
@@ -1948,6 +2005,9 @@ impl Threadbear {
                         | "bots.settings.automaticReview"
                         | "bots.settings.automaticTidy"
                         | "bots.requests.rerun"
+                        | "bots.tasks.start"
+                        | "bots.tasks.send"
+                        | "bots.tasks.retry"
                 ))
         {
             let operation = match &self.bots.pending_write {
@@ -2031,6 +2091,14 @@ impl Threadbear {
             After::Memory => {
                 self.bots.editor = None;
                 self.load_bot_memory(false, cx);
+            }
+            After::Tasks => {
+                self.bots.editor = None;
+                self.load_bot_tasks(false, cx);
+                if value["saved"].as_bool() == Some(false) {
+                    self.bots.error =
+                        Some("The task stopped, but the Runner could not save the stop.".into());
+                }
             }
             After::Requests => {
                 self.bots.editor = None;

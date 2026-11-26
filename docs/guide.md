@@ -2085,6 +2085,12 @@ or read the result. **Check delivery** checks the saved receipt. **Start another
 run** takes a new brief and keeps the original conversations. Cancelling a
 request stops further delivery for that request and its children.
 
+Use **Background tasks** to start work on its own thread while continuing the
+original conversation. Open the task to answer its questions and approvals.
+You can send more instructions, stop the task, read the saved result or open
+the original conversation from the same list. Retrying keeps the previous
+attempt available.
+
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.

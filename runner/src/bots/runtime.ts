@@ -5,13 +5,17 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_REQUEST_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
 import { BotReviews, type BotReviewOptions } from './reviews.ts';
 import { botMethods, botRequestMethods } from './rpc.ts';
 import { BotRequests } from './request-service.ts';
+import { atomicWriteFileSync } from '../fsutil.ts';
+import { TaskJournal } from './task-journal.ts';
+import { BotTaskThreads } from './task-threads.ts';
+import { botTaskMethods } from './task-rpc.ts';
 import type { BotInputRef } from '../protocol.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
@@ -38,16 +42,18 @@ export class BotRuntime {
   private workspace?: { repo: BotRepository; conversations: BotConversations };
   private reviewService?: BotReviews;
   private requestService?: BotRequests;
+  private taskService?: BotTaskThreads;
+  private readonly taskWake = new Set<string>();
   private requestListener?: () => void;
   private readonly requestWake = new Set<string>();
   private reviewQueue?: ReviewQueue;
   private reviewDeps?: ReviewDeps;
   private stopListening?: () => void;
 
-  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat(), () => this.requestsAvailable()), botRequestMethods(() => this.requests()), {
+  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat(), () => this.requestsAvailable()), botRequestMethods(() => this.requests()), botTaskMethods(() => this.tasks()), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), reason };
+      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), reason };
     },
   });
 
@@ -64,11 +70,53 @@ export class BotRuntime {
     const { home, runner, owns } = this.options;
     return this.requestService ??= new BotRequests({
       root: join(home, 'bots'), runner: runner(), repo: this.getWorkspace().repo, owns,
+      task: id => this.tasksAvailable() ? this.tasks().get(id) : undefined,
+      childTasks: id => this.tasksAvailable() ? this.tasks().children(id) : [],
+      onCancel: row => {
+        this.reconcileTasks(row.targetThreadId);
+        this.reconcileTasks(row.sourceThreadId);
+      },
       protect: () => {
         if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
         protectBotData(home, BOT_REQUEST_FORMAT);
       },
       warn: () => runner().notice('error', 'A Bot request could not be reconciled.'),
+    });
+  }
+
+  tasksAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_TASK_FORMAT);
+  }
+
+  tasks(): BotTaskThreads {
+    if (!this.tasksAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Background Bot tasks need an updated Runner supervisor.');
+    const { home, runner, owns } = this.options;
+    return this.taskService ??= new BotTaskThreads({
+      runner: runner(), repo: this.getWorkspace().repo, owns,
+      parent: id => this.requestsAvailable() ? this.requests().currentParent(id) : undefined,
+      childRequests: id => this.requestsAvailable() && this.requests().pendingFrom(id),
+      cancelChildRequests: id => { if (this.requestsAvailable()) this.requests().cancelFrom(id); },
+      parentCancelled: id => this.requestsAvailable() && this.requests().cancelled(id),
+      journal: new TaskJournal(join(home, 'bots'), atomicWriteFileSync, () => {
+        if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+        protectBotData(home, BOT_TASK_FORMAT);
+      }),
+    });
+  }
+
+  taskQueue(threadId: string, ref: NonNullable<BotInputRef['task']>): 'allow' | 'wait' | 'drop' {
+    return this.tasksAvailable() ? this.tasks().queue(threadId, ref) : 'wait';
+  }
+
+  reconcileTasks(threadId?: string): void {
+    if (!this.tasksAvailable()) return;
+    const key = threadId ?? '';
+    if (this.taskWake.has(key)) return;
+    this.taskWake.add(key);
+    setImmediate(() => {
+      if (!this.taskWake.delete(key) || !this.tasksAvailable()) return;
+      try { this.tasks().recover(threadId); }
+      catch { this.options.runner().notice('warning', 'The Bot task journal could not be reopened.'); }
     });
   }
 
@@ -80,12 +128,18 @@ export class BotRuntime {
     if (this.requestListener) return;
     const runner = this.options.runner();
     this.requestListener = runner.onNotification(note => {
+      if (note.method === 'thread.updated' && note.params.thread.botLink?.taskId) {
+        this.reconcileTasks(note.params.thread.id);
+        return;
+      }
       if (note.method !== 'thread.event') return;
       const { threadId, event } = note.params;
       if (!runner.threads.get(threadId)?.rec.botLink) return;
-      if (event.type === 'turn.completed' || (event.type === 'user.message' && event.botInput?.request)) this.reconcileRequests(threadId);
+      if (event.type === 'turn.completed' || (event.type === 'user.message' && (event.botInput?.request || event.botInput?.task))) this.reconcileRequests(threadId);
+      if (event.type === 'turn.completed' || (event.type === 'user.message' && event.botInput?.task)) this.reconcileTasks(threadId);
     });
     this.reconcileRequests();
+    this.reconcileTasks();
   }
 
   reconcileRequests(threadId?: string): void {
@@ -104,6 +158,7 @@ export class BotRuntime {
     this.requestListener?.();
     this.requestListener = undefined;
     this.requestWake.clear();
+    this.taskWake.clear();
   }
 
   startReviews(deps: ReviewDeps): void {
@@ -117,14 +172,14 @@ export class BotRuntime {
     this.stopListening = runner.onNotification(note => {
       if (note.method === 'thread.updated') {
         const { id, status, botLink } = note.params.thread;
-        if (botLink && !this.unavailable()) queue.status(id, status === 'idle');
+        if (botLink && !botLink.taskId && !this.unavailable()) queue.status(id, status === 'idle');
       } else if (note.method === 'thread.deleted') {
         queue.status(note.params.threadId, false);
       }
     });
     if (!this.unavailable()) {
       for (const { rec } of runner.threads.values()) {
-        if (rec.botLink && !rec.copied && rec.status === 'idle') queue.status(rec.id, true);
+        if (rec.botLink && !rec.botLink.taskId && !rec.copied && rec.status === 'idle') queue.status(rec.id, true);
       }
     }
   }
@@ -198,7 +253,8 @@ export class BotRuntime {
       const otherFolders = repo.list().flatMap(bot => bot.id !== botId && bot.privacy ? bot.privacy.folder : []);
       if (moving.size && !this.options.withdrawShared) throw new Error('This Runner cannot yet withdraw previously shared conversations.');
       const affected = all.filter(({ rec }) => moving.has(rec.id));
-      if (affected.some(({ rec, rt }) => rt.session || rt.turn || rt.tasks.length || rec.queue.length)) {
+      if ((this.tasksAvailable() && this.tasks().hasActive(botId)) ||
+          affected.some(({ rec, rt }) => rt.session || rt.turn || rt.tasks.length || rec.queue.length)) {
         throw new Error('Stop the Bot’s conversations and background work before making it private.');
       }
       const threadFolders = all.filter(({ rec }) => !moving.has(rec.id)).map(({ rec }) => rec.cwd);
@@ -262,6 +318,7 @@ export class BotRuntime {
 
   context(rec: ThreadRecord): string {
     if (rec.copied) throw new RpcError(ErrorCode.notAllowed, 'A copy of a Bot conversation stays read-only.');
-    return this.getWorkspace().conversations.context(rec);
+    const task = rec.botLink?.taskId ? this.tasks().active(rec) : undefined;
+    return this.getWorkspace().conversations.context(rec, task);
   }
 }

@@ -37,3 +37,16 @@ Feature: Bot workspace
     When I open requests from the original Bot conversation
     And I read the saved Bot request result
     Then I see the full saved request result
+
+  @bots.tasks @bots @swift-pending
+  Scenario: A background task keeps its own thread and result after reconnect
+    Given the app is connected to an isolated Bot Runner
+    When I open a Bot conversation ready for a background task
+    And I start a background task from that conversation
+    And the isolated Bot Runner restarts
+    Then the app is connected again
+    When I open this Bot's background tasks
+    And I read the saved background task result
+    Then I see the full saved request result
+    And I can open the background task's own thread
+    And I can return directly to its original conversation

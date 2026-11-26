@@ -177,3 +177,33 @@ owner to inspect. It is not redirected to another conversation. A Private
 request cannot send its input or reply outside the approval's recorded
 destination and text. These RPCs and their contents are local to the
 owning Runner. Older clients ignore the extra Bot input fields.
+## Background Bot tasks
+
+A Bot runs a task in its own Thread. The Bot's normal conversation keeps its
+existing Thread and native CLI session. The task has an independent `taskId`,
+execution `threadId` and, when it belongs to delegated work, an
+`originRequestId`. Its stable reservation precedes creation of its Thread.
+The owning Runner creates the Task using the original conversation's Bot
+identity, login, model, permission ceiling and approved scope. An agent
+choosing a task folder uses the existing Thread approval path.
+
+Owner-only `bots.tasks.start` takes the originating `threadId`, `title`,
+`brief`, an optional `folder` and an `operationId`. Repeating the operation
+after a restart keeps the execution Thread. A different brief under that
+operation is refused. The Runner accepts four active tasks in the workspace
+and two per Bot. A task cannot start another background task.
+
+`bots.tasks.list` returns pages for a Bot, including completed tasks.
+`bots.tasks.read` takes a `taskId` and resolves it to the saved Thread.
+`bots.tasks.send` gives an active task a new instruction. Task questions and
+approvals still belong to its execution Thread. `bots.tasks.cancel` takes
+`expectedRevision`, stops the task's queue, CLI and outstanding work, and
+reports whether the stop was saved. These operations never stop the source
+conversation. `bots.tasks.retry` creates a separate execution attempt and
+retains its link to the earlier task.
+
+The terminal record preserves a reference to the full answer and any reply
+still due to the original conversation in one write. An unavailable
+transcript leaves a preview. The Runner keeps completed history, checks the
+native queue, approvals, job state, handover and child requests on recovery,
+and marks interrupted tasks when nothing still owns them.

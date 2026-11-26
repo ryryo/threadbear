@@ -61,9 +61,11 @@ import { FINDINGS_REFUSALS, FINDINGS_REFUSED, MAX_FINDINGS, findingsProblem, ref
 type Aw<T> = T | Promise<T>;
 type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
 import type { BotRequests } from './bots/request-service.ts';
+import type { BotTaskThreads } from './bots/task-threads.ts';
 import { NAME_MAX } from './bots/ported/requests.js';
 
 type BotTools = Pick<BotRequests, 'sendBot'>;
+type BotTaskTools = Pick<BotTaskThreads, 'start'>;
 
 export type ThreadControl = {
   authorizeBotSend?(threadId: string, text: string, signal?: AbortSignal): Promise<void>;
@@ -294,9 +296,11 @@ export function buildThreadbearTools(
     projectStepNote?: boolean;
     coordinators?: () => Coordinators | undefined;
     botRequests?: BotTools;
+    botTasks?: BotTaskTools;
   } = {},
 ) {
   const botRequests = opts.botRequests;
+  const botTasks = opts.botTasks;
   const codex = opts.provider === 'codex';
   // A schedule's check (schedule-check.ts).
   const checkArg = (update: boolean): Record<string, z.ZodOptional<z.ZodTypeAny>> => ({
@@ -2506,6 +2510,27 @@ export function buildThreadbearTools(
         return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
     ),
+    ...(botTasks ? [tool(
+      'task_start',
+      'Start a background task for this Bot and keep the current conversation. The result comes back when the task is done.',
+      { title: z.string().min(1).max(200), brief: z.string().min(1).max(30_000), folder: z.string().optional(),
+        operationId: z.string().min(1).max(NAME_MAX) },
+      handle(async ({ title, brief, folder: wanted, operationId }, extra) => {
+        const cwd = await folder(wanted ?? '.');
+        const base = await folder('.');
+        const mode = (await accessOf(selfId)).mode;
+        const task = await botTasks.start(selfId, { title, brief, folder: cwd, operationId }, async (_source, chosen, text) => {
+          if (chosen !== cwd) throw new Error('The task folder changed before approval.');
+          if (chosen !== base) {
+            await confirm('task_start', [`Start a background task in ${chosen}`], { title, text, folder: chosen, permissionMode: mode }, extra?.signal);
+            await sameFolder(wanted ?? '.', chosen);
+          }
+          if (extra?.signal?.aborted) throw new Error('The task was cancelled before it started.');
+          return mode;
+        });
+        return `Started task ${task.id} in thread ${task.threadId}.`;
+      }),
+    )] : []),
     ...(botRequests && control.authorizeBotSend ? [tool(
       'message_bot',
       'Ask another Bot in this workspace. Reuse the same request name when retrying the same brief. The result returns here.',
@@ -2857,14 +2882,14 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools, botTasks?: BotTaskTools): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const isHelper = Boolean(coordinators?.()?.helperOwner(selfId));
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: isHelper ? COORDINATOR_WORKER_PROMPT : serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), livePages: livePages?.() ?? false }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests, botTasks }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

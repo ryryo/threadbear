@@ -18,7 +18,7 @@ const scoped = z.object({ scope: z.object({ kind: z.enum(['bot', 'team', 'group'
 const scopeWrite = scoped.extend({ operationId: botOperationId, expectedRevision: z.union([z.literal('empty'), z.uuid()]) });
 const automation = identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean(), operationId: botOperationId });
 
-function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
+export function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
   return (p) => {
     const input = schema.safeParse(p);
     if (!input.success) throw new RpcError(ErrorCode.badParams, `Invalid Bot parameters: ${input.error.issues.map(issue => issue.path.join('.')).join(', ')}`);

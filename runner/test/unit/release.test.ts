@@ -495,3 +495,47 @@ test("on Windows tb names the current release's tb.cmd", () => {
   fs.writeFileSync(path.join(home, 'runner', 'current'), 'r2\n');
   assert.deepEqual(staleRelease(root('r1'), 'win32'), { mine: 'r1', current: 'r2', tb: path.join(root('r2'), 'bin', 'tb.cmd') });
 });
+test('a managed Bot background task reopens its own Thread and result without replacing its origin', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  configureBotFixture(home);
+  const cli = installBotFixtureCli(home);
+  const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: cli, THREADBEAR_RESTART_MS: '50' });
+  try {
+    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    try {
+      assert.equal((await c.call('bots.status')).tasks, true);
+      const { bot } = await c.call('bots.create', { name: '編集者' });
+      const { conversation } = await c.call('bots.conversations.create', { botId: bot.id, operationId: 'conversation' });
+      const input = { threadId: conversation.threadId, title: '見出し案', brief: '背景で見出しを考える', operationId: 'test-task' };
+      const { task } = await c.call('bots.tasks.start', input);
+      assert.notEqual(task.threadId, conversation.threadId);
+      assert.equal(fs.readFileSync(path.join(home, 'bots-format.json'), 'utf8').trim(), '4');
+      const file = path.join(home, 'bots', 'tasks.json');
+      await patiently(() => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('"sent":true'));
+      assert.deepEqual((await c.call('bots.tasks.read', { taskId: task.id })).result, { text: BOT_FIXTURE_REPLY, whole: true }, run.out());
+      await c.call('runner.restart', { reason: 'Bot task verification' });
+      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      try {
+        const { task: replayed } = await reopened.call('bots.tasks.start', input);
+        assert.equal(replayed.id, task.id);
+        assert.equal(replayed.threadId, task.threadId);
+        assert.deepEqual((await reopened.call('bots.get', { botId: bot.id })).conversations, [conversation]);
+        assert.deepEqual((await reopened.call('bots.tasks.read', { taskId: task.id })).result, { text: BOT_FIXTURE_REPLY, whole: true });
+        const { events } = await reopened.call('threads.events', { threadId: conversation.threadId, limit: 100 });
+        assert.equal(events.filter((event: { type: string; botInput?: { task?: { id: string; role: string } } }) =>
+          event.type === 'user.message' && event.botInput?.task?.id === task.id && event.botInput?.task?.role === 'result').length, 1);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      c.close();
+    }
+    run.proc.kill('SIGTERM');
+    assert.equal(await run.exited, 0);
+  } finally {
+    if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
+  }
+});

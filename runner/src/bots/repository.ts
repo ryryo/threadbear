@@ -196,6 +196,12 @@ export class BotRepository {
     return structuredClone(this.current.conversations.filter(link => link.botId === botId));
   }
 
+  // A Thread owns its conversation across CLI session switches. A Bot's ID
+  // cannot stand in for either identity (DS-Bot threads.js used that fallback).
+  matchesConversation(botId: string, conversationId: string, threadId: string): boolean {
+    return this.current.conversations.some(link => link.botId === botId && link.id === conversationId && link.threadId === threadId);
+  }
+
   reserveConversation(botId: string, operationId: string): Conversation | PendingConversation {
     const entry = this.get(botId);
     if (entry.archivedAt) throw new Error('This Bot is archived');

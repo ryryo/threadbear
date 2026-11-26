@@ -455,6 +455,10 @@ async function main(): Promise<void> {
   };
   const requestTools = (threadId: string) => bots.requestsAvailable() && runner.threads.get(threadId)?.rec.botLink
     ? bots.requests() : undefined;
+  const taskTools = (threadId: string) => {
+    const link = runner.threads.get(threadId)?.rec.botLink;
+    return bots.tasksAvailable() && link && !link.taskId ? bots.tasks() : undefined;
+  };
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
@@ -465,7 +469,7 @@ async function main(): Promise<void> {
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
-        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId)),
+        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId)),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -484,6 +488,7 @@ async function main(): Promise<void> {
       gatewayHealth: localOnly ? undefined : gatewayHealth, remote: () => localOnly ? undefined : remoteControl(),
       coordinators: () => localOnly ? undefined : runner.coordinators,
       botRequests: requestTools(threadId),
+      botTasks: taskTools(threadId),
     });
   };
   // One app-server per live Codex thread, each starting what E says is
@@ -577,6 +582,7 @@ async function main(): Promise<void> {
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
     botContext: (rec) => bots.context(rec),
     botRequestQueue: (threadId, ref) => bots.requestQueue(threadId, ref),
+    botTaskQueue: (threadId, ref) => bots.taskQueue(threadId, ref),
     ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id), pendingBotPrivacy: id => bots.pendingPrivateThread(id) }),
     projects,
     atMac: () => atMac,
@@ -637,6 +643,7 @@ async function main(): Promise<void> {
         // after the resume, which it would otherwise turn away.
         runner.startOwedReviews(threadId);
         bots.reconcileRequests(threadId);
+        bots.reconcileTasks(threadId);
         // It may have finished on the old runner while a thread waiting on
         // it had already come across. After its own carry-ons, which are
         // new work, so a finish they replace doesn't count.

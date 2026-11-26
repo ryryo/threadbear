@@ -11,7 +11,9 @@
       "sha256": "20461d2d4aeae6ca373e3431a5802317d1130468e1940d22032189134429f984",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/roster.js",
       "phase": 1,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/repository.ts",
+      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation."
     },
     {
       "upstreamPath": "ds-bot/test/roster.test.js",
@@ -19,7 +21,9 @@
       "sha256": "8890d5e32297556047826a5c065e424a473126bec79dd4533ebf823b24fddf34",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/roster.test.js",
       "phase": 1,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/repository.test.ts",
+      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction."
     },
     {
       "upstreamPath": "ds-bot/src/host/threads.js",
@@ -27,7 +31,9 @@
       "sha256": "e93710eacf98a2e86c74bd768f55590f1ac9af98748e4dc74148e5bc5b6e90e0",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/threads.js",
       "phase": 1,
-      "portMode": "A"
+      "portMode": "C",
+      "portPath": "runner/src/bots/repository.ts",
+      "changes": "Use the authoritative Threadbear conversation-to-Thread link. The native Thread owns CLI session replacement. Do not reproduce DS-Bot session segments or the Bot ID fallback."
     },
     {
       "upstreamPath": "ds-bot/test/threads.test.js",
@@ -35,7 +41,9 @@
       "sha256": "ba78471c34fe9d4ff6e849c2b68945d3060297429aa51c9a67390ea7c3991230",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/threads.test.js",
       "phase": 1,
-      "portMode": "A"
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/conversations.test.ts",
+      "changes": "Adapt L19–44 to a native adapter changing its session ID, preserving its original conversation and isolating another Thread after Runner restart."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory-entries.js",
@@ -187,7 +195,9 @@
       "sha256": "1331ddb7f1fa2182ec049ca1b943638330240b6e0c5eed623eb170b8c7a7705f",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/privacy.test.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/privacy-folders.test.ts",
+      "changes": "Adapt overlap and symlink assertions to native folders. The separate private-rpc fixture covers event, search and summary access."
     },
     {
       "upstreamPath": "ds-bot/test/permissions.test.js",
@@ -256,6 +266,46 @@
       "portMode": "B",
       "portPath": "runner/test/ported-dsbot/request-return.test.ts",
       "changes": "Adapt duplicate completion and distinct parent work on a shared failed turn to the Runner receipt model."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/bot-tasks.js",
+      "upstreamBlob": "90437a41e3e00d7a15aca326bd1355d6c7acaf66",
+      "sha256": "050b20af7a5ef66801ebc9df9ea110a7d85f2ecfa47618d38bbf3b5046bb9ed3",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/bot-tasks.js",
+      "phase": 4,
+      "portMode": "B",
+      "portPath": "runner/src/bots/task-service.ts",
+      "changes": "Adapt admission and follow-up to a distinct Threadbear Thread with a pinned execution scope."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/bot-tasks.js",
+      "upstreamBlob": "9116437ea17ad7a8814afb3c687bacc8866d8561",
+      "sha256": "07701ae804298f68aa54f6fb8d69c7b98b4b99afd059d81d107d320bdc593e7e",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/bot-tasks.js",
+      "phase": 4,
+      "portMode": "B",
+      "portPath": "runner/src/bots/task-lifecycle.ts",
+      "changes": "Keep stop cleanup in finally. Adapt persistence and restart reconciliation to the existing Runner and ThreadStore."
+    },
+    {
+      "upstreamPath": "ds-bot/test/bot-tasks.test.js",
+      "upstreamBlob": "29afb8bc488e0b7c74668d713a599c435623c00d",
+      "sha256": "2cbe995691381564b745e1938c372ad1ed6c353d1226f060a23e4a9d3d98e1e7",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/bot-tasks.test.js",
+      "phase": 4,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/request-task-native.test.ts",
+      "changes": "Adapt independent execution L190–244, full result, parent settlement and task-only approval L343–455, restart evidence L483–555 and the disk-full stop case L691–705. Use native approval and job events to check that a failed save still stops the task."
+    },
+    {
+      "upstreamPath": "ds-bot/test/handoff-abandon.test.js",
+      "upstreamBlob": "69bee5190e552458a20bf5de3035bd91be77ff2e",
+      "sha256": "63dd515181b8eac17792dd93820b69fc630edcc34586ee2a2587aaaa8da711b9",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/handoff-abandon.test.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/request-state.test.ts",
+      "changes": "L227–277: cancellation closes only the requested branch and stays closed across restart. Keep native cancelled records and reject a late result, so it cannot wake the cancelled branch. A separate user action to give up a wait and resume the live parent is not part of this test."
     }
   ]
 }

@@ -143,3 +143,69 @@ Then('I see the full saved request result', async function (this: BotWorld) {
     }
   }
 });
+
+type TaskWorld = BotWorld & { taskBot?: string; taskOrigin?: string; taskThread?: string };
+
+When('I open a Bot conversation ready for a background task', async function (this: TaskWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const ready = await this.app.withManagedRunner(async client => {
+    const { bot } = await client.call<{ bot: { id: string } }>('bots.create', { name: '編集者' });
+    const { conversation } = await client.call<{ conversation: { threadId: string } }>('bots.conversations.create', {
+      botId: bot.id, operationId: 'original-task-chat',
+    });
+    return { botId: bot.id, origin: conversation.threadId };
+  });
+  this.taskBot = ready.botId;
+  this.taskOrigin = ready.origin;
+  await this.until('the originating conversation appears', d => d.sidebar.sections.some(
+    section => section.threads.some(thread => thread.id === ready.origin)));
+  await this.app.do({ cmd: 'open', id: ready.origin });
+});
+
+When('I start a background task from that conversation', async function (this: TaskWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.until('the originating conversation is loaded', d =>
+    d.selection?.id === this.taskOrigin && d.transcript.state === 'loaded');
+  await click(this, 'Background tasks');
+  await click(this, 'New background task');
+  await this.app.do({ cmd: 'type', here: true, text: '見出し案\n背景で見出し案を考える' });
+  await click(this, 'Save');
+  this.taskThread = await this.app.withManagedRunner(async client => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const { rows } = await client.call<{ rows: { id: string; threadId: string; title: string }[] }>(
+        'bots.tasks.list', { botId: this.taskBot });
+      const task = rows.find(row => row.title === '見出し案');
+      if (task) {
+        const { result } = await client.call<{ result?: { whole: boolean; text: string } }>('bots.tasks.read', { taskId: task.id });
+        if (result?.whole && result.text === BOT_FIXTURE_REPLY) return task.threadId;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error('The isolated Bot background task did not finish');
+  });
+  assert.notEqual(this.taskThread, this.taskOrigin);
+  await click(this, 'Open original conversation');
+});
+
+When("I open this Bot's background tasks", async function (this: TaskWorld) {
+  await this.until('the originating conversation is loaded', d =>
+    d.selection?.id === this.taskOrigin && d.transcript.state === 'loaded');
+  await click(this, 'Background tasks');
+});
+
+When('I read the saved background task result', async function (this: TaskWorld) {
+  await click(this, 'Read task result');
+});
+
+Then("I can open the background task's own thread", async function (this: TaskWorld) {
+  await click(this, 'Open task');
+  await this.until('the background task has a separate selected thread', d =>
+    d.selection && d.selection.id === this.taskThread && d.selection.id !== this.taskOrigin && d.transcript.state === 'loaded');
+});
+
+Then('I can return directly to its original conversation', async function (this: TaskWorld) {
+  await click(this, 'Original conversation');
+  await this.until('the original Bot thread opens from the background task', d =>
+    d.selection?.id === this.taskOrigin && d.transcript.state === 'loaded');
+});

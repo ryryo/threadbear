@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotConversations } from '../../../src/bots/conversations.ts';
 import { botMethods } from '../../../src/bots/rpc.ts';
@@ -33,6 +34,32 @@ test('a second Bot conversation reads the first conversation’s note after reop
   assert.equal(restarted.store.load(b.threadId)?.nativeSessionId, bRecord.nativeSessionId);
   const outside = restarted.runner.makeThread({ text: 'Independent thread' }).st.rec.id;
   assert.throws(() => reopened.notes(editor.id, outside), /does not belong/);
+});
+
+// DS-Bot threads.test.js L19–44: a new CLI part stays in its conversation.
+test('a fresh session keeps its conversation identity across Runner restart', async () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  let service: BotConversations;
+  const h = makeHarness(home, {}, { botContext: rec => service.context(rec) });
+  const repo = new BotRepository(root, 'runner-1');
+  service = new BotConversations(h.runner, repo, root);
+  const bot = repo.create({ name: 'Writer' });
+  const first = service.create(bot.id, 'first');
+  const second = service.create(bot.id, 'second');
+  h.runner.send(first.threadId, 'Check a title');
+  await tick();
+  const session = h.adapter.last;
+  const freshId = randomUUID();
+  session.init(freshId);
+  session.result();
+  await tick();
+  const restarted = h.restart();
+  const reopened = new BotRepository(root, 'runner-1');
+  assert.equal(restarted.store.load(first.threadId)?.nativeSessionId, freshId);
+  assert.equal(reopened.matchesConversation(bot.id, first.id, first.threadId), true);
+  assert.equal(reopened.matchesConversation(bot.id, first.id, second.threadId), false);
+  assert.equal(reopened.matchesConversation(bot.id, first.id, bot.id), false);
 });
 
 test('a saved Thread can confirm the same Bot reservation after confirmation failed', () => {

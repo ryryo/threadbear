@@ -899,6 +899,9 @@ the owning runner.
   and recipient conversation IDs and a reference to the result. The full
   result lives in the recipient's Thread events. The first request raises the
   required format to 3 after the updated supervisor has been confirmed.
+  Background tasks store their identities, progress and result references in
+  `<home>/bots/tasks.json`. The full result is in the task’s Thread events.
+  The first background task raises the required format to 4.
   The workspace team and project scopes have their own directories and
   journals there. Memory reviews keep their cursor, model, event range and
   decisions under `<home>/bots/reviews/`. An opted-in review or a requested

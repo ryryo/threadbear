@@ -27,3 +27,31 @@ test('a result stays returning after a restart and can only use its original del
   assert.throws(() => restarted.advance(first.id, waiting.revision, { status: 'cancelled', reason: 'stale' }), /request changed/);
   assert.throws(() => restarted.advance(first.id, returned.revision, { status: 'queued', turnId: 'turn2' }), /cannot enter/);
 });
+
+// DS-Bot handoff-abandon.test.js L227–277 keeps the sibling work and remembers the stop.
+test('a cancelled branch stays closed after a restart without cancelling its sibling', t => {
+  const root = mkdtempSync(join(tmpdir(), 'tb-request-abandon-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const open = () => new RequestStateStore(root, () => {});
+  const store = open();
+  const at = '2026-11-26T00:00:00.000Z';
+  const parent = store.admit({
+    id: 'parent', sourceBotId: 'chief', sourceThreadId: 'chief-thread', sourceConversationId: 'chief-chat',
+    targetBotId: 'writer', targetThreadId: 'writer-thread', targetConversationId: 'writer-chat', acceptedAt: at, when: 'queue',
+  });
+  const delegate = (id: string) => store.admit({
+    id, parentRequestId: parent.id, sourceBotId: 'writer', sourceThreadId: 'writer-thread', sourceConversationId: 'writer-chat',
+    targetBotId: id, targetThreadId: `${id}-thread`, targetConversationId: `${id}-chat`, acceptedAt: at, when: 'queue',
+  });
+  const tester = delegate('tester');
+  const editor = delegate('editor');
+  store.advance(tester.id, tester.revision, { status: 'cancelled', reason: 'Cancelled by the owner' });
+  const reopened = open();
+  assert.deepEqual(reopened.children(parent.id).filter(row => row.state.status !== 'cancelled').map(row => row.id), [editor.id]);
+  assert.equal(reopened.get(tester.id).state.status, 'cancelled');
+  assert.throws(() => reopened.advance(tester.id, tester.revision + 1, {
+    status: 'returning', turnId: 'late', replyId: 'bot-reply:tester',
+    result: keepResult({ threadId: 'tester-thread', seq: 21 }, 'Here is the late answer'),
+  }), /cannot enter/);
+  assert.deepEqual(reopened.get(editor.id), editor);
+});

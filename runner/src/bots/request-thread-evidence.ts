@@ -2,6 +2,7 @@ import type { PersistedEvent } from '../protocol.ts';
 import type { Runner } from '../runner.ts';
 import type { KeptResult } from './handoff-result.ts';
 import { requestEvidence, type InputEvidence } from './request-events.ts';
+import type { SavedTask } from './task-journal.ts';
 import type { RequestRow } from './request-state.ts';
 
 function events(runner: Runner, threadId: string): PersistedEvent[] | undefined {
@@ -30,17 +31,21 @@ export class RequestThreadEvidence {
 
   constructor(runner: Runner) { this.runner = runner; }
 
-  input(row: RequestRow, children: readonly RequestRow[] = []): InputEvidence {
+  input(row: RequestRow, children: readonly RequestRow[] = [], tasks: readonly SavedTask[] = []): InputEvidence {
     const st = recipient(this.runner, row, false);
     if (!st) return { kind: 'waiting' };
     const journal = events(this.runner, st.rec.id);
     if (!journal) return { kind: 'unknown' };
     // Check saved events before a stale queue snapshot; the existing Runner
     // flushes the authenticated input event before calling the CLI.
-    const childIds = new Set(children.filter(child => child.state.status === 'returned').map(child => child.id));
-    const waitsForChild = children.some(child => !['returned', 'failed', 'cancelled'].includes(child.state.status));
-    const waitsForResult = st.rec.queue.some(input => input.botInput?.request?.role === 'result' && childIds.has(input.botInput.request.id));
-    const evidence = waitsForChild || waitsForResult ? { kind: 'waiting' as const } : requestEvidence(journal, row.id, st.rt.turn?.turnId, childIds);
+    const childIds = new Set(children.filter(child => child.state.status === 'returned' && child.sourceThreadId === row.targetThreadId).map(child => child.id));
+    const taskIds = new Set(tasks.filter(task => 'outcome' in task.state && task.state.reply?.sent && task.sourceThreadId === row.targetThreadId).map(task => task.id));
+    const waitsForChild = children.some(child => !['returned', 'failed', 'cancelled'].includes(child.state.status)) ||
+      tasks.some(task => !('outcome' in task.state) || (task.state.reply && !task.state.reply.sent));
+    const waitsForResult = st.rec.queue.some(input =>
+      (input.botInput?.request?.role === 'result' && childIds.has(input.botInput.request.id)) ||
+      (input.botInput?.task?.role === 'result' && taskIds.has(input.botInput.task.id)));
+    const evidence = waitsForChild || waitsForResult ? { kind: 'waiting' as const } : requestEvidence(journal, row.id, st.rt.turn?.turnId, childIds, taskIds);
     if (evidence.kind !== 'missing') return evidence;
     const queued = st.rec.queue.find(entry => entry.botInput?.request?.id === row.id && entry.botInput.request.role === 'request');
     return queued ? { kind: 'queued', turnId: queued.turnId } : { kind: 'missing' };

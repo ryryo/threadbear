@@ -12,16 +12,17 @@ export type InputEvidence =
   | { kind: 'blocked' }
   | { kind: 'waiting' };
 
-export function requestEvidence(events: readonly PersistedEvent[], requestId: string, liveTurnId?: string, childIds: ReadonlySet<string> = new Set()): InputEvidence {
+export function requestEvidence(events: readonly PersistedEvent[], requestId: string, liveTurnId?: string, childIds: ReadonlySet<string> = new Set(), taskIds: ReadonlySet<string> = new Set()): InputEvidence {
   const accepted = events.findLast(event => event.type === 'user.message' &&
     event.botInput?.request?.id === requestId && event.botInput.request.role === 'request');
   if (!accepted) return { kind: 'missing' };
-  const continuation = childIds.size ? events.findLast(event => event.type === 'user.message' && event.seq > accepted.seq &&
-    event.botInput?.request?.role === 'result' && childIds.has(event.botInput.request.id)) : undefined;
+  const continuation = childIds.size || taskIds.size ? events.findLast(event => event.type === 'user.message' && event.seq > accepted.seq &&
+    ((event.botInput?.request?.role === 'result' && childIds.has(event.botInput.request.id)) ||
+     (event.botInput?.task?.role === 'result' && taskIds.has(event.botInput.task.id)))) : undefined;
   const input = continuation ?? accepted;
   const turnId = input.turnId;
   if (!turnId) return { kind: 'unknown' };
-  if (childIds.size && !continuation) return { kind: 'waiting' };
+  if ((childIds.size || taskIds.size) && !continuation) return { kind: 'waiting' };
   const completed = events.findLast(event => event.type === 'turn.completed' && event.turnId === turnId && event.seq > input.seq);
   if (!completed || completed.type !== 'turn.completed') return liveTurnId === turnId ? { kind: 'running', turnId } : { kind: 'unknown' };
   if (completed.outcome !== 'completed') {

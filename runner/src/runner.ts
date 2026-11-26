@@ -686,6 +686,7 @@ export type RunnerDeps = {
   /** Mike's standing instructions for every session (instructions.ts); '' for none. */
   standingInstructions?: () => string;
   botContext?: (rec: ThreadRecord) => string;
+  botTaskQueue?: (threadId: string, task: NonNullable<BotInputRef['task']>) => 'allow' | 'wait' | 'drop';
   botRequestQueue?: (threadId: string, request: NonNullable<BotInputRef['request']>) => 'allow' | 'wait' | 'drop';
   botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   pendingBotPrivacy?: (threadId: string) => string | undefined;
@@ -798,6 +799,7 @@ export class Runner {
   standingInstructions?: () => string;
   private botContext?: (rec: ThreadRecord) => string;
   private botRequestQueue?: RunnerDeps['botRequestQueue'];
+  private botTaskQueue?: RunnerDeps['botTaskQueue'];
   private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   private pendingBotPrivacy?: (threadId: string) => string | undefined;
   coordinators?: Coordinators;
@@ -931,6 +933,7 @@ export class Runner {
     this.standingInstructions = deps.standingInstructions;
     this.botContext = deps.botContext;
     this.botRequestQueue = deps.botRequestQueue;
+    this.botTaskQueue = deps.botTaskQueue;
     this.botFolderRefusal = deps.botFolderRefusal;
     this.pendingBotPrivacy = deps.pendingBotPrivacy;
     this.appRestartAsked = deps.appRestartAsked;
@@ -2120,7 +2123,7 @@ export class Runner {
     checkImages(images);
     // A report to the thread that started the sender, kept until its other
     // threads finish (runner/nested.ts).
-    if (!opts.botRequest && this.holdReport(st, text, images, opts)) return { turnId: crypto.randomUUID(), held: true };
+    if (!st.rec.botLink?.taskId && !opts.botRequest && !opts.botTask && this.holdReport(st, text, images, opts)) return { turnId: crypto.randomUUID(), held: true };
     // Another thread's message, allowed for this thread as it is now: if
     // it waits in the queue while Mike raises this thread, it's held as it
     // leaves (runner/ceiling.ts).
@@ -2136,14 +2139,22 @@ export class Runner {
     const privateBotId = this.privateBotOf(rec.id);
     if (privateBotId) this.checkBotFolder(rec.cwd, privateBotId);
     if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
-    if (opts.botRequest && (!rec.botLink || !opts.messageId || !opts.botSource ||
-        this.botRequestQueue?.(rec.id, opts.botRequest) !== 'allow')) {
-      throw new RpcError(ErrorCode.notAllowed, 'This Bot request is not allowed in this conversation.');
+    const taskId = rec.botLink?.taskId;
+    const taskInput = opts.botTask ?? (taskId && !opts.botRequest ? { id: taskId, role: 'work' as const } : undefined);
+    if (taskId && this.botTaskQueue?.(rec.id, { id: taskId, role: 'work' }) !== 'allow') {
+      throw new RpcError(ErrorCode.notAllowed, 'This Bot task is no longer accepting messages.');
+    }
+    const botDelivery = opts.botRequest || opts.botTask;
+    if (botDelivery && (!rec.botLink || !opts.messageId || !opts.botSource ||
+        (opts.botRequest && opts.botTask) ||
+        (opts.botRequest && this.botRequestQueue?.(rec.id, opts.botRequest) !== 'allow') ||
+        (opts.botTask && this.botTaskQueue?.(rec.id, opts.botTask) !== 'allow'))) {
+      throw new RpcError(ErrorCode.notAllowed, 'This Bot delivery is not allowed in this conversation.');
     }
     // Written with less access than it has now: Mike's to read, not its
     // agent's (runner/ceiling.ts). Checked again as it leaves the queue.
     if (!this.underCeiling(st, opts.ceiling)) {
-      if (opts.botRequest) throw new RpcError(ErrorCode.notAllowed, 'The recipient has more access than was approved for this Bot request.');
+      if (botDelivery) throw new RpcError(ErrorCode.notAllowed, 'The recipient has more access than was approved for this Bot message.');
       this.withholdMessage(st, { text, origin: opts.origin, scheduleId: opts.scheduleId });
       return opts.messageId ?? crypto.randomUUID();
     }
@@ -2212,10 +2223,11 @@ export class Runner {
     const turnId = opts.messageId ?? crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
     if (rec.botLink) msg.botInput = {
-      id: opts.botRequest ? turnId : crypto.randomUUID(),
+      id: botDelivery ? turnId : crypto.randomUUID(),
       conversationId: rec.botLink.conversationId,
       source: opts.botSource ?? { kind: opts.origin ?? 'unknown' },
       ...(opts.botRequest ? { request: opts.botRequest } : {}),
+      ...(taskInput ? { task: taskInput } : {}),
     };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.wakeReason && opts.origin === 'runner') msg.wakeReason = opts.wakeReason;
@@ -2284,7 +2296,7 @@ export class Runner {
       this.steer(st, msg);
       return rt.turn.turnId;
     }
-    if (opts.botRequest) {
+    if (botDelivery) {
       // Admission is durable before suggesting that this reached the
       // recipient. It cannot start the CLI before this save.
       rec.queue.push(msg);
@@ -4894,9 +4906,11 @@ export class Runner {
     }
     const offered = st.rec.queue[0];
     const botRequest = offered.botInput?.request;
-    if (botRequest) {
+    const botTask = offered.botInput?.task;
+    if (botRequest || botTask) {
       const receipt = this.store.log(st.rec.id);
-      const decision = this.botRequestQueue?.(st.rec.id, botRequest) ?? 'wait';
+      const decision = (botRequest ? this.botRequestQueue?.(st.rec.id, botRequest) :
+        botTask && this.botTaskQueue?.(st.rec.id, botTask)) ?? 'wait';
       if (decision === 'wait') return false;
       // Recovery from an earlier partial send may reconstruct this queue
       // item. The flushed event means the input may already have run.
@@ -5750,7 +5764,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; agentSignal?: AbortSignal };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; agentSignal?: AbortSignal };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; superseded?: false } | { superseded: true; started: true };
 
