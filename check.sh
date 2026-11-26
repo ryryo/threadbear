@@ -789,6 +789,12 @@ if [ "$APP_ONLY" = 0 ] && [ "$RUNNER_ONLY" = 0 ]; then
   else
     skip "site build" "nothing the site reads changed"
   fi
+  if needed '^desktop/|^shared/i18n/|^scripts/i18n'; then
+    step "localization" "$ROOT" node scripts/i18n-check.ts
+    step "localization tests" "$ROOT" node --test scripts/i18n.test.ts
+  else
+    skip "localization" "no desktop or translation files changed"
+  fi
   # The GPUI specs (features/) line up with their step files, and every
   # scenario has a features.md id tag of its own: the Desktop workflow's
   # first step. On 13 Nov a spec tagged on its Feature line only passed

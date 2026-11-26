@@ -1,0 +1,83 @@
+{
+  "repository": "pingdotgg/t3code",
+  "commit": "ae945dd42a9879104991280df99182a0f0cec3bf",
+  "sources": [
+    {
+      "path": "LICENSE",
+      "blob": "55ee675bb1de9e580b69f3dd68684df2a4dffba7",
+      "classification": "A",
+      "target": "docs/third-party/t3-code-MIT.txt",
+      "reason": "Verbatim MIT notice, shared with the browser panel."
+    },
+    {
+      "path": "scripts/i18n-check.ts",
+      "blob": "82ae0e6d237c9236c9a259cc354b9ef382d327d2",
+      "classification": "B",
+      "target": "scripts/i18n-check.ts",
+      "reason": "Keep the source and translation key checks; use a Rust extractor and validate substitutions."
+    },
+    {
+      "path": "scripts/i18n-untranslated.ts",
+      "blob": "4b1646bb09e062e6d13864573aa2e0e7aaa34448",
+      "classification": "B",
+      "target": "scripts/i18n-untranslated.ts",
+      "reason": "Report missing entries in Threadbear desktop catalogs."
+    },
+    {
+      "path": "packages/client-runtime/src/locales.ts",
+      "blob": "772e65ccfac644419f15004930de497d0cffb7b7",
+      "classification": "B",
+      "target": "desktop/core/src/i18n.rs",
+      "reason": "Resolve system languages in preferred order with the two supported catalogs."
+    },
+    {
+      "path": "apps/desktop/src/i18n/messages.ts",
+      "blob": "72fe7487796c34d26f659fc7d546a653d0b56167",
+      "classification": "B",
+      "target": "desktop/core/src/i18n.rs",
+      "reason": "Resolve source messages at display time and fall back to English."
+    },
+    {
+      "path": "apps/desktop/src/i18n/translations/en.json",
+      "blob": "bb88ca0fcf5d85aa632e083e91361c2ccc46eb94",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/desktop/src/i18n/translations/ja.json",
+      "blob": "9e41de4072e12f727f30a175ccadffe7469af085",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/web/src/i18n/translations/en.json",
+      "blob": "05c5cba5914e2baf4acaca9f0238627d096b4ca1",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/web/src/i18n/translations/ja.json",
+      "blob": "84fa7e634af4336cea26d2aaf481460e251c6c08",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/mobile/src/i18n/translations/en.json",
+      "blob": "61a8320d52d5a1e5c5d9e5ba2d9a4aaea2eee375",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/mobile/src/i18n/translations/ja.json",
+      "blob": "cd3e9bf41f0aadbf8fc0cfc597a36b219899deb4",
+      "classification": "B",
+      "target": "scripts/i18n-seed-from-t3code.ts",
+      "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    }
+  ]
+}
