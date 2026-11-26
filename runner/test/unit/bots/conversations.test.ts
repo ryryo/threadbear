@@ -3,6 +3,12 @@ import { test } from 'node:test';
 import { join } from 'node:path';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotConversations } from '../../../src/bots/conversations.ts';
+import { botMethods } from '../../../src/bots/rpc.ts';
+import { RpcServer } from '../../../src/rpc.ts';
+import { RunnerClient } from '../../../src/client.ts';
+import { threadKey } from '../../../src/rpc-auth.ts';
+import { CallerGate } from '../../../src/rpc-gate.ts';
+import { nullLogger } from '../../../src/log.ts';
 import { makeHarness, tick, tmpDir } from '../../helpers/fakes.ts';
 
 test('a second Bot conversation reads the first conversation’s note after reopening the Runner', () => {
@@ -83,4 +89,36 @@ test('a fresh Bot conversation hears the shared note and a resumed CLI hears onl
   resumed.runner.send(b.threadId, '最後の記事');
   await tick();
   assert.equal(resumed.adapter.last.sent.at(-1)?.text, '最後の記事');
+});
+
+test('the owner can create and read Bot conversations over RPC and a Full thread key cannot', async t => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const service = new BotConversations(h.runner, repo, root);
+  const token = 'bot-test-owner-authentication';
+  const server = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: h.runner, log: nullLogger, gate: new CallerGate({ runner: h.runner }), methods: botMethods(repo, service) });
+  const { port } = await server.listen();
+  const url = `ws://127.0.0.1:${port}/rpc`;
+  const owner = await RunnerClient.connect(url, token);
+  const caller = h.runner.makeThread({ text: '', permissionMode: 'full' }).st.rec.id;
+  const full = await RunnerClient.connect(url, threadKey(token, caller), { threadId: caller });
+  t.after(async () => { owner.close(); full.close(); await server.close(); });
+  const { bot } = await owner.call<{ bot: { id: string; revision: number } }>('bots.create', { name: 'Editor' });
+  await assert.rejects(full.call('bots.list', {}), /owner/);
+  await assert.rejects(full.call('bots.create', { name: 'Intruder' }), /owner/);
+  const { conversation } = await owner.call<{ conversation: { threadId: string } }>('bots.conversations.create', { botId: bot.id, operationId: 'a' });
+  const input = { botId: bot.id, threadId: conversation.threadId };
+  const { note } = await owner.call<{ note: { id: string } }>('bots.memory.add', { ...input, text: 'Keep headings short' });
+  assert.equal((await owner.call<{ notes: unknown[] }>('bots.memory.read', input)).notes.length, 1);
+  await assert.rejects(full.call('bots.memory.read', input), /owner/);
+  await owner.call('bots.memory.edit', { ...input, entryId: note.id, text: 'Keep headings concise' });
+  const { rows } = await owner.call<{ rows: { id: string; op: string }[] }>('bots.memory.history', input);
+  assert.equal(rows[0].op, 'replace');
+  await owner.call('bots.memory.restore', { ...input, changeId: rows[0].id });
+  await owner.call('bots.memory.remove', { ...input, entryId: note.id });
+  await owner.call('bots.archive', { botId: bot.id, expectedRevision: bot.revision });
+  await assert.rejects(owner.call('bots.memory.add', { ...input, text: 'One more' }), /archived/);
+  await assert.rejects(owner.call('bots.conversations.create', { botId: bot.id, operationId: 'b' }), /archived/);
+  assert.equal((await owner.call<{ rows: unknown[] }>('bots.memory.history', input)).rows.length, 4);
 });

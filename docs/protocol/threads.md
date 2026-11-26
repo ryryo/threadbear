@@ -12,6 +12,19 @@ instructions. A live or resumed session receives changes before the next normal
 message. The Runner tracks the context it sent and retries it if sending fails
 or the turn fails to complete.
 
+On a Runner with the Bot experiment available, the local owner can call
+`bots.list`, `bots.get`, `bots.create`, `bots.update` and `bots.archive`.
+`bots.get` returns the Bot and its conversation links. Settings edits and archive
+require the revision the editor began with. An archived Bot's settings and
+history stay readable. `bots.conversations.create` takes `botId` and
+`operationId` and returns the persisted conversation link. `bots.memory.read`,
+`bots.memory.add`, `bots.memory.edit`, `bots.memory.remove`, `bots.memory.history`
+and `bots.memory.restore` take `botId` and `threadId`; the thread must belong to
+that Bot. Edit and remove take `entryId`, restore takes the history `changeId`,
+and history returns up to 50 changes, newest first, with a `more` cursor.
+Bot RPCs require the owner's credential. A Thread key cannot use them at any
+permission level.
+
 ## Pictures in a message
 
 A message's words can say where its pictures go. `[Picture N]` in the

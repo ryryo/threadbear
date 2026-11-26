@@ -97,19 +97,32 @@ export class BotRepository {
     return structuredClone(entry);
   }
 
-  update(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
+  private editable(id: string, expectedRevision: number): Bot {
     const entry = this.get(id);
     if (entry.revision !== expectedRevision) throw new Error('This Bot changed. Reload its current settings before saving.');
     if (entry.archivedAt) throw new Error('This Bot is archived');
+    return entry;
+  }
+
+  private saveBot(entry: Bot): Bot {
+    entry.revision++;
+    this.save({ ...this.current, bots: this.current.bots.map(item => item.id === entry.id ? entry : item) });
+    return structuredClone(entry);
+  }
+
+  update(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
+    const entry = this.editable(id, expectedRevision);
     if (settings.name !== undefined && settings.name !== entry.name) {
       entry.name = cleanName(settings.name);
       this.available(entry.name, id);
     }
     if (settings.role !== undefined) entry.role = settings.role.trim().slice(0, 24).toWellFormed();
     if (settings.instructions !== undefined) entry.instructions = settings.instructions.trim();
-    entry.revision++;
-    this.save({ ...this.current, bots: this.current.bots.map(item => item.id === id ? entry : item) });
-    return structuredClone(entry);
+    return this.saveBot(entry);
+  }
+
+  archive(id: string, expectedRevision: number, at: string): Bot {
+    return this.saveBot({ ...this.editable(id, expectedRevision), archivedAt: at });
   }
 
   conversations(botId: string): Conversation[] {

@@ -133,6 +133,7 @@ export class CallerGate {
   // Throws a refusal, or returns the params to run with (the caller's own
   // mode filled in, what only a client with the token may say taken out).
   check(threadId: string, method: string, p: Params): Params {
+    if (method.startsWith('bots.')) throw new RpcError(ErrorCode.notAllowed, 'Only the owner can use the Bot controls.');
     // Pausing a coordinator and answering its helpers' questions are the
     // user's, from the project home. Starting one and handing it a charter
     // and to-dos is open to an ordinary thread on Full access (below it,

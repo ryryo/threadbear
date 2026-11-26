@@ -1410,7 +1410,7 @@ export class Runner {
     // thread.json being saved; then it only needs its status back.
     const ended = midTurn && rec.turnId ? this.findTurnCompleted(rec.id, rec.turnId) : undefined;
     // Only a turn that completed kept what it was told (Codex's second look).
-    if (midTurn && ended?.outcome !== 'completed') delete rec.botContextTold;
+    if (midTurn && (ended?.type !== 'turn.completed' || ended.outcome !== 'completed')) delete rec.botContextTold;
     if (midTurn && ended?.type === 'turn.completed' && ended.outcome === 'completed' && rec.wakeNews?.check && rec.wakeNews.check === rec.turnId) delete rec.wakeNews;
     if (midTurn) this.settlePresses(rec, ended?.type === 'turn.completed' && ended.outcome === 'completed');
     // thread.json can be behind the log (a crash before it was saved): a card
@@ -2747,7 +2747,13 @@ export class Runner {
     }
     // Kept for the next message when this one is a command, as the news is.
     if (rt.turn) rt.turn.dispatched = true;
-    if (command) rt.session!.send({ ...input, text });
+    if (command) {
+      if (rec.botLink) {
+        if (!this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
+        this.botContext(rec);
+      }
+      rt.session!.send({ ...input, text });
+    }
     else if (!this.compactFirst(st, msg, () => this.sendWithInstructionsNews(st, { ...input, text }))) this.sendWithInstructionsNews(st, { ...input, text });
     if (msg.reviewId && !rec.reviewDeliveries?.includes(msg.reviewId)) {
       (rec.reviewDeliveries ??= []).push(msg.reviewId);
