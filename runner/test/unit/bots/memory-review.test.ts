@@ -53,10 +53,11 @@ test('the review response never routes writes, modifies a pin, or keeps an ident
       { op: 'remove', entry: 1 },
       { op: 'add', text: 'fixture-value' },
       { op: 'add', text: 'Everyone can read this', team: true },
+      { op: 'add', text: 'A temporary fact', until: '2026-02-30' },
     ] }),
   });
   assert.deepEqual(result, {
-    first: 20, through: 21, more: false, rejected: 3,
+    first: 20, through: 21, more: false, rejected: 4,
     changes: [{ op: 'edit', id: 'b', before: 'Use long headings', text: 'Use short headings' }],
   });
 });
@@ -65,5 +66,7 @@ test('a malformed reply has a bounded diagnostic while a transport failure remai
   const options = { bot: { name: 'Writer' }, lines: [{ who: 'user' as const, seq: 20, text: 'User: Use short headings' }], through: 21, notes: [], redact: String };
   const invalid = await reviewBatch({ ...options, ask: async () => 'unparsed tool output with fixture-value' });
   assert.deepEqual(invalid, { first: 20, through: 21, more: false, rejected: 0, changes: [], diagnostic: 'invalid-reply' });
+  const badIndex = await reviewBatch({ ...options, ask: async () => '{"changes":[{"op":"remove","entry":{"toString":null}}]}' });
+  assert.equal(badIndex.diagnostic, 'invalid-reply');
   await assert.rejects(reviewBatch({ ...options, ask: async () => { throw new Error('temporary I/O failure'); } }), /temporary I\/O/);
 });

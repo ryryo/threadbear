@@ -17,6 +17,7 @@ const bot = z.looseObject({
   archivedAt: z.iso.datetime().optional(),
   modelBinding: modelBinding.optional(),
   reviewEnabled: z.boolean().optional(),
+  tidyEnabled: z.boolean().optional(),
   privacy: z.object({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
 });
 const conversation = z.looseObject({
@@ -26,7 +27,7 @@ const pendingConversation = conversation.extend({ sessionId: id });
 const state = z.looseObject({
   workspaceId: id, ownerRunnerId: z.string().min(1), ownerEpoch: revision, formatVersion: z.literal(1),
   bots: z.array(bot), conversations: z.array(conversation), pendingConversations: z.array(pendingConversation),
-  reviewOperations: z.array(z.object({ id: botOperationId, enabled: z.boolean(), bot })).optional(),
+  reviewOperations: z.array(z.object({ id: botOperationId, enabled: z.boolean(), setting: z.enum(['reviewEnabled', 'tidyEnabled']).optional(), bot })).optional(),
 });
 export type Bot = z.infer<typeof bot>;
 export type Conversation = z.infer<typeof conversation>;
@@ -146,19 +147,19 @@ export class BotRepository {
     return this.saveBot(entry);
   }
 
-  setReviewEnabled(id: string, expectedRevision: number, enabled: boolean, operationId: string, authorize: () => void = () => {}): Bot {
+  setAutomation(id: string, expectedRevision: number, setting: 'reviewEnabled' | 'tidyEnabled', enabled: boolean, operationId: string, authorize: () => void = () => {}): Bot {
     const prior = this.current.reviewOperations ?? [];
     const previous = prior.find(operation => operation.id === operationId);
     if (previous) {
-      if (previous.bot.id !== id || previous.enabled !== enabled) throw new Error('The operation id already belongs to different review settings');
+      if (previous.bot.id !== id || previous.enabled !== enabled || (previous.setting ?? 'reviewEnabled') !== setting) throw new Error('The operation id already belongs to different memory settings');
       return structuredClone(previous.bot);
     }
     const entry = this.editable(id, expectedRevision);
     authorize();
-    const updated = { ...entry, reviewEnabled: enabled, revision: entry.revision + 1 };
+    const updated = { ...entry, [setting]: enabled, revision: entry.revision + 1 };
     this.save({
       ...this.current, bots: this.current.bots.map(item => item.id === id ? updated : item),
-      reviewOperations: [...prior, { id: operationId, enabled, bot: updated }],
+      reviewOperations: [...prior, { id: operationId, enabled, setting, bot: updated }],
     });
     return structuredClone(updated);
   }

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotConversations } from '../../../src/bots/conversations.ts';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotReviews } from '../../../src/bots/reviews.ts';
+import { PersonalMemory } from '../../../src/bots/ported/personal-memory.js';
 import { makeHarness, tick, tmpDir } from '../../helpers/fakes.ts';
 
 test('opted-in review reads a linked Thread, pins its login, and restores proposals after restart', async () => {
@@ -36,7 +37,7 @@ test('opted-in review reads a linked Thread, pins its login, and restores propos
 
   await service.review(a.threadId);
   assert.deepEqual(picks, []);
-  repo.setReviewEnabled(editor.id, modelSaved.revision, true, randomUUID());
+  repo.setAutomation(editor.id, modelSaved.revision, 'reviewEnabled', true, randomUUID());
   await service.review(a.threadId);
   await service.review(a.threadId);
   assert.deepEqual(picks, ['claude-3:claude-sonnet-4-6']);
@@ -65,4 +66,50 @@ test('opted-in review reads a linked Thread, pins its login, and restores propos
   await service.review(a.threadId);
   assert.deepEqual(picks, ['claude-3:claude-sonnet-4-6', 'claude-3:claude-sonnet-4-6']);
   assert.deepEqual(reopened.reports(editor.id, a.threadId)[0].retry, { previous: report.id, operationId: replay });
+});
+
+test('automatic tidy uses the same selected login and only starts after a scope changes', async () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  let conversations: BotConversations;
+  const h = makeHarness(home, {}, { botContext: rec => conversations.context(rec) });
+  const repo = new BotRepository(root, 'runner-1');
+  conversations = new BotConversations(h.runner, repo, root);
+  const bot = repo.create({ name: 'Writer' });
+  const link = conversations.create(bot.id, 'chat');
+  h.runner.update({ threadId: link.threadId, accountId: 'claude-3', model: 'claude-sonnet-4-6' });
+  const bound = conversations.conversationModel(bot.id, bot.revision, link.threadId);
+  const reviewed = repo.setAutomation(bot.id, bound.revision, 'reviewEnabled', true, randomUUID());
+  repo.setAutomation(bot.id, reviewed.revision, 'tidyEnabled', true, randomUUID());
+  const memoryRoot = join(root, 'memory', bot.id);
+  const memory = new PersonalMemory(memoryRoot);
+  memory.add('A pinned owner note', {}, h.runner.isoNow());
+  const imported = Array.from({ length: 8 }, (_, index) => `- Prior fact ${index} [id: old${index}; added: 2026-10-03]`);
+  appendFileSync(join(memoryRoot, 'MEMORY.md'), `\n## Imported notes\n${imported.join('\n')}\n`);
+  const requested: string[] = [];
+  let protectedWrites = 0;
+  const service = new BotReviews({
+    root, repo, runner: h.runner, enabled: () => true, redact: String,
+    protectTidy: () => { protectedWrites++; },
+    askers: { claude: async request => {
+      assert.equal(request.account.id, 'claude-3');
+      const tidy = request.system.includes('You tidy');
+      requested.push(tidy ? 'tidy' : 'review');
+      return { ok: true, text: tidy ? '{"changes":[{"op":"retire","entry":1,"why":"old"}]}' : '{"changes":[{"op":"add","text":"The user wants short headings"}]}' };
+    } },
+  });
+  h.runner.send(link.threadId, 'Use short headings', [], { botSource: { kind: 'owner' } });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+  await service.review(link.threadId);
+  assert.deepEqual(requested, ['review']);
+  const [proposal] = service.reports(bot.id, link.threadId);
+  service.approve(bot.id, link.threadId, proposal.id, 0, 'fixture-approve');
+  await service.review(link.threadId);
+  assert.deepEqual(requested, ['review', 'tidy']);
+  assert.equal(protectedWrites, 1);
+  assert.equal(memory.history()[0].op, 'tidy');
+  assert.ok(memory.list('2026-11-27').some(note => note.pinned));
 });

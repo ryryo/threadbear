@@ -2076,6 +2076,8 @@ from History while the affected notes are unchanged.
 **Memory review** can propose changes from the user's messages after a
 conversation. Turn it on after choosing the Bot's model and login. You can
 accept, edit or reject a proposed change and review the same messages again.
+**Turn on automatic tidy** queues a tidy after you accept a change to the
+Bot's memory.
 
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and

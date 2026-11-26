@@ -88,6 +88,7 @@ export class BotRuntime {
     return this.reviewService ??= new BotReviews({
       ...deps, root: join(this.options.home, 'bots'), repo, runner: this.options.runner(),
       enabled: () => this.reviewDeps === deps && this.unavailable() === undefined,
+      protectTidy: () => this.protectNewFormat(),
     });
   }
 

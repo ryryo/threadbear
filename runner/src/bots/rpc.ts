@@ -14,6 +14,7 @@ const memoryTarget = identity.extend({ threadId: z.uuid() });
 const proposal = memoryTarget.extend({ reportId: z.uuid(), index: z.int().nonnegative(), operationId: botOperationId });
 const scoped = z.object({ scope: z.object({ kind: z.enum(['bot', 'team', 'group', 'project']), id: z.string().min(1).max(128) }) });
 const scopeWrite = scoped.extend({ operationId: botOperationId, expectedRevision: z.union([z.literal('empty'), z.uuid()]) });
+const automation = identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean(), operationId: botOperationId });
 
 function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
   return (p) => {
@@ -31,6 +32,12 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
   const memory = (scope: ScopeRef, access: 'read' | 'write') => conversations().scopedMemory.open(scope, { kind: 'owner' }, access);
   const now = () => conversations().now();
   const change = (target: z.infer<typeof scopeWrite>, mutation: ScopeChange) => memory(target.scope, 'write').change(mutation, target.operationId, target.expectedRevision, now());
+  const setAutomation = (setting: 'reviewEnabled' | 'tidyEnabled') => method(automation, ({ botId, expectedRevision, enabled, operationId }) => ({
+    bot: repo().setAutomation(botId, expectedRevision, setting, enabled, operationId, () => {
+      const reason = enabled ? reviews?.().unavailable(repo().get(botId)) : undefined;
+      if (reason) throw new RpcError(ErrorCode.notAllowed, reason);
+    }),
+  }));
   return {
     'bots.list': () => ({ bots: repo().list() }),
     'bots.get': method(identity, ({ botId }) => {
@@ -68,12 +75,8 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     ...(reviews && protectFormat && { 'bots.memory.scope.tidy': method(scopeWrite.extend({ botId }), p => reviews().tidy(p.botId, () => memory(p.scope, 'write'), p.expectedRevision, p.operationId, protectFormat)) }),
     ...(makePrivate && { 'bots.settings.privacy': method(privacy, async p => ({ bot: await makePrivate(p) })) }),
     ...(reviews && {
-      'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean(), operationId: botOperationId }), ({ botId, expectedRevision, enabled, operationId }) => {
-        return { bot: repo().setReviewEnabled(botId, expectedRevision, enabled, operationId, () => {
-          const reason = enabled ? reviews().unavailable(repo().get(botId)) : undefined;
-          if (reason) throw new RpcError(ErrorCode.notAllowed, reason);
-        }) };
-      }),
+      'bots.settings.automaticReview': setAutomation('reviewEnabled'),
+      'bots.settings.automaticTidy': setAutomation('tidyEnabled'),
       'bots.reviews.list': method(memoryTarget, p => ({
         reports: reviews().reports(p.botId, p.threadId), unavailable: reviews().unavailable(repo().get(p.botId)),
       })),

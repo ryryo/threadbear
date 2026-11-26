@@ -90,6 +90,9 @@ revision is refused before touching any notes.
 scope. It takes the scope write fields and `botId`. It reports merged, moved
 and retired counts. Pinned notes are out of scope. The journal retains the
 affected files and can undo the batch if none of those files has changed.
+`bots.settings.automaticTidy` uses the same settings fields as automatic
+review. When enabled, accepting a new proposal queues a tidy for that Bot's
+changed scope. It shares the Runner's single model queue with reviews.
 
 Private conversations and their notes are owner-local. Thread RPC and agent
 tools enforce visibility at each read, including filtered lists and searches,

@@ -23,6 +23,8 @@ export type BotReviewOptions = {
   redact: (text: string) => string;
   askers: Partial<Record<Provider, Ask>>;
   privateFolder?: (folder: string) => boolean;
+  protectTidy?: () => void;
+  onError?: (threadId: string) => void;
 };
 
 export class BotReviews {
@@ -71,6 +73,11 @@ export class BotReviews {
       ...(acceptedText === undefined ? {} : { acceptedText }),
     }, runner.isoNow(), redact);
     this.checkpoints.reconcile(link.id, [applied]);
+    const protect = this.options.protectTidy;
+    if (protect && repo.get(botId).tidyEnabled) {
+      const revision = this.memory(botId).revision();
+      this.tidy(botId, () => this.memory(botId), revision, `proposal-${operationId}`, protect, true).catch(() => this.options.onError?.(threadId));
+    }
   }
 
   private memory(botId: string): PersonalMemory {
@@ -124,12 +131,13 @@ export class BotReviews {
     });
   }
 
-  tidy(botId: string, memory: () => PersonalMemory, expectedRevision: string, operationId: string, protect: () => void) {
+  tidy(botId: string, memory: () => PersonalMemory, expectedRevision: string, operationId: string, protect: () => void, automatic = false) {
     return this.enqueue(async () => {
       const { runner, repo, enabled, askers, redact } = this.options;
       if (!enabled()) throw new Error('Bot memory tidy is unavailable');
       const bot = repo.get(botId);
       if (bot.archivedAt) throw new Error('This Bot is archived');
+      if (automatic && !bot.tidyEnabled) return { revision: expectedRevision, counts: { merged: 0, moved: 0, retired: 0 } };
       const store = memory();
       const previous = store.tidyResult(operationId);
       if (previous) return previous;

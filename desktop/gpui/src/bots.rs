@@ -28,6 +28,7 @@ struct Profile {
     archived_at: Option<String>,
     model_binding: Option<ModelBinding>,
     review_enabled: Option<bool>,
+    tidy_enabled: Option<bool>,
     privacy: Option<Privacy>,
 }
 
@@ -999,7 +1000,9 @@ impl Threadbear {
     fn render_bot_reviews(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
         let bot = &detail.bot;
         let enabled = bot.review_enabled.unwrap_or(false);
+        let tidy = bot.tidy_enabled.unwrap_or(false);
         let disabled = self.bots.busy || bot.archived_at.is_some();
+        let no_model = bot.model_binding.is_none() || self.bots.review_unavailable.is_some();
         let settings =
             json!({ "botId": bot.id, "expectedRevision": bot.revision, "enabled": !enabled });
         let mut section = v_flex().gap(px(12.)).max_w(px(680.));
@@ -1011,14 +1014,34 @@ impl Threadbear {
                 } else {
                     "Turn on automatic review"
                 },
-                disabled
-                    || (!enabled
-                        && (bot.model_binding.is_none() || self.bots.review_unavailable.is_some())),
+                disabled || (!enabled && no_model),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.bot_write(
                     "bots.settings.automaticReview",
                     settings.clone(),
+                    After::Profile,
+                    window,
+                    cx,
+                )
+            })),
+        );
+        let tidy_settings =
+            json!({ "botId": bot.id, "expectedRevision": bot.revision, "enabled": !tidy });
+        section = section.child(
+            bot_button(
+                "bot-tidy-toggle",
+                if tidy {
+                    "Turn off automatic tidy"
+                } else {
+                    "Turn on automatic tidy"
+                },
+                disabled || (!tidy && no_model),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.bot_write(
+                    "bots.settings.automaticTidy",
+                    tidy_settings.clone(),
                     After::Profile,
                     window,
                     cx,
@@ -1570,7 +1593,9 @@ impl Threadbear {
                 || method.starts_with("bots.memory.scope.")
                 || matches!(
                     method,
-                    "bots.settings.privacy" | "bots.settings.automaticReview"
+                    "bots.settings.privacy"
+                        | "bots.settings.automaticReview"
+                        | "bots.settings.automaticTidy"
                 ))
         {
             let operation = match &self.bots.pending_write {
