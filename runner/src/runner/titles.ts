@@ -20,6 +20,7 @@ export const titlesPart = {
   // thread is named (retitle): a terse first message like "Explain thread
   // count" means little without it.
   async titleFromModel(this: Runner, st: ThreadState, text: string, reply?: string): Promise<{ title: string } | { reason: string }> {
+    if (st.rec.privateBotId) return { reason: 'This is a private Bot conversation.' };
     if (!this.models) return { reason: 'Model calls are off in this runner.' };
     const before = st.rec.title;
     const res = await this.models.generate({
@@ -52,7 +53,7 @@ export const titlesPart = {
     const picked = params.threadIds?.map((id) => this.mustGet(id));
     const due: { st: ThreadState; text: string; reply?: string }[] = [];
     for (const st of picked ?? this.threads.values()) {
-      if (st.rec.titleSet) continue;
+      if (st.rec.titleSet || st.rec.privateBotId) continue;
       const { text, reply } = this.opening(st.rec.id);
       const line = text?.split('\n').map((l) => l.trim()).find(Boolean);
       // titleFrom cut it at some length; an older runner may have cut it elsewhere.
@@ -76,6 +77,7 @@ export const titlesPart = {
   // shows it (a row's seq can be a streamed delta's, not the final text's).
   async explain(this: Runner, params: { threadId: string; selection: string; message?: string; question?: string; earlier?: ExplainTurn[] }): Promise<{ answer: string; model: string }> {
     const st = this.mustGet(params.threadId);
+    if (st.rec.privateBotId) throw new RpcError(ErrorCode.notAllowed, 'Explain is unavailable for private Bot conversations.');
     if (!this.models) throw new RpcError(ErrorCode.other, 'Model calls are off in this runner.');
     const gist = this.threadGist(st.rec.id, { recent: RECENT_MESSAGES, chars: RECENT_CHARS });
     const res = await this.models.generate({

@@ -17,14 +17,15 @@ export class BotConversations {
 
   create(botId: string, operationId: string): Conversation {
     const reserved = this.repo.reserveConversation(botId, operationId);
+    const bot = this.repo.get(botId);
     const existing = this.runner.store.load(reserved.threadId);
     if (existing) {
-      if (existing.botLink?.botId !== botId || existing.botLink.conversationId !== reserved.id) {
+      if (existing.botLink?.botId !== botId || existing.botLink.conversationId !== reserved.id ||
+          existing.privateBotId !== (bot.privacy ? bot.id : undefined)) {
         throw new Error('The saved Thread does not match its Bot conversation');
       }
     } else {
       if (typeof reserved.sessionId !== 'string') throw new Error('This Bot conversation’s Thread is gone');
-      const bot = this.repo.get(botId);
       const binding = bot.modelBinding;
       if (binding) {
         const account = this.runner.accounts.get(binding.accountId);
@@ -32,10 +33,11 @@ export class BotConversations {
         const checked = this.runner.checkSettings(account, binding.model, binding.effort);
         if (checked.model !== binding.model || checked.effort !== binding.effort) throw new Error('The saved Bot model or effort is no longer available');
       }
-      this.runner.makeThread({ text: '', title: bot.name, ...binding }, {
+      this.runner.makeThread({ text: '', title: bot.name, cwd: bot.privacy?.folder, ...binding }, {
         id: reserved.threadId,
         sessionId: reserved.sessionId,
         botLink: { botId, conversationId: reserved.id },
+        ...(bot.privacy ? { privateBotId: bot.id } : {}),
       });
     }
     const link = this.repo.confirmConversation(operationId, reserved.threadId);

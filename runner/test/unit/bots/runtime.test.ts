@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotRuntime } from '../../../src/bots/runtime.ts';
@@ -48,4 +49,41 @@ test('Bot Threads cannot be packed for moving, and a copy retains its read-only 
   assert.equal(copied.botLink?.botId, bot.id);
   assert.equal(copied.botContextTold, undefined);
   assert.throws(() => runtime.context(copied), /copy/i);
+});
+
+test('Private is guarded before the first conversation and children keep the dedicated folder', () => {
+  const home = tmpDir();
+  const folder = realpathSync.native(tmpDir());
+  const marker = join(home, 'bots-format.json');
+  let runtime: BotRuntime;
+  let canChangePrivacy = false;
+  let enabled = true;
+  const h = makeHarness(home, {}, { botContext: rec => runtime.context(rec), botFolderRefusal: (cwd, id) => runtime.folderRefusal(cwd, id) });
+  runtime = new BotRuntime({
+    home, runner: () => h.runner, owner: () => 'local', enabled: () => enabled, guarded: () => true, owns: () => true,
+    canChangePrivacy: () => canChangePrivacy,
+    protectPrivacy: () => { writeFileSync(marker, '2\n'); },
+  });
+  const { bot } = runtime.methods['bots.create']({ name: 'Private Writer' }) as { bot: { id: string; revision: number } };
+  const params = { botId: bot.id, expectedRevision: bot.revision, folder, operationId: randomUUID() };
+  assert.throws(() => runtime.methods['bots.settings.privacy'](params), /finish handing over/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '1');
+  canChangePrivacy = true;
+  assert.throws(() => runtime.methods['bots.settings.privacy']({ ...params, folder: h.runner.cfg.defaults.cwd }), /dedicated Bot folder/);
+  const changed = runtime.methods['bots.settings.privacy'](params);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '2');
+  const { thread } = runtime.methods['bots.conversations.create']({ botId: bot.id, operationId: 'p' }) as { thread: { id: string; privateBotId: string; cwd: string } };
+  assert.equal(thread.privateBotId, bot.id);
+  assert.equal(thread.cwd, folder);
+  assert.deepEqual(runtime.methods['bots.settings.privacy'](params), changed);
+  const child = h.runner.makeThread({ text: '', startedBy: { kind: 'thread', label: 'Agent', threadId: thread.id } }).st.rec;
+  assert.equal(child.privateBotId, bot.id);
+  assert.equal(child.cwd, folder);
+  assert.throws(() => h.runner.makeThread({ text: '', cwd: folder }), /overlaps a private Bot/);
+  assert.throws(() => h.runner.update({ threadId: child.id, cwd: h.runner.cfg.defaults.cwd }), /dedicated work folder/);
+  assert.deepEqual(h.runner.threadRecords(), []);
+  h.runner.update({ threadId: thread.id, archived: true });
+  enabled = false;
+  assert.equal(h.store.load(thread.id)?.privateBotId, bot.id);
+  assert.throws(() => h.runner.makeThread({ text: '', cwd: folder }), /overlaps a private Bot/);
 });

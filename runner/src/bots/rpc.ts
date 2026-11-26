@@ -19,7 +19,9 @@ function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<str
   };
 }
 
-export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews): Record<string, (p: Record<string, unknown>) => unknown> {
+const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: z.uuid() });
+
+export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
   const conversations = () => workspace().conversations;
   return {
@@ -41,6 +43,7 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.remove': method(memoryTarget.extend({ entryId: z.string().min(1) }), p => { conversations().removeNote(p.botId, p.threadId, p.entryId); return {}; }),
     'bots.memory.history': method(memoryTarget.extend({ before: z.uuid().optional() }), p => conversations().history(p.botId, p.threadId, p.before)),
     'bots.memory.restore': method(memoryTarget.extend({ changeId: z.uuid() }), p => { conversations().restoreNote(p.botId, p.threadId, p.changeId); return {}; }),
+    ...(makePrivate && { 'bots.settings.privacy': method(privacy, p => ({ bot: makePrivate(p) })) }),
     ...(reviews && {
       'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean() }), ({ botId, expectedRevision, enabled }) => {
         const service = reviews();

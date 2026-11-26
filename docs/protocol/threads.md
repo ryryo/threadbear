@@ -81,6 +81,13 @@ of the synchronization projection and notifications. Thread keys cannot
 change those rules. Private protects these Runner interfaces. It does not
 provide filesystem isolation from another process using the same OS account.
 
+`bots.settings.privacy` takes `botId`, `expectedRevision`, `operationId` and an
+existing dedicated `folder`. The Runner can make a Bot Private before any of
+its conversations have been reserved. It rejects overlapping work folders,
+including filesystem aliases. The Runner writes the new data format marker
+before saving Private state. New conversations and their child threads keep
+the Private identity on disk from creation, including after archive.
+
 ## Pictures in a message
 
 A message's words can say where its pictures go. `[Picture N]` in the

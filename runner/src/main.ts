@@ -532,6 +532,7 @@ async function main(): Promise<void> {
     enabled: () => experimentOn(cfg.home, BOT_EXPERIMENT),
     guarded: () => supervisorGuardsBotData(cfg.home),
     owns: () => !box && !draining,
+    canChangePrivacy: () => !draining && peers.status().length === 0,
   });
   // Not in box mode: its spawn gate (spawn-gate.ts) holds processes on the
   // main thread only, and the look runs git.
@@ -552,6 +553,7 @@ async function main(): Promise<void> {
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
     botContext: (rec) => bots.context(rec),
+    ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id) }),
     projects,
     atMac: () => atMac,
     config: cfg,

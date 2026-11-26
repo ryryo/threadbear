@@ -686,6 +686,7 @@ export type RunnerDeps = {
   /** Mike's standing instructions for every session (instructions.ts); '' for none. */
   standingInstructions?: () => string;
   botContext?: (rec: ThreadRecord) => string;
+  botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
@@ -794,6 +795,7 @@ export class Runner {
   projects?: Projects;
   standingInstructions?: () => string;
   private botContext?: (rec: ThreadRecord) => string;
+  private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   coordinators?: Coordinators;
   activity = new Set<(a: ThreadActivity) => void>();
   patchCache: PatchCache = new Map();
@@ -924,6 +926,7 @@ export class Runner {
     this.projects = deps.projects;
     this.standingInstructions = deps.standingInstructions;
     this.botContext = deps.botContext;
+    this.botFolderRefusal = deps.botFolderRefusal;
     this.appRestartAsked = deps.appRestartAsked;
     this.awaitingAppRestart = deps.awaitingAppRestart;
     this.appRestartWant = deps.appRestartWant;
@@ -1913,6 +1916,11 @@ export class Runner {
     return this.threads.get(threadId)?.rec.privateBotId;
   }
 
+  checkBotFolder(cwd: string, privateBotId?: string): void {
+    const refusal = this.botFolderRefusal?.(cwd, privateBotId);
+    if (refusal) throw new RpcError(ErrorCode.notAllowed, refusal);
+  }
+
   // What a sub-agent has done so far, from the CLI's transcript of it or from
   // a hidden runner-managed coordinator helper's persisted event log.
   subagent(threadId: string, subagentId: string): { subagent?: Subagent; events: PersistedEvent[] } {
@@ -2119,6 +2127,7 @@ export class Runner {
 
   sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
+    if (rec.privateBotId) this.checkBotFolder(rec.cwd, rec.privateBotId);
     if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
     // Written with less access than it has now: Mike's to read, not its
     // agent's (runner/ceiling.ts). Checked again as it leaves the queue.
@@ -2540,6 +2549,7 @@ export class Runner {
 
   async deliver(st: ThreadState, msg: QueuedSend, live?: LiveLook): Promise<void> {
     const { rec, rt } = st;
+    if (rec.privateBotId) this.checkBotFolder(rec.cwd, rec.privateBotId);
     // Deleted (which leaves rt.turn as it was) or interrupted meanwhile.
     const gone = () => rt.deleted || rt.turn?.turnId !== msg.turnId;
     // Looks at the folder's Claude Code settings on the trust worker, as a
@@ -4150,6 +4160,7 @@ export class Runner {
     }
     if (params.cwd !== undefined && !params.cwd.trim()) throw new RpcError(ErrorCode.badParams, 'cwd must not be blank');
     const newCwd = params.cwd !== undefined ? path.resolve(expandHome(params.cwd.trim())) : undefined;
+    if (newCwd !== undefined) this.checkBotFolder(newCwd, rec.privateBotId);
     if (newCwd !== undefined && !isDirectory(newCwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${newCwd}`);
     const newAccount = toAccountId !== undefined ? this.accounts.get(toAccountId) : undefined;
     if (toAccountId !== undefined && !newAccount) {

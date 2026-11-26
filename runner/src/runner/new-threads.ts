@@ -245,7 +245,11 @@ export const newThreadsPart = {
     // New threads belong on the new release.
     if (this.draining) throw new RpcError(ErrorCode.busy, 'This runner is handing over to a new one; start the thread there.');
     // A blank folder means the default, not the runner's own folder.
-    const cwd = path.resolve(expandHome(params.cwd?.trim() ? params.cwd.trim() : this.cfg.defaults.cwd));
+    const parent = params.startedBy?.threadId ? this.threads.get(params.startedBy.threadId)?.rec : undefined;
+    const privateBotId = ids?.privateBotId ?? parent?.privateBotId;
+    const inherited = parent?.privateBotId ? parent.cwd : undefined;
+    const cwd = path.resolve(expandHome(params.cwd?.trim() || inherited || this.cfg.defaults.cwd));
+    this.checkBotFolder(cwd, privateBotId);
     // An accountId pins the thread to that login. Otherwise a pool picks
     // the login (docs/protocol/settings.md, "Pools"), except on a dev runner whose
     // keepAccount pins new threads to its own account.
@@ -278,7 +282,6 @@ export const newThreadsPart = {
     if (retired) throw new RpcError(ErrorCode.badParams, retired);
     const now = this.isoNow();
     const id = params.id ?? ids?.id ?? crypto.randomUUID();
-    const privateBotId = ids?.privateBotId ?? (params.startedBy?.threadId && this.privateBotOf(params.startedBy.threadId));
     const rec: ThreadRecord = {
       id,
       ...(ids?.botLink ? { botLink: ids.botLink } : {}),

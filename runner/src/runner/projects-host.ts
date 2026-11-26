@@ -10,15 +10,15 @@ import type { ThreadRecord } from '../store.ts';
 import { cutOut } from '../store.ts';
 
 export const projectsHostPart = {
-  // Every thread's record, put away ones included. Read only.
+  // Records eligible for the project index and librarian, including archives.
   threadRecords(this: Runner): ThreadRecord[] {
-    return [...this.threads.values()].filter((t) => !t.rt.deleted).map((t) => t.rec);
+    return [...this.threads.values()].filter((t) => !t.rt.deleted && !t.rec.privateBotId).map((t) => t.rec);
   },
 
   // A thread id from a full id or unique prefix; -32004 otherwise.
   resolveThread(this: Runner, idOrPrefix: string): string {
     const t = typeof idOrPrefix === 'string' && idOrPrefix ? this.findThread(idOrPrefix) : undefined;
-    if (!t) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${idOrPrefix}`);
+    if (!t || t.privateBotId) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${idOrPrefix}`);
     return t.id;
   },
 

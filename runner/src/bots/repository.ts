@@ -16,6 +16,7 @@ const bot = z.looseObject({
   archivedAt: z.iso.datetime().optional(),
   modelBinding: modelBinding.optional(),
   reviewEnabled: z.boolean().optional(),
+  privacy: z.object({ folder: z.string().min(1), operationId: z.uuid() }).optional(),
 });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
@@ -145,6 +146,22 @@ export class BotRepository {
     const entry = this.editable(id, expectedRevision);
     if ((entry.reviewEnabled ?? false) === enabled) return entry;
     return this.saveBot({ ...entry, reviewEnabled: enabled });
+  }
+
+  setPrivate(id: string, expectedRevision: number, folder: string, operationId: string, authorize: () => void): Bot {
+    const current = this.get(id);
+    if (current.privacy?.operationId === operationId) {
+      if (current.privacy.folder !== folder) throw new Error('The operation id already names a different private folder');
+      return current;
+    }
+    const entry = this.editable(id, expectedRevision);
+    if (entry.privacy) throw new Error('This Bot already has a private folder');
+    if (this.current.bots.some(bot => bot.privacy?.operationId === operationId)) throw new Error('The operation id already belongs to another Bot');
+    if ([...this.current.conversations, ...this.current.pendingConversations].some(link => link.botId === id)) {
+      throw new Error('This Bot already has conversations. Its shared history must be removed before it can become private.');
+    }
+    authorize();
+    return this.saveBot({ ...entry, privacy: { folder, operationId } });
   }
 
   conversations(botId: string): Conversation[] {

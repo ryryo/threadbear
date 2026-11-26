@@ -32,6 +32,10 @@ export function checkBotDataFormat(home: string, expected: number | readonly num
   return true;
 }
 
+export function hasPrivateBotData(home: string): boolean {
+  return readFormatRequirement(home) === PRIVATE_BOT_FORMAT;
+}
+
 export function supervisorGuardsBotData(home: string, required = baseline): boolean {
   const guardedHome = process.env.THREADBEAR_BOT_FORMAT_HOME;
   if (!supervised() || !process.connected || process.env.THREADBEAR_BOT_FORMAT_GUARD !== '1' || !guardedHome) return false;
