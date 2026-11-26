@@ -34,3 +34,28 @@ Feature: Desktop language
     When I type "バックアップを確認してください" in the composer
     And I press Return
     Then the transcript shows my message "バックアップを確認してください"
+
+  @settings.language @swift-pending
+  Scenario: Allowing an action in Japanese lets the agent continue
+    When I choose Japanese as the desktop language
+    And I open the thread "Make uploads resume after a crash"
+    And I press "許可"
+    Then the approval card has gone
+    And the transcript shows a reply starting "Done"
+
+  @settings.language @swift-pending
+  Scenario: Japanese inbox actions still move the thread to the right section
+    When I choose Japanese as the desktop language
+    Then the "受信トレイ" section lists "Morning brief"
+    When I search the threads for "poster"
+    Then the sidebar lists "Make a poster for the meetup"
+    And the sidebar doesn't list "Morning brief"
+    When I clear the search
+    And I right-click the row "Morning brief"
+    Then the row's menu offers "名前を変更 | スターを付ける | 休止 | アーカイブ | スレッドIDをコピー"
+    When I open the Hibernate menu for "Morning brief"
+    And I choose "1時間" in the menu
+    Then the "休止中" section lists "Morning brief"
+    When I open the thread "Rename the Settings tabs"
+    And I archive the open thread
+    Then the "アーカイブ済み" section lists "Rename the Settings tabs"
