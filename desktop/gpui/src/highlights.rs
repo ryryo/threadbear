@@ -898,7 +898,7 @@ impl SidePane {
     // MARK: opening things
 
     /// A click on a highlight: a file previews in the pane (a project file opens
-    /// in its app), a page goes to the browser for now (`AppModel.open`).
+    /// in its app), a page opens where Default says.
     pub(crate) fn open_highlight(
         &mut self,
         item: &Highlight,
@@ -916,8 +916,8 @@ impl SidePane {
         }
     }
 
-    /// A link from a row: a file in the pane, a page in the browser (for
-    /// now). Anything else (a `slack:` link and the like) isn't opened from
+    /// A link from a row: a file in the pane, a page where Default says.
+    /// Anything else (a `slack:` link and the like) isn't opened from
     /// here: an agent's links only start other apps once Mike has been
     /// asked, which the app can't do yet (`LinkPolicy.ask`).
     pub(crate) fn follow_link(&mut self, url: &str, cx: &mut Context<Self>) {
@@ -939,20 +939,31 @@ impl SidePane {
             if crate::reply_links::web_click() == threadbear_core::reply_links::WebLinkAction::Panel
             {
                 if let Some(thread) = self.thread(cx) {
-                    let from = self.section_for(&thread);
-                    self.show_preview(
-                        PanePreview::new(
-                            Target::Page(url.to_owned()),
-                            core::text::address(url),
-                            from,
-                        ),
-                        &thread.id,
-                        cx,
-                    );
+                    self.preview_web_link(url, None, &thread, cx);
                     return;
                 }
             }
             crate::files::open_web(url, cx);
+        }
+    }
+
+    pub(crate) fn preview_web_link(
+        &mut self,
+        url: &str,
+        title: Option<String>,
+        thread: &ThreadSummary,
+        cx: &mut Context<Self>,
+    ) {
+        if crate::pr_view::pr_url(url).is_some() {
+            self.open_pr(url, thread, cx);
+        } else if core::is_web_page(url) {
+            let from = self.section_for(thread);
+            let title = title.unwrap_or_else(|| core::text::address(url));
+            self.show_preview(
+                PanePreview::new(Target::Page(url.to_owned()), title, from),
+                &thread.id,
+                cx,
+            );
         }
     }
 
@@ -1187,7 +1198,9 @@ impl SidePane {
             MenuAction::PreviewFile { path, title } => {
                 self.preview_path(&path, Some(title), thread, cx)
             }
-            MenuAction::PreviewPage { url } => crate::files::open_web(&url, cx),
+            MenuAction::PreviewPage { url } => {
+                self.preview_web_link(&url, None, thread, cx);
+            }
             MenuAction::OpenFile { path } => self.open_externally(&path, cx),
             MenuAction::OpenUrl { url } => {
                 if core::is_web_page(&url) {

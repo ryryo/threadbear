@@ -12,7 +12,7 @@ import { okValue, sleep, type Dump } from '../support/driver.ts';
 import { pane } from '../support/pane.ts';
 import { sites } from '../support/web-runtime.ts';
 
-type PageInfo = { key: string; url?: string; title?: string; address?: string; loading?: boolean; loads?: number; canGoBack?: boolean; hidden?: boolean; muted?: boolean; slot?: [number, number, number, number]; frame?: [number, number, number, number]; picture?: [number, number] | null };
+type PageInfo = { key: string; url?: string; title?: string; address?: string; loading?: boolean; loads?: number; canGoBack?: boolean; hidden?: boolean; muted?: boolean; placedThisFrame?: boolean; slot?: [number, number, number, number]; frame?: [number, number, number, number]; picture?: [number, number] | null };
 type ConvexInfo = { project?: string | null; label?: string; deployment?: string; choices?: string[]; note?: string | null; failure?: string | null; code?: string | null; signInFailure?: string | null };
 type WebPane = { url?: string; shows: string; note?: string; buttons: string[]; page?: PageInfo; convex?: ConvexInfo };
 
@@ -36,6 +36,20 @@ Given("the thread's url panel shows the page server", async function (this: Thre
 
 Given("the thread's url panel shows {string}", async function (this: ThreadbearWorld, url: string) {
   await this.app.do({ cmd: 'mock', method: 'urlPanel', params: { threadId: await threadId(this), url, title: 'Preview' } });
+});
+
+When(/^the agent pins( and shows)? the page server as "([^"]+)"$/, async function (this: ThreadbearWorld, shows: string | undefined, title: string) {
+  await this.app.do({ cmd: 'mock', method: 'pin', params: { threadId: await threadId(this), url: sites().home, title, show: Boolean(shows) } });
+});
+
+Then('the link preview shows the page {string}', async function (this: ThreadbearWorld, title: string) {
+  await this.until(`the link preview showing "${title}"`, (d) => {
+    const preview = pane(d) as { previewKind?: string; previewText?: string } | undefined;
+    const page = pages(d).find((p) => p.url === sites().home);
+    return preview?.previewKind === 'page' && preview.previewText === sites().home
+      && page?.title === title && page.loading === false && page.hidden === false
+      && page.placedThisFrame === true;
+  }, LOADED_MS);
 });
 
 Given('the thread has the Convex panel', async function (this: ThreadbearWorld) {

@@ -276,7 +276,13 @@ pub(crate) fn media_key(thread_id: &str, path: &str, opened: u64) -> String {
 /// Whether the pane is showing a video or a PDF in the system's view, which
 /// has to be placed every frame (shell.rs draws the pane uncached then).
 pub(crate) fn shows_media(side: &SidePane, thread_id: &str) -> bool {
-    let Some(path) = side.previews.get(thread_id).and_then(|p| p.file_path()) else {
+    let Some(preview) = side.previews.get(thread_id) else {
+        return false;
+    };
+    if matches!(preview.target, Target::Page(_)) {
+        return true;
+    }
+    let Some(path) = preview.file_path() else {
         return false;
     };
     // A local page's view is placed every frame too (web_panels.rs).
@@ -465,11 +471,7 @@ impl SidePane {
                 }
                 _ => self.load_file(thread, path.clone(), preview.opened, cx),
             },
-            Target::Page(url) => {
-                open_web(url, cx);
-                self.previews.remove(&thread.id);
-                cx.notify();
-            }
+            Target::Page(_) => {}
             Target::Folder(_) => self.load_folder_for_preview(thread, cx),
             Target::Pr(url) => self.begin_pr(url, cx),
         }
@@ -1130,6 +1132,17 @@ impl SidePane {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mut row = h_flex().flex_none().gap(px(0.));
+        if let Target::Page(url) = &preview.target {
+            let url = url.clone();
+            row = row.child(self.header_button(
+                "hl-open-page",
+                "arrow.up.right",
+                "Open in browser".to_owned(),
+                p,
+                cx,
+                move |_, cx| open_web(&url, cx),
+            ));
+        }
         if let Target::Folder(path) = &preview.target {
             row = row.child(self.folder_mode_button(p, cx));
             // Another Mac's folder has no copy here to hand over.
@@ -1356,7 +1369,6 @@ impl SidePane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = palette(cx);
         match &preview.target {
             Target::File(path) => self.render_file(
                 thread,
@@ -1367,7 +1379,11 @@ impl SidePane {
                 cx,
             ),
             Target::Page(url) => {
-                pane_note(&format!("{url} opened in your browser."), p).into_any_element()
+                let main = self
+                    .app
+                    .upgrade()
+                    .is_some_and(|app| app.read(cx).main_window == window.window_handle());
+                crate::web_panels::link_preview(url, main, window, cx)
             }
             Target::Folder(path) => self.render_folder(thread, path, preview, window, cx),
             Target::Pr(url) => self.render_pr(thread, url, window, cx),
@@ -2301,18 +2317,7 @@ pub(crate) fn preview_command(
     } else if let Some(path) = cmd["path"].as_str() {
         side.update(cx, |pane, cx| pane.preview_path(path, None, thread, cx));
     } else if let Some(url) = cmd["url"].as_str() {
-        side.update(cx, |pane, cx| {
-            let section = pane.section_for(thread);
-            pane.show_preview(
-                PanePreview::new(
-                    Target::Page(url.to_owned()),
-                    core::text::address(url),
-                    section,
-                ),
-                &thread.id,
-                cx,
-            );
-        });
+        side.update(cx, |pane, cx| pane.preview_web_link(url, None, thread, cx));
     } else {
         return Err("preview needs path, url or close".into());
     }

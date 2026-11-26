@@ -127,7 +127,9 @@ the owning runner.
   `download/` and is deleted once it's unpacked. Chromium runs inside the
   GPUI app's own process, started the first time something needs it, and
   its helpers as child processes of the app (its renderers, GPU and network
-  processes), all stopping when the app quits. Its own process sandbox is
+  processes), all stopping when the app quits. The same runtime displays
+  web links opened in the side pane, including links an agent pins with
+  Show. Its own process sandbox is
   off for now, as it only covers a runtime inside the app's bundle
   (`desktop/web/src/mac/host.rs`). Removing the `web-runtime` folder
   uninstalls it. The pictures it draws of ```` ```mermaid ```` and

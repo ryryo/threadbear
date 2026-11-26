@@ -17,7 +17,6 @@
 // any button's release, so a probe then would click early or end the drag. A
 // right-click's menu asks with the right button down, whose release nothing
 // in a reply acts on.
-use crate::highlights::{PanePreview, Target};
 use crate::open_gate::{self, Origin};
 use crate::style::{self, size};
 use crate::thread::ThreadPane;
@@ -555,15 +554,7 @@ impl ThreadPane {
                 let side = app.read(cx).side.clone();
                 let section = side.update(cx, |side, cx| {
                     let section = side.section_for(&thread);
-                    side.show_preview(
-                        PanePreview::new(
-                            Target::Page(url.to_owned()),
-                            hl::text::address(url),
-                            section.clone(),
-                        ),
-                        &thread.id,
-                        cx,
-                    );
+                    side.preview_web_link(url, None, &thread, cx);
                     section
                 });
                 show_pane(&app, &section, cx);

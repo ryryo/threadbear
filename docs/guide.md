@@ -423,6 +423,12 @@ permission, its window comes to the middle of your screen and the panel says so,
 with Show it to bring it to the front. Existing-profile pages use captured frames,
 so movement is less smooth than the separate Chrome's stream.
 
+To show a web page beside the thread, right-click its link in a reply or
+Highlights and choose **Open in Panel**. On the GPUI Mac app, the first page
+can ask you to install the web runtime. Back above the page returns to the
+panel you opened it from. The arrow beside the page title opens it in your
+browser.
+
 A link to a folder opens it in the side pane, where it works like a Finder
 window. Double-click a folder to go in, or a file to see it there, and the
 back arrow takes you back to where you were. Press the space bar for Quick

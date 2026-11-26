@@ -6,6 +6,7 @@ import { tempFolder } from '../support/temp.ts';
 import type { ThreadbearWorld } from '../support/world.ts';
 import { okValue, type Dump, type Row } from '../support/driver.ts';
 import { pane, previewShown } from '../support/pane.ts';
+import { sites } from '../support/web-runtime.ts';
 
 // A reply's links (reply-links.feature): what a click, a ⌘-click and a
 // right-click do, and the card that shows on a rest. Both apps take `peek`
@@ -46,6 +47,10 @@ async function streamReply(world: ThreadbearWorld, text: string, read?: string):
 
 When('a reply linking {string} to {string} streams in', async function (this: LinkWorld, words: string, url: string) {
   await streamReply(this, `Here's [${words}](${url}) to look at.`);
+});
+
+When('a reply linking {string} to the page server streams in', async function (this: LinkWorld, words: string) {
+  await streamReply(this, `Here's [${words}](${sites().home}) to look at.`);
 });
 
 When('a reply linking {string} to that file streams in', async function (this: LinkWorld, words: string) {

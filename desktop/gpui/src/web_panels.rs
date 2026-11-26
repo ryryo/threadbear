@@ -1010,11 +1010,35 @@ fn page_view(
     let Some(url) = panel.url.clone().filter(|u| !u.trim().is_empty()) else {
         return note("This panel has no page to show.", cx);
     };
+    let key = page_key(url.clone(), pinned);
+    public_page(panels, &key, &url, main, window, cx)
+}
+
+/// An ordinary web link opened over a pane section. Its page has its own
+/// slot even if a patch panel shows the same address at the same time.
+pub(crate) fn link_preview(url: &str, main: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+    let Some(panels) = panels(cx) else {
+        return note("The web runtime is unavailable.", cx);
+    };
+    if threadbear_web::site(url).is_none() {
+        return note("This link isn't a web page.", cx);
+    }
+    public_page(&panels, &format!("link:{url}"), url, main, window, cx)
+}
+
+fn public_page(
+    panels: &Entity<WebPanels>,
+    key: &str,
+    url: &str,
+    main: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let open = Some(Opener {
-        url: url.clone(),
+        url: url.to_owned(),
         tip: "Open in browser".into(),
     });
-    if !loads_in_panel(&url) {
+    if !loads_in_panel(url) {
         return away(
             "This panel's page isn't a web page, so it opens outside the app.",
             open,
@@ -1022,22 +1046,14 @@ fn page_view(
         );
     }
     match running(
-        &format!("web-panel-{}", panel.id),
+        &format!("web-panel-{key}"),
         "this panel's page",
         main,
         open.clone(),
         window,
         cx,
     ) {
-        Ok(parent) => slot(
-            panels,
-            &page_key(url.clone(), pinned),
-            &url,
-            || PanelKind::Patch,
-            parent,
-            open,
-            cx,
-        ),
+        Ok(parent) => slot(panels, key, url, || PanelKind::Patch, parent, open, cx),
         Err(instead) => instead,
     }
 }
@@ -2043,7 +2059,10 @@ fn save_selections(selections: &HashMap<String, String>) {
 /// A kept page's address as the dump gives it: a pinned copy's as its own,
 /// the Convex dashboard's as the embedded page.
 fn dumped_url(key: &str) -> String {
-    let key = key.strip_prefix("pin:").unwrap_or(key);
+    let key = key
+        .strip_prefix("pin:")
+        .or_else(|| key.strip_prefix("link:"))
+        .unwrap_or(key);
     key.strip_prefix("convex:")
         .map_or(key.to_owned(), |_| embedded())
 }

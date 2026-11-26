@@ -16,6 +16,33 @@ Feature: Web pages in a thread's panels
     Given the app is connected to a runner with the demo threads
 
   @panel.web @web-runtime @swift-pending
+  Scenario: Open in Panel on a reply link loads the page beside the thread
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the link preview shows the page "Panel home"
+    And nothing was opened in another app
+
+  @panel.web @web-runtime @swift-pending
+  Scenario: Open in Panel on a pinned link loads the page beside the thread
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And the agent pins the page server as "the page"
+    And I choose "Open in Panel" from the menu of the highlight "the page"
+    Then the link preview shows the page "Panel home"
+    And nothing was opened in another app
+
+  @panel.web @web-runtime @swift-pending
+  Scenario: An agent can show a pinned page beside the thread
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And I'm looking at the app
+    And the agent pins and shows the page server as "the page"
+    Then the link preview shows the page "Panel home"
+    And nothing was opened in another app
+
+  @panel.web @web-runtime @swift-pending
   Scenario: A url panel shows its page, and keeps it between visits
     Given the web runtime is installed
     When I open the thread "Add dark mode to the dashboard"

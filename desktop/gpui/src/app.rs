@@ -894,9 +894,7 @@ impl Threadbear {
             );
             // Only the pane: an agent showing a file never starts its app.
             // One unpinned since still opens Highlights.
-            if let Some((path, title)) =
-                item.and_then(|i| i.path.clone().map(|p| (p, i.title.clone())))
-            {
+            if let Some(item) = item {
                 let (shown, side) = (thread.clone(), self.side.clone());
                 // Once this update is over: the pane reads the app to know its
                 // thread, which GPUI refuses while the app is the one being
@@ -904,8 +902,12 @@ impl Threadbear {
                 // crashed the app (Mike, 12 Nov).
                 cx.defer(move |cx| {
                     side.update(cx, |side, cx| {
-                        side.preview_path(&path, Some(title), &shown, cx)
-                    })
+                        if let Some(path) = item.path {
+                            side.preview_path(&path, Some(item.title), &shown, cx);
+                        } else if let Some(url) = item.url {
+                            side.preview_web_link(&url, Some(item.title), &shown, cx);
+                        }
+                    });
                 });
             }
             self.tell_panel_shown(&request, &thread);

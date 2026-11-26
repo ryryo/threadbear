@@ -71,10 +71,11 @@ only acted on the first time it saw it, and never for a thread it hadn't
 fetched yet.) The app opens the pin over Highlights, fetching the
 thread's highlights first if it hasn't got that one, then calls
 `threads.panelShown`; one that's gone opens Highlights. The tool waits
-up to 2 seconds for that, as `show_panel` does, and says which. Only the pane: a file shown this
-way never opens in its app (a project file included), and a link only
-opens by itself if it's a web page, where a click on it would go. `unpin { id }` takes one off
-again. The tools' descriptions say when to use them.
+up to 2 seconds for that, as `show_panel` does, and says which. A file
+shown this way opens in the pane, including a project file. GPUI also
+opens a web link in the pane for a show request, regardless of the
+default for link clicks. Other link schemes do not open by themselves.
+`unpin { id }` takes one off again.
 
 The Windows desktop app refuses network shares and device paths before
 probing a local file, including a hover card or file search. Its resolver
