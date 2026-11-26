@@ -1221,8 +1221,12 @@ impl Threadbear {
                 }
                 "recipes.updated" => self.load_recipes(cx),
                 "settings.updated" => {
+                    let bots_on = self.bots_on();
                     self.runner_settings_state
                         .on_updated(params["settings"].clone());
+                    if bots_on != self.bots_on() {
+                        self.discover_bots(cx);
+                    }
                     self.load_coordinators(cx);
                 }
                 // A login appearing or going, its models once asked, its

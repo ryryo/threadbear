@@ -3,12 +3,17 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync } from '../fsutil.ts';
+import { EFFORT_LEVELS, PROVIDERS } from '../protocol.ts';
 
 const id = z.uuid();
 const revision = z.int().positive();
+const modelBinding = z.object({
+  accountId: z.string().min(1), provider: z.enum(PROVIDERS), model: z.string().min(1), effort: z.enum(EFFORT_LEVELS).optional(),
+});
 const bot = z.looseObject({
   id, name: z.string().min(1), role: z.string(), instructions: z.string(), revision,
   archivedAt: z.iso.datetime().optional(),
+  modelBinding: modelBinding.optional(),
 });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
@@ -126,6 +131,13 @@ export class BotRepository {
 
   archive(id: string, expectedRevision: number, at: string): Bot {
     return this.saveBot({ ...this.editable(id, expectedRevision), archivedAt: at });
+  }
+
+  setModelBinding(id: string, expectedRevision: number, binding: Bot['modelBinding']): Bot {
+    const entry = this.editable(id, expectedRevision);
+    if (binding) entry.modelBinding = modelBinding.parse(binding);
+    else delete entry.modelBinding;
+    return this.saveBot(entry);
   }
 
   conversations(botId: string): Conversation[] {

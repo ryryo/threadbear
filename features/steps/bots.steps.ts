@@ -5,7 +5,16 @@ import type { ThreadbearWorld } from '../support/world.ts';
 type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string };
 
 async function click(world: ThreadbearWorld, tip: string) {
-  await world.app.do({ cmd: 'click', tip });
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      await world.app.do({ cmd: 'click', tip });
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('no control with the tip') || Date.now() >= deadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
 }
 
 When('I create a Bot called {string} from the Bots page', async function (this: BotWorld, name: string) {

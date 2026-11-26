@@ -24,7 +24,15 @@ export class BotConversations {
       }
     } else {
       if (typeof reserved.sessionId !== 'string') throw new Error('This Bot conversation’s Thread is gone');
-      this.runner.makeThread({ text: '', title: this.repo.get(botId).name }, {
+      const bot = this.repo.get(botId);
+      const binding = bot.modelBinding;
+      if (binding) {
+        const account = this.runner.accounts.get(binding.accountId);
+        if (!account || account.provider !== binding.provider) throw new Error('The saved Bot login is no longer available');
+        const checked = this.runner.checkSettings(account, binding.model, binding.effort);
+        if (checked.model !== binding.model || checked.effort !== binding.effort) throw new Error('The saved Bot model or effort is no longer available');
+      }
+      this.runner.makeThread({ text: '', title: bot.name, ...binding }, {
         id: reserved.threadId,
         sessionId: reserved.sessionId,
         botLink: { botId, conversationId: reserved.id },
@@ -38,11 +46,26 @@ export class BotConversations {
 
   summary(threadId: string) { return this.runner.get(threadId); }
 
-  private memoryFor(botId: string, threadId: string): PersonalMemory {
-    const saved = this.runner.store.load(threadId)?.botLink;
-    if (saved?.botId !== botId || !this.repo.conversations(botId).some(link => link.threadId === threadId && link.id === saved.conversationId)) {
+  private conversationRecord(botId: string, threadId: string): ThreadRecord {
+    const rec = this.runner.store.load(threadId);
+    const saved = rec?.botLink;
+    if (!rec || saved?.botId !== botId || !this.repo.conversations(botId).some(link => link.threadId === threadId && link.id === saved.conversationId)) {
       throw new Error('This Thread does not belong to this Bot');
     }
+    return rec;
+  }
+
+  conversationModel(botId: string, expectedRevision: number, threadId: string | null) {
+    if (threadId === null) return this.repo.setModelBinding(botId, expectedRevision, undefined);
+    const rec = this.conversationRecord(botId, threadId);
+    const account = this.runner.accounts.get(rec.accountId);
+    const model = rec.model ?? account?.defaultModel;
+    if (!model || !account || account.provider !== rec.provider) throw new Error('Choose a login and model on the conversation first');
+    return this.repo.setModelBinding(botId, expectedRevision, { accountId: rec.accountId, provider: rec.provider, model, effort: rec.effort });
+  }
+
+  private memoryFor(botId: string, threadId: string): PersonalMemory {
+    this.conversationRecord(botId, threadId);
     return new PersonalMemory(join(this.root, 'memory', botId));
   }
 

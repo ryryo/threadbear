@@ -54,6 +54,25 @@ test('a saved Thread can confirm the same Bot reservation after confirmation fai
   assert.equal(restarted.store.load(pending.threadId)?.nativeSessionId, record.nativeSessionId);
 });
 
+test('the settings chosen on one conversation can become defaults for later conversations', () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const service = new BotConversations(h.runner, repo, root);
+  const editor = repo.create({ name: 'Editor' });
+  const a = service.create(editor.id, 'a');
+  const unrelated = h.runner.makeThread({ text: 'Independent' }).st.rec.id;
+  h.runner.update({ threadId: a.threadId, accountId: 'claude-3', model: 'claude-sonnet-4-6' });
+  assert.throws(() => service.conversationModel(editor.id, editor.revision, unrelated), /does not belong/);
+  let saved = service.conversationModel(editor.id, editor.revision, a.threadId);
+  const b = service.create(editor.id, 'b');
+  assert.equal(h.store.load(b.threadId)?.accountId, 'claude-3');
+  assert.equal(h.store.load(b.threadId)?.model, 'claude-sonnet-4-6');
+  saved = service.conversationModel(editor.id, saved.revision, null);
+  assert.equal(saved.modelBinding, undefined);
+  assert.equal(h.store.load(a.threadId)?.model, 'claude-sonnet-4-6');
+});
+
 test('a fresh Bot conversation hears the shared note and a resumed CLI hears only a changed Bot context', async () => {
   const home = tmpDir();
   const root = join(home, 'bots');

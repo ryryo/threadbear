@@ -25,6 +25,7 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
     'bots.update': method(settings.partial().extend({ botId, expectedRevision: z.int().positive() }), ({ botId, expectedRevision, ...p }) => ({ bot: repo().update(botId, expectedRevision, p) })),
     'bots.archive': method(identity.extend({ expectedRevision: z.int().positive() }), p => ({ bot: conversations().archive(p.botId, p.expectedRevision) })),
+    'bots.settings.conversationModel': method(identity.extend({ expectedRevision: z.int().positive(), threadId: z.uuid().nullable() }), p => ({ bot: conversations().conversationModel(p.botId, p.expectedRevision, p.threadId) })),
     'bots.conversations.create': method(identity.extend({ operationId: z.string().min(1).max(128) }), p => {
       const service = conversations();
       const conversation = service.create(p.botId, p.operationId);

@@ -34,6 +34,10 @@ permission level.
 `bots.status` reports whether the owner can open the local Bot workspace and,
 when unavailable, gives a reason. Bot conversations stay on the workspace's
 owning Runner. A local copy of real threads keeps them as a read-only transcript.
+`bots.settings.conversationModel` takes a Bot revision and `threadId`.
+When given a linked conversation, its login, model and effort
+become the Bot's defaults for new conversations. A null `threadId` restores
+the Runner defaults. Existing conversations retain their own settings.
 
 ## Pictures in a message
 

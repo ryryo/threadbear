@@ -2062,6 +2062,9 @@ keeps its own messages and can reopen after the Runner restarts.
 The owning Runner needs its updated supervisor running before it can create a
 Bot. Its Bot controls are on the local desktop connection. The conversations
 use the same model, permission and approval controls as ordinary threads.
+To use one conversation's model and login for future conversations, open the
+Bot from that conversation, go to **Settings** and choose **Use this
+conversation’s model**. You can return to the Runner defaults there too.
 
 ## Connectors
 <!-- slug: connectors -->

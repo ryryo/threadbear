@@ -25,6 +25,14 @@ struct Profile {
     instructions: String,
     revision: u64,
     archived_at: Option<String>,
+    model_binding: Option<ModelBinding>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelBinding {
+    account_id: String,
+    model: String,
 }
 
 #[derive(Deserialize)]
@@ -114,7 +122,9 @@ pub(crate) struct BotsState {
 
 impl Threadbear {
     pub(crate) fn bots_on(&self) -> bool {
-        self.bots.offered || self.experiment_on(EXPERIMENT)
+        self.runner_settings_state
+            .experiment_on(EXPERIMENT)
+            .unwrap_or_else(|| self.bots.offered || self.experiment_on(EXPERIMENT))
     }
 
     pub(crate) fn discover_bots(&mut self, cx: &mut Context<Self>) {
@@ -567,6 +577,7 @@ impl Threadbear {
                     ),
             );
         }
+        section = section.child(self.render_bot_model(bot, disabled, cx));
         let (id, revision) = (bot.id.clone(), bot.revision);
         if bot.archived_at.is_none() {
             section = section.child(bot_button("bot-archive", "Archive Bot", disabled).on_click(
@@ -580,6 +591,77 @@ impl Threadbear {
                     );
                 }),
             ));
+        }
+        section.into_any_element()
+    }
+
+    fn render_bot_model(
+        &self,
+        bot: &Profile,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = bot.model_binding.as_ref().map_or_else(
+            || "Runner defaults".to_owned(),
+            |binding| {
+                let title = self
+                    .logins
+                    .account(&binding.account_id)
+                    .map_or(binding.account_id.as_str(), |account| {
+                        account.title.as_str()
+                    });
+                format!("{} · {title}", binding.model)
+            },
+        );
+        let mut section = v_flex()
+            .gap(px(4.))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Model for new conversations"),
+            )
+            .child(div().child(label));
+        if let Some(source) = self
+            .bots
+            .source
+            .as_ref()
+            .filter(|source| self.threads.contains_key(*source))
+        {
+            let params =
+                json!({ "botId": bot.id, "expectedRevision": bot.revision, "threadId": source });
+            section = section.child(
+                bot_button(
+                    "bot-use-conversation-model",
+                    "Use this conversation’s model",
+                    disabled,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.bot_write(
+                        "bots.settings.conversationModel",
+                        params.clone(),
+                        After::Profile,
+                        window,
+                        cx,
+                    )
+                })),
+            );
+        }
+        if bot.model_binding.is_some() {
+            let params =
+                json!({ "botId": bot.id, "expectedRevision": bot.revision, "threadId": null });
+            section = section.child(
+                bot_button("bot-reset-model", "Use Runner defaults", disabled).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.bot_write(
+                            "bots.settings.conversationModel",
+                            params.clone(),
+                            After::Profile,
+                            window,
+                            cx,
+                        )
+                    }),
+                ),
+            );
         }
         section.into_any_element()
     }
