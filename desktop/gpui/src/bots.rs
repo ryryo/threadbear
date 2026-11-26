@@ -1,4 +1,5 @@
 //! Bot profiles and their conversations on the local Runner.
+use crate::a11y::A11yRole as _;
 use crate::app::Threadbear;
 use crate::shell::SidebarMode;
 use crate::style::{self, px};
@@ -874,6 +875,7 @@ impl Threadbear {
             .find(|bot| bot.id == bot_id)
             .map_or("Bot", |bot| bot.name.as_str())
             .to_owned();
+        let tip = "Show the Bot’s notes and settings";
         Some(
             div()
                 .id("thread-bot-chip")
@@ -883,7 +885,10 @@ impl Threadbear {
                 .rounded_full()
                 .cursor_pointer()
                 .bg(style::primary_opacity(cx, 0.06))
-                .tip("Show the Bot’s notes and settings")
+                .test_support()
+                .a11y_role(gpui_kit::Role::Button)
+                .aria_label(tip)
+                .tip(tip)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.open_bot_from_thread(bot_id.clone(), thread_id.clone(), cx)
                 }))

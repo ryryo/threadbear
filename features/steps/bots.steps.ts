@@ -8,10 +8,11 @@ async function click(world: ThreadbearWorld, tip: string) {
   const deadline = Date.now() + 10_000;
   for (;;) {
     try {
-      await world.app.do({ cmd: 'click', tip });
+      await world.app.do({ cmd: 'click', tip, enabled: true });
       return;
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('no control with the tip') || Date.now() >= deadline) throw error;
+      if (!(error instanceof Error) || !/(no control with the tip|is disabled)/.test(error.message)) throw error;
+      if (Date.now() >= deadline) throw new Error(`${error.message}\nControls: ${await world.app.do({ cmd: 'labels' })}`);
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
