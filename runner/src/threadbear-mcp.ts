@@ -62,10 +62,12 @@ type Aw<T> = T | Promise<T>;
 type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
 import type { BotRequests } from './bots/request-service.ts';
 import type { BotTaskThreads } from './bots/task-threads.ts';
+import type { BotTeams } from './bots/teams.ts';
 import { NAME_MAX } from './bots/ported/requests.js';
 
 type BotTools = Pick<BotRequests, 'sendBot'>;
 type BotTaskTools = Pick<BotTaskThreads, 'start'>;
+type BotTeamTools = Pick<BotTeams, 'read' | 'createBot' | 'editBot' | 'stopBot'>;
 
 export type ThreadControl = {
   authorizeBotSend?(threadId: string, text: string, signal?: AbortSignal): Promise<void>;
@@ -297,10 +299,12 @@ export function buildThreadbearTools(
     coordinators?: () => Coordinators | undefined;
     botRequests?: BotTools;
     botTasks?: BotTaskTools;
+    botTeams?: BotTeamTools;
   } = {},
 ) {
   const botRequests = opts.botRequests;
   const botTasks = opts.botTasks;
+  const botTeams = opts.botTeams;
   const codex = opts.provider === 'codex';
   // A schedule's check (schedule-check.ts).
   const checkArg = (update: boolean): Record<string, z.ZodOptional<z.ZodTypeAny>> => ({
@@ -2531,6 +2535,28 @@ export function buildThreadbearTools(
         return `Started task ${task.id} in thread ${task.threadId}.`;
       }),
     )] : []),
+    ...(botTeams ? [
+      tool('bot_team', 'Read this Bot’s team, current revision and your granted management operations.', {}, handle(() => JSON.stringify(botTeams.read(selfId)))),
+      tool('create_bot', 'Create a Bot with a template the owner granted this Chief.', {
+        teamRevision: z.int().positive(), template: z.string().min(1), name: z.string().min(1),
+      }, handle(({ teamRevision, template, name }) => {
+        const { bot } = botTeams.createBot(selfId, teamRevision, template, name);
+        return `Created ${bot.name} (${bot.id}).`;
+      })),
+      tool('update_bot', 'Update the specific Bot profile fields the owner granted this Chief.', {
+        teamRevision: z.int().positive(), botId: z.uuid(), botRevision: z.int().positive(),
+        name: z.string().min(1).optional(), role: z.string().optional(), instructions: z.string().optional(),
+      }, handle(({ teamRevision, botId, botRevision, ...settings }) => {
+        const { bot } = botTeams.editBot(selfId, teamRevision, botId, botRevision, settings);
+        return `Updated ${bot.name}.`;
+      })),
+      tool('stop_bot', 'Stop the running Threads of a Bot the owner granted this Chief permission to stop.', {
+        teamRevision: z.int().positive(), botId: z.uuid(), reason: z.string().trim().min(1).max(500),
+      }, handle(async ({ teamRevision, botId, reason }) => {
+        const { stoppedThreads } = await botTeams.stopBot(selfId, teamRevision, botId, reason);
+        return `Stopped ${stoppedThreads.length} Threads.`;
+      })),
+    ] : []),
     ...(botRequests && control.authorizeBotSend ? [tool(
       'message_bot',
       'Ask another Bot in this workspace. Reuse the same request name when retrying the same brief. The result returns here.',
@@ -2882,14 +2908,14 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools, botTasks?: BotTaskTools): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools, botTasks?: BotTaskTools, botTeams?: BotTeamTools): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const isHelper = Boolean(coordinators?.()?.helperOwner(selfId));
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: isHelper ? COORDINATOR_WORKER_PROMPT : serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), livePages: livePages?.() ?? false }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests, botTasks }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests, botTasks, botTeams }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

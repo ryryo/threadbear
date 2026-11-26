@@ -3,6 +3,7 @@ import type { ThreadRecord } from '../store.ts';
 import type { PersonalMemory, MemoryNote } from './ported/personal-memory.js';
 import type { BotRepository, Conversation } from './repository.ts';
 import { ScopedMemory } from './scoped-memory.ts';
+import { lowerMode } from '../access.ts';
 
 export class BotConversations {
   private readonly runner: Runner;
@@ -33,7 +34,12 @@ export class BotConversations {
         const checked = this.runner.checkSettings(account, binding.model, binding.effort);
         if (checked.model !== binding.model || checked.effort !== binding.effort) throw new Error('The saved Bot model or effort is no longer available');
       }
-      this.runner.makeThread({ text: '', title: bot.name, cwd: bot.privacy?.folder, ...binding }, {
+      this.runner.makeThread({
+        text: '', title: bot.name, cwd: bot.privacy?.folder ?? bot.workFolder, ...binding,
+        ...(bot.permissionCeiling !== undefined && {
+          permissionMode: lowerMode(this.runner.cfg.defaults.permissionMode ?? 'full', bot.permissionCeiling),
+        }),
+      }, {
         id: reserved.threadId,
         sessionId: reserved.sessionId,
         botLink: { botId, conversationId: reserved.id },

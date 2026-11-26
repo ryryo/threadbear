@@ -539,3 +539,55 @@ test('a managed Bot background task reopens its own Thread and result without re
     if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
   }
 });
+
+test('a managed Bot team and permission limit persist after restart and a failed write restores the prior Thread mode', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  configureBotFixture(home);
+  const cli = installBotFixtureCli(home);
+  const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: cli, THREADBEAR_RESTART_MS: '50' });
+  try {
+    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    try {
+      assert.equal((await c.call('bots.status')).teams, true);
+      const { bot } = await c.call('bots.create', { name: '編集者' });
+      const { conversation } = await c.call('bots.conversations.create', { botId: bot.id, operationId: 'team-chat' });
+      const from = { threadId: conversation.threadId };
+      await c.call('threads.update', { ...from, permissionMode: 'full' });
+      const cap = { botId: bot.id, expectedRevision: bot.revision, ceiling: 'ask' };
+      const file = path.join(home, 'bots', 'state.json');
+      fs.renameSync(file, file + '.saved');
+      fs.mkdirSync(file);
+      try {
+        await assert.rejects(c.call('bots.settings.permissionCeiling', cap));
+        assert.equal((await c.call('threads.list', { ids: [from.threadId] })).threads[0]?.permissionMode, 'full');
+      } finally {
+        fs.rmdirSync(file);
+        fs.renameSync(file + '.saved', file);
+      }
+      await c.call('bots.settings.permissionCeiling', cap);
+      assert.equal((await c.call('threads.list', { ids: [from.threadId] })).threads[0]?.permissionMode, 'ask');
+      await assert.rejects(c.call('threads.update', { ...from, permissionMode: 'full' }), /permission limit/);
+      const { team } = await c.call('bots.teams.create', { title: '編集チーム', memberIds: [bot.id] });
+      const { team: assigned } = await c.call('bots.teams.setChief', { teamId: team.id, expectedRevision: team.revision, botId: bot.id, main: true });
+      assert.equal(fs.readFileSync(path.join(home, 'bots-format.json'), 'utf8').trim(), '5');
+      await c.call('runner.restart', { reason: 'Bot team verification' });
+      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      try {
+        assert.deepEqual((await reopened.call('bots.teams.get', { teamId: team.id })).team, assigned);
+        assert.equal((await reopened.call('bots.get', { botId: bot.id })).bot.permissionCeiling, 'ask');
+        assert.equal((await reopened.call('threads.list', { ids: [from.threadId] })).threads[0]?.permissionMode, 'ask');
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      c.close();
+    }
+    run.proc.kill('SIGTERM');
+    assert.equal(await run.exited, 0);
+  } finally {
+    if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
+  }
+});

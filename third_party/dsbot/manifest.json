@@ -13,7 +13,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/src/bots/repository.ts",
-      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation."
+      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation. Chief activation and replacement at L922–949 are extracted into runner/src/bots/chief-rules.ts and applied atomically to the native team row."
     },
     {
       "upstreamPath": "ds-bot/test/roster.test.js",
@@ -23,7 +23,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/test/unit/bots/repository.test.ts",
-      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction."
+      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction. L439–480 role replacement, primary order and last Chief protection are adapted in runner/test/unit/bots/chief-rules.test.ts."
     },
     {
       "upstreamPath": "ds-bot/src/host/threads.js",
@@ -187,7 +187,9 @@
       "sha256": "2ebc08a5549b9eecbb94a372f01029a80f75764c9062463ddc816a6706b81763",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/permissions.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/permission-changes.ts",
+      "changes": "Extract L49–119 per-Bot sequencing, rollback to the applied setting and a stale-rollback guard. The native adapter narrows Thread permission under the existing mode and stops CLIs which had broader access."
     },
     {
       "upstreamPath": "ds-bot/test/privacy.test.js",
@@ -205,7 +207,9 @@
       "sha256": "deb2b35d0975aa810fdbc96b2be486ade6857c61f6462170fb9669563b06e6a0",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/permissions.test.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/permission-changes.test.ts",
+      "changes": "Adapt L99–129 and L183–224 to current Thread IDs and an atomic workspace revision. The managed Runner test injects a failed Bot-state write and verifies the prior Thread mode."
     },
     {
       "upstreamPath": "ds-bot/src/host/handoffs.js",
@@ -245,7 +249,7 @@
       "phase": 3,
       "portMode": "B",
       "portPath": "runner/src/bots/request-dispatch.ts",
-      "changes": "Adapt pinned destination, queue/steer and delegated ancestry to the local Runner. Reuse the existing thread tool approval and access checks."
+      "changes": "Adapt pinned destination, queue/steer and delegated ancestry to the local Runner. Reuse the existing thread tool approval and access checks. L451–536 Main Bot authorization is adapted in runner/src/bots/teams.ts, with per-tool owner grants and native Thread identity."
     },
     {
       "upstreamPath": "ds-bot/test/handoff-results.test.js",

@@ -459,6 +459,10 @@ async function main(): Promise<void> {
     const link = runner.threads.get(threadId)?.rec.botLink;
     return bots.tasksAvailable() && link && !link.taskId ? bots.tasks() : undefined;
   };
+  const teamTools = (threadId: string) => {
+    const link = runner.threads.get(threadId)?.rec.botLink;
+    return bots.teamsAvailable() && link && !link.taskId && !privateAgent(threadId) ? bots.teams() : undefined;
+  };
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
@@ -469,7 +473,7 @@ async function main(): Promise<void> {
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
-        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId)),
+        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId), teamTools(threadId)),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -489,6 +493,7 @@ async function main(): Promise<void> {
       coordinators: () => localOnly ? undefined : runner.coordinators,
       botRequests: requestTools(threadId),
       botTasks: taskTools(threadId),
+      botTeams: teamTools(threadId),
     });
   };
   // One app-server per live Codex thread, each starting what E says is
@@ -581,6 +586,7 @@ async function main(): Promise<void> {
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
     botContext: (rec) => bots.context(rec),
+    botPermissionCeiling: rec => bots.permissionCeiling(rec),
     botRequestQueue: (threadId, ref) => bots.requestQueue(threadId, ref),
     botTaskQueue: (threadId, ref) => bots.taskQueue(threadId, ref),
     ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id), pendingBotPrivacy: id => bots.pendingPrivateThread(id) }),

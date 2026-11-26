@@ -1,3 +1,4 @@
+import { raises } from './access.ts';
 import type { SpareWeek } from './spare-week.ts';
 import { HELD_EXTRA } from './schedule-check.ts';
 // The thread manager: owns threads, turns, the event log, approvals, idle
@@ -686,6 +687,7 @@ export type RunnerDeps = {
   /** Mike's standing instructions for every session (instructions.ts); '' for none. */
   standingInstructions?: () => string;
   botContext?: (rec: ThreadRecord) => string;
+  botPermissionCeiling?: (rec: ThreadRecord) => PermissionMode | undefined;
   botTaskQueue?: (threadId: string, task: NonNullable<BotInputRef['task']>) => 'allow' | 'wait' | 'drop';
   botRequestQueue?: (threadId: string, request: NonNullable<BotInputRef['request']>) => 'allow' | 'wait' | 'drop';
   botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
@@ -798,6 +800,7 @@ export class Runner {
   projects?: Projects;
   standingInstructions?: () => string;
   private botContext?: (rec: ThreadRecord) => string;
+  private readonly botPermissionCeiling?: RunnerDeps['botPermissionCeiling'];
   private botRequestQueue?: RunnerDeps['botRequestQueue'];
   private botTaskQueue?: RunnerDeps['botTaskQueue'];
   private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
@@ -932,6 +935,7 @@ export class Runner {
     this.projects = deps.projects;
     this.standingInstructions = deps.standingInstructions;
     this.botContext = deps.botContext;
+    this.botPermissionCeiling = deps.botPermissionCeiling;
     this.botRequestQueue = deps.botRequestQueue;
     this.botTaskQueue = deps.botTaskQueue;
     this.botFolderRefusal = deps.botFolderRefusal;
@@ -2134,8 +2138,16 @@ export class Runner {
     return { turnId: this.sendTo(st, text, images, opts) };
   }
 
+  private checkBotPermission(rec: ThreadRecord, mode: PermissionMode): void {
+    const limit = this.botPermissionCeiling?.(rec);
+    if (limit !== undefined && raises(mode, limit)) {
+      throw new RpcError(ErrorCode.notAllowed, 'This conversation cannot exceed its Bot’s permission limit.');
+    }
+  }
+
   sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
+    this.checkBotPermission(rec, rec.permissionMode);
     const privateBotId = this.privateBotOf(rec.id);
     if (privateBotId) this.checkBotFolder(rec.cwd, privateBotId);
     if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
@@ -2592,6 +2604,7 @@ export class Runner {
 
   async deliver(st: ThreadState, msg: QueuedSend, live?: LiveLook): Promise<void> {
     const { rec, rt } = st;
+    this.checkBotPermission(rec, rec.permissionMode);
     const privateBotId = this.privateBotOf(rec.id);
     if (privateBotId) this.checkBotFolder(rec.cwd, privateBotId);
     // Deleted (which leaves rt.turn as it was) or interrupted meanwhile.
@@ -4160,6 +4173,7 @@ export class Runner {
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
+    if (params.permissionMode !== undefined) this.checkBotPermission(rec, params.permissionMode);
     if (this.coordinators?.forThread(rec.id)?.state === 'active' && (params.archived || params.snoozedUntil)) {
       throw new RpcError(ErrorCode.badParams, 'Pause this project’s coordinator before archiving or hibernating its conversation.');
     }

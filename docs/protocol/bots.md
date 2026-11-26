@@ -207,3 +207,28 @@ still due to the original conversation in one write. An unavailable
 transcript leaves a preview. The Runner keeps completed history, checks the
 native queue, approvals, job state, handover and child requests on recovery,
 and marks interrupted tasks when nothing still owns them.
+
+## Teams and Chiefs
+
+The owner can add a team, change its membership and give a member a Chief
+role. `bots.teams.list` and `bots.teams.get` expose the saved roster and
+chronological changes. `bots.teams.create`, `bots.teams.update`,
+`bots.teams.setChief` and `bots.teams.setGrants` use the same Runner and
+workspace as the Bot profiles. Writes against an existing team take
+`expectedRevision`. A team may start with no Chief. Enabling the role takes
+a first Chief, and an active team must keep at least one. Replacing a Chief
+changes the roster in one write and removes the previous Chief's grants.
+A Private Bot cannot become a Chief or receive team management grants.
+
+Management grants are per Chief and per operation. `createBot` allows
+specific owner-saved templates with a model, login, folder and permission
+ceiling, up to an owner-set total. `updateOtherBot` allows named profile
+fields on specific Bots. `stopOtherBot` names the Bots it may stop. Group
+grants are saved independently for creation and updates. An empty grant
+set gives the Chief no management authority.
+
+`bots.settings.permissionCeiling` takes a Bot ID, expected revision and the
+highest native permission mode it can use. A narrower limit stops an active
+CLI with broader permissions and applies to queued input and future
+conversations. A higher limit takes effect when the owner changes the Thread setting. Failed updates keep
+the last saved limit and restore the affected Thread settings when safe.

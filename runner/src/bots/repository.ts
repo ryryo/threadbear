@@ -3,8 +3,10 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync } from '../fsutil.ts';
-import { EFFORT_LEVELS, PROVIDERS } from '../protocol.ts';
+import { EFFORT_LEVELS, PERMISSION_MODES, PROVIDERS } from '../protocol.ts';
 import { nameProblem } from './ported/mentions.js';
+import { setChief } from './chief-rules.ts';
+import { teamGrant, teamRecord, validateTeam, type Team, type TeamAudit, type TeamGrant } from './team-state.ts';
 
 const id = z.uuid();
 const revision = z.int().positive();
@@ -16,6 +18,8 @@ const bot = z.looseObject({
   id, name: z.string().min(1), role: z.string(), instructions: z.string(), revision,
   archivedAt: z.iso.datetime().optional(),
   modelBinding: modelBinding.optional(),
+  workFolder: z.string().min(1).optional(),
+  permissionCeiling: z.enum(PERMISSION_MODES).optional(),
   reviewEnabled: z.boolean().optional(),
   tidyEnabled: z.boolean().optional(),
   privacy: z.object({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
@@ -27,6 +31,7 @@ const pendingConversation = conversation.extend({ sessionId: id });
 const state = z.looseObject({
   workspaceId: id, ownerRunnerId: z.string().min(1), ownerEpoch: revision, formatVersion: z.literal(1),
   bots: z.array(bot), conversations: z.array(conversation), pendingConversations: z.array(pendingConversation),
+  teams: z.array(teamRecord).optional(),
   reviewOperations: z.array(z.object({ id: botOperationId, enabled: z.boolean(), setting: z.enum(['reviewEnabled', 'tidyEnabled']).optional(), bot })).optional(),
 });
 export type Bot = z.infer<typeof bot>;
@@ -57,6 +62,12 @@ function load(file: string, ownerRunnerId: string): State {
         [links.map(link => link.id), links.map(link => link.threadId), links.map(link => link.operationId)].some(keys => new Set(keys).size !== keys.length)) {
       throw new Error('Bot state contains inconsistent identities');
     }
+    const teams = current.teams ?? [];
+    const assigned = teams.flatMap(item => item.memberIds);
+    if (new Set(teams.map(team => team.id)).size !== teams.length || new Set(assigned).size !== assigned.length) {
+      throw new Error('Bot workspace has duplicate team identities or membership');
+    }
+    for (const team of teams) validateTeam(team, botIds);
     return current;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -96,20 +107,132 @@ export class BotRepository {
     return structuredClone(entry);
   }
 
+  teams(): Team[] {
+    return structuredClone(this.current.teams ?? []);
+  }
+
+  team(id: string): Team {
+    const row = this.current.teams?.find(team => team.id === id);
+    if (!row) throw new Error('Unknown Bot team');
+    return structuredClone(row);
+  }
+
+  teamIdForBot(botId: string): string {
+    return this.current.teams?.find(team => team.memberIds.includes(botId))?.id ?? this.workspaceId();
+  }
+
+  private checkMembership(teamId: string, memberIds: string[]): string[] {
+    const members = [...new Set(memberIds)];
+    for (const id of members) {
+      const bot = this.get(id);
+      if (bot.archivedAt) throw new Error('An archived Bot cannot join a team');
+      if (this.current.teams?.some(team => team.id !== teamId && team.memberIds.includes(id))) {
+        throw new Error('This Bot already belongs to another team');
+      }
+    }
+    return members;
+  }
+
+  private checkedTeam(id: string, expectedRevision: number): Team {
+    const current = this.team(id);
+    if (current.revision !== expectedRevision) throw new Error('The Bot team changed. Read its current settings.');
+    return current;
+  }
+
+  private saveTeam(next: Team, event: TeamAudit, bots = this.current.bots): Team {
+    const stored = teamRecord.parse({ ...next, audit: [...next.audit, event] });
+    validateTeam(stored, new Set(bots.map(bot => bot.id)));
+    const teams = this.current.teams ?? [];
+    const rows = teams.some(item => item.id === next.id) ?
+      teams.map(item => item.id === stored.id ? stored : item) : [...teams, stored];
+    this.save({ ...this.current, bots, teams: rows });
+    return structuredClone(stored);
+  }
+
+  createTeam(title: string, memberIds: string[], at: string): Team {
+    const id = randomUUID();
+    return this.saveTeam({
+      id, title: title.trim(), memberIds: this.checkMembership(id, memberIds), chiefIds: [],
+      chiefEnabled: false, revision: 1, grantByChief: {}, audit: [],
+    }, { at, kind: 'created' });
+  }
+
+  updateTeam(id: string, expectedRevision: number, patch: { title?: string; memberIds?: string[]; chiefEnabled?: boolean }, at: string): Team {
+    const current = this.checkedTeam(id, expectedRevision);
+    const memberIds = patch.memberIds ? this.checkMembership(id, patch.memberIds) : current.memberIds;
+    const chiefEnabled = patch.chiefEnabled ?? current.chiefEnabled;
+    if (chiefEnabled && !current.chiefIds.length) throw new Error('Choose a Chief when enabling this role');
+    const chiefIds = current.chiefIds.filter(chief => memberIds.includes(chief));
+    if (chiefEnabled && chiefIds.length !== current.chiefIds.length) {
+      throw new Error('Remove the current Chief role before removing a member');
+    }
+    const grantByChief = Object.fromEntries(Object.entries(current.grantByChief).filter(([chief]) => chiefIds.includes(chief)));
+    return this.saveTeam({
+      ...current, title: patch.title?.trim() ?? current.title, memberIds,
+      chiefIds, chiefEnabled, grantByChief, revision: current.revision + 1,
+    }, { at, kind: 'membership' });
+  }
+
+  setChief(id: string, expectedRevision: number, botId: string, change: { main: boolean; replace?: string; primary?: boolean }, at: string): Team {
+    const current = this.checkedTeam(id, expectedRevision);
+    if (!current.memberIds.includes(botId)) throw new Error('Only a Bot on this team can hold its Chief role');
+    const bot = this.get(botId);
+    const member = bot.archivedAt ? undefined : { id: bot.id, name: bot.name, private: Boolean(bot.privacy) };
+    const chiefIds = setChief(current.chiefIds, member, change.main, change);
+    const grantByChief = Object.fromEntries(Object.entries(current.grantByChief).filter(([chief]) => chiefIds.includes(chief)));
+    return this.saveTeam({
+      ...current, chiefIds, chiefEnabled: change.main || current.chiefEnabled,
+      grantByChief, revision: current.revision + 1,
+    }, { at, kind: 'chief', botId });
+  }
+
+  setTeamGrants(id: string, expectedRevision: number, chiefId: string, draft: TeamGrant, at: string): Team {
+    const current = this.checkedTeam(id, expectedRevision);
+    if (!current.chiefIds.includes(chiefId)) throw new Error('Only a Chief can hold team management grants');
+    const grants = teamGrant.parse(draft);
+    const targets = [...grants.updateOtherBot?.botIds ?? [], ...grants.stopOtherBot?.botIds ?? [], ...grants.createGroup?.memberBotIds ?? []];
+    for (const botId of targets) {
+      if (!current.memberIds.includes(botId) || this.get(botId).privacy) throw new Error('Management grants must refer to non-Private Bots on this team');
+    }
+    return this.saveTeam({ ...current, grantByChief: { ...current.grantByChief, [chiefId]: grants },
+      revision: current.revision + 1 }, { at, kind: 'grants', botId: chiefId });
+  }
+
   private available(name: string, except?: string): void {
     if (this.current.bots.some(entry => entry.id !== except && normalize(entry.name) === normalize(name))) {
       throw new Error(`A Bot named ${name} already exists`);
     }
   }
 
-  create({ name, role = '', instructions = '' }: Partial<BotSettings> & Pick<BotSettings, 'name'>): Bot {
-    // DS-Bot holds a name while its async session setup runs. This transaction
-    // commits the roster synchronously. Thread setup has a separate reservation.
+  private buildBot({ name, role = '', instructions = '' }: Partial<BotSettings> & Pick<BotSettings, 'name'>): Bot {
     name = cleanName(name);
     this.available(name);
-    const entry: Bot = { id: randomUUID(), name, role: role.trim().slice(0, 24).toWellFormed(), instructions: instructions.trim(), revision: 1 };
+    return { id: randomUUID(), name, role: role.trim().slice(0, 24).toWellFormed(), instructions: instructions.trim(), revision: 1 };
+  }
+
+  create(settings: Partial<BotSettings> & Pick<BotSettings, 'name'>): Bot {
+    // DS-Bot holds a name while its async session setup runs. This transaction
+    // commits the roster synchronously. Thread setup has a separate reservation.
+    const entry = this.buildBot(settings);
     this.save({ ...this.current, bots: [...this.current.bots, entry] });
     return structuredClone(entry);
+  }
+
+  createManagedBot(
+    teamId: string, expectedRevision: number, actorId: string, at: string,
+    settings: BotSettings & Required<Pick<Bot, 'modelBinding' | 'workFolder' | 'permissionCeiling'>>,
+  ): { bot: Bot; team: Team } {
+    const team = this.checkedTeam(teamId, expectedRevision);
+    const { modelBinding, workFolder, permissionCeiling } = settings;
+    const bot = { ...this.buildBot(settings), modelBinding, workFolder, permissionCeiling };
+    const next = this.saveTeam({ ...team, memberIds: [...team.memberIds, bot.id], revision: team.revision + 1 },
+      { at, kind: 'bot-created', actorId, botId: bot.id }, [...this.current.bots, bot]);
+    return { bot: structuredClone(bot), team: next };
+  }
+
+  noteManagedStop(teamId: string, expectedRevision: number, actorId: string, botId: string, reason: string, at: string): Team {
+    const team = this.checkedTeam(teamId, expectedRevision);
+    return this.saveTeam({ ...team, revision: team.revision + 1 }, { at, kind: 'bot-stopped', actorId, botId, reason });
   }
 
   private editable(id: string, expectedRevision: number): Bot {
@@ -126,6 +249,10 @@ export class BotRepository {
   }
 
   update(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
+    return this.saveBot(this.editProfile(id, expectedRevision, settings));
+  }
+
+  private editProfile(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
     const entry = this.editable(id, expectedRevision);
     if (settings.name !== undefined && settings.name !== entry.name) {
       entry.name = cleanName(settings.name);
@@ -133,10 +260,27 @@ export class BotRepository {
     }
     if (settings.role !== undefined) entry.role = settings.role.trim().slice(0, 24).toWellFormed();
     if (settings.instructions !== undefined) entry.instructions = settings.instructions.trim();
-    return this.saveBot(entry);
+    return entry;
+  }
+
+  updateManagedBot(
+    teamId: string, expectedTeamRevision: number, actorId: string, botId: string, expectedBotRevision: number,
+    settings: Partial<BotSettings>, at: string,
+  ): { bot: Bot; team: Team } {
+    const team = this.checkedTeam(teamId, expectedTeamRevision);
+    const bot = this.editProfile(botId, expectedBotRevision, settings);
+    bot.revision++;
+    const next = this.saveTeam({ ...team, revision: team.revision + 1 },
+      { at, kind: 'bot-updated', actorId, botId }, this.current.bots.map(item => item.id === botId ? bot : item));
+    return { bot: structuredClone(bot), team: next };
+  }
+
+  setPermissionCeiling(id: string, expectedRevision: number, ceiling: Bot['permissionCeiling']): Bot {
+    return this.saveBot({ ...this.editable(id, expectedRevision), permissionCeiling: ceiling });
   }
 
   archive(id: string, expectedRevision: number, at: string): Bot {
+    if (this.current.teams?.some(team => team.chiefIds.includes(id))) throw new Error('Remove the Chief role before archiving this Bot');
     return this.saveBot({ ...this.editable(id, expectedRevision), archivedAt: at });
   }
 
@@ -172,6 +316,7 @@ export class BotRepository {
     }
     const entry = this.editable(id, expectedRevision);
     if (entry.privacy) throw new Error('This Bot already has a private folder');
+    if (this.current.teams?.some(team => team.chiefIds.includes(id))) throw new Error('Remove the Chief role before making this Bot private');
     if (this.current.bots.some(bot => bot.privacy?.operationId === operationId)) throw new Error('The operation id already belongs to another Bot');
     if (this.current.pendingConversations.some(link => link.botId === id)) {
       throw new Error('Finish creating this Bot’s conversation before changing its privacy.');

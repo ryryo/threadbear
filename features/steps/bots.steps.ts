@@ -209,3 +209,37 @@ Then('I can return directly to its original conversation', async function (this:
   await this.until('the original Bot thread opens from the background task', d =>
     d.selection?.id === this.taskOrigin && d.transcript.state === 'loaded');
 });
+
+When('I create the Bot team {string}', async function (this: BotWorld, title: string) {
+  await click(this, 'Teams');
+  await click(this, 'New team');
+  await this.app.do({ cmd: 'type', here: true, text: title });
+  await click(this, 'Save');
+});
+
+When('I add {string} to the Bot team', async function (this: BotWorld, bot: string) {
+  await click(this, `Add ${bot}`);
+});
+
+When('I appoint {string} as the first Chief', async function (this: BotWorld, bot: string) {
+  await click(this, `Make ${bot} Chief`);
+});
+
+When('I replace the Chief with {string}', async function (this: BotWorld, bot: string) {
+  await click(this, `Replace Chief with ${bot}`);
+});
+
+Then('{string} is the Chief of the Bot team', async function (this: BotWorld, bot: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const deadline = Date.now() + 15_000;
+  await this.app.withManagedRunner(async client => {
+    while (Date.now() < deadline) {
+      const { teams } = await client.call<{ teams: { chiefIds: string[] }[] }>('bots.teams.list', {});
+      const { bots } = await client.call<{ bots: { id: string; name: string }[] }>('bots.list', {});
+      const chief = bots.find(row => row.name === bot);
+      if (teams.length === 1 && teams[0].chiefIds.length === 1 && teams[0].chiefIds[0] === chief?.id) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail(`No team had ${bot} as its Chief.`);
+  });
+});

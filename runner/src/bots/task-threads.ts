@@ -55,7 +55,9 @@ export class BotTaskThreads {
       openThread: (task, source, folder) => {
         const existing = runner.threads.get(task.threadId)?.rec;
         if (existing) { this.check(existing); return; }
-        const permissionMode = ceilingMode(lowerMode(task.ceiling ?? 'ask', runner.accessOf(source.threadId)));
+        const approved = lowerMode(task.ceiling ?? 'ask', runner.accessOf(source.threadId));
+      const cap = this.options.repo.get(task.botId).permissionCeiling ?? 'full';
+      const permissionMode = ceilingMode(lowerMode(approved, cap));
         runner.makeThread({
           text: '', title: task.title, cwd: folder, worktree: false, ...task.settings, permissionMode,
           startedBy: { kind: 'thread', threadId: source.threadId, label: 'Bot task' },

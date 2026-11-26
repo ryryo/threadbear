@@ -22,6 +22,7 @@ export class ScopedMemory {
     return [
       ...repo.list().map(bot => ({ kind: 'bot' as const, id: bot.id, title: bot.name, archived: Boolean(bot.archivedAt) })),
       { kind: 'team' as const, id: repo.workspaceId(), title: 'Workspace team', archived: false },
+      ...repo.teams().map(team => ({ kind: 'team' as const, id: team.id, title: team.title, archived: false })),
       ...(projects?.list({ archived: true }) ?? []).map(project => ({ kind: 'project' as const, id: project.id, title: project.title, archived: Boolean(project.archived) })),
     ];
   }
@@ -35,12 +36,12 @@ export class ScopedMemory {
     switch (kind) {
       case 'bot': {
         const bot = repo.get(id);
-        scope = { kind, id, private: Boolean(bot.privacy), teamId: repo.workspaceId() };
+        scope = { kind, id, private: Boolean(bot.privacy), teamId: repo.teamIdForBot(bot.id) };
         archived = Boolean(bot.archivedAt);
         break;
       }
       case 'team':
-        if (repo.workspaceId() !== id) throw new Error('Unknown Bot team');
+        if (repo.workspaceId() !== id) repo.team(id);
         scope = { kind, id };
         break;
       case 'project': {

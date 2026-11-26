@@ -112,6 +112,10 @@ export class BotRequests {
     if (current.conversationId !== row.sourceConversationId || current.privateBotId !== row.sourcePrivateBotId) {
       throw new RpcError(ErrorCode.notAllowed, 'The source changed while this request was being approved.');
     }
+    if (actor.kind === 'bot' && row.sourceBotId &&
+        this.options.repo.teamIdForBot(row.sourceBotId) !== this.options.repo.teamIdForBot(row.targetBotId)) {
+      throw new RpcError(ErrorCode.notAllowed, 'A Bot can only delegate to its own team.');
+    }
     const messageId = `bot-input:${row.id}`;
     const { turnId } = runner.send(row.targetThreadId, text, [], {
       ceiling: row.ceiling ?? 'ask', origin: 'runner', queue: row.when === 'queue', messageId,
@@ -162,7 +166,10 @@ export class BotRequests {
     const { runner } = this.options;
     const before = runner.accessOf(threadId);
     const authorizer: AuthorizeRequest = async (_actor, target, text) => {
-      if (target.privateBotId && target.privateBotId !== source.privateBotId) throw new RpcError(ErrorCode.threadNotFound, 'The recipient Bot is unavailable.');
+      if ((target.privateBotId && target.privateBotId !== source.privateBotId) ||
+          this.options.repo.teamIdForBot(target.botId) !== this.options.repo.teamIdForBot(source.botId)) {
+        throw new RpcError(ErrorCode.threadNotFound, 'The recipient Bot is unavailable.');
+      }
       const ceiling = await authorize(target, text);
       return { ceiling, returnCeiling: ceilingMode(lowerMode(lowerMode(before, runner.accessOf(threadId)), runner.accessOf(target.threadId))) };
     };

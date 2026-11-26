@@ -2091,6 +2091,11 @@ You can send more instructions, stop the task, read the saved result or open
 the original conversation from the same list. Retrying keeps the previous
 attempt available.
 
+Open **Teams** to group Bots, appoint a Chief and allow specific management
+actions. In a Bot’s **Settings**, choose its permission limit. Lowering the
+limit stops a conversation that is still running with broader access. A
+higher limit lets you choose broader access in that conversation later.
+
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.

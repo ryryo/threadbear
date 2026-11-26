@@ -50,3 +50,15 @@ Feature: Bot workspace
     Then I see the full saved request result
     And I can open the background task's own thread
     And I can return directly to its original conversation
+
+  @bots.teams @bots @swift-pending
+  Scenario: The owner can replace the Chief of a Bot team
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Editor" from the Bots page
+    And I create a Bot called "Writer" from the Bots page
+    And I create the Bot team "Editorial"
+    And I add "Editor" to the Bot team
+    And I add "Writer" to the Bot team
+    And I appoint "Editor" as the first Chief
+    And I replace the Chief with "Writer"
+    Then "Writer" is the Chief of the Bot team

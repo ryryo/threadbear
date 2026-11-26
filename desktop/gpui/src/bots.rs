@@ -17,7 +17,9 @@ use threadbear_core::inbox::ThreadSummary;
 use threadbear_core::tr;
 
 mod tasks;
+mod teams;
 use tasks::TaskCard;
+use teams::TeamCard;
 
 const EXPERIMENT: &str = "nativeBots";
 
@@ -31,6 +33,7 @@ struct Profile {
     revision: u64,
     archived_at: Option<String>,
     model_binding: Option<ModelBinding>,
+    permission_ceiling: Option<String>,
     review_enabled: Option<bool>,
     tidy_enabled: Option<bool>,
     privacy: Option<Privacy>,
@@ -209,6 +212,9 @@ enum Edit {
     Privacy,
     Review(String, usize),
     RequestRerun(String, u64),
+    NewTeam,
+    RenameTeam(String, u64),
+    GrantChief(String, u64, String),
     TaskStart,
     TaskWrite(String),
     TaskRetry(String, u64),
@@ -224,6 +230,8 @@ impl Edit {
             Self::Privacy => tr!("Dedicated work folder"),
             Self::Review(_, _) => tr!("Proposed note"),
             Self::RequestRerun(_, _) => tr!("Instructions for the new run"),
+            Self::NewTeam | Self::RenameTeam(..) => "Team name",
+            Self::GrantChief(..) => "Management grants",
             Self::TaskStart => tr!("Task title on the first line, then the brief"),
             Self::TaskWrite(_) => tr!("Instruction for the task"),
             Self::TaskRetry(_, _) => tr!("Brief for the new task run"),
@@ -245,6 +253,10 @@ pub(crate) struct BotsState {
     available: bool,
     requests_available: bool,
     tasks_available: bool,
+    teams_available: bool,
+    show_teams: bool,
+    teams: Vec<TeamCard>,
+    selected_team: Option<String>,
     reason: Option<String>,
     list: Vec<Profile>,
     selected: Option<String>,
@@ -289,6 +301,7 @@ impl Threadbear {
                 this.bots.available = value["available"].as_bool().unwrap_or(false);
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
+                this.bots.teams_available = value["teams"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
                     this.load_bot_list(cx);
@@ -339,6 +352,7 @@ impl Threadbear {
         if self.bots.busy || self.bots.editor.is_some() {
             return;
         }
+        self.bots.show_teams = false;
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
         self.bots.source = source;
@@ -648,8 +662,16 @@ impl Threadbear {
                 bot_button("new-bot", tr!("New Bot"), disabled)
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
+                        this.bots.show_teams = false;
                         this.edit_bot(Edit::New, String::new(), window, cx);
                     })),
+            );
+        }
+        if self.bots.teams_available {
+            list = list.child(
+                bot_button("bot-teams", "Teams", disabled)
+                    .when(self.bots.show_teams, |button| button.primary())
+                    .on_click(cx.listener(|this, _, _, cx| this.open_bot_teams(cx))),
             );
         }
         for bot in &self.bots.list {
@@ -698,6 +720,9 @@ impl Threadbear {
                     tr!("Checking whether Bots are available on this Runner…").into()
                 }))
                 .into_any_element();
+        }
+        if self.bots.show_teams && self.bots.teams_available {
+            return page.child(self.render_bot_teams(cx)).into_any_element();
         }
         let editor = self.bots.editor.as_ref();
         if let Some(editor) = editor.filter(|editor| matches!(editor.kind, Edit::New)) {
@@ -1109,6 +1134,9 @@ impl Threadbear {
             );
         }
         section = section.child(self.render_bot_model(bot, disabled, cx));
+        if self.bots.teams_available {
+            section = section.child(self.render_bot_permission_limit(bot, disabled, cx));
+        }
         if let Some(privacy) = &bot.privacy {
             let title = if privacy.moving.is_some() {
                 tr!("Moving to a private work folder")
@@ -1854,6 +1882,7 @@ impl Threadbear {
 enum After {
     Requests,
     Tasks,
+    Teams,
     Profile,
     Conversation,
     Memory,
@@ -1871,7 +1900,7 @@ impl Threadbear {
         if self.bots.busy || self.bots.editor.is_some() {
             return;
         }
-        let rows = if matches!(kind, Edit::Instructions) {
+        let rows = if matches!(kind, Edit::Instructions | Edit::GrantChief(..)) {
             (4, 14)
         } else {
             (2, 6)
@@ -1915,6 +1944,29 @@ impl Threadbear {
                 json!({ "botId": id, "threadId": self.bots.source, "reportId": report_id, "index": index, "text": text }),
                 After::Reviews,
             ),
+            Edit::NewTeam => (
+                "bots.teams.create",
+                json!({ "title": text, "memberIds": [] }),
+                After::Teams,
+            ),
+            Edit::RenameTeam(team_id, revision) => (
+                "bots.teams.update",
+                json!({ "teamId": team_id, "expectedRevision": revision, "title": text }),
+                After::Teams,
+            ),
+            Edit::GrantChief(team_id, revision, bot_id) => {
+                let Ok(grant) = serde_json::from_str::<Value>(&text) else {
+                    self.bots.error =
+                        Some("Enter a JSON object with the permissions for this Chief.".into());
+                    cx.notify();
+                    return;
+                };
+                (
+                    "bots.teams.setGrants",
+                    json!({ "teamId": team_id, "expectedRevision": revision, "botId": bot_id, "grant": grant }),
+                    After::Teams,
+                )
+            }
             Edit::TaskStart => {
                 let Some((title, brief)) = text.split_once('\n') else {
                     self.bots.error = Some(
@@ -2119,6 +2171,11 @@ impl Threadbear {
             After::Memory => {
                 self.bots.editor = None;
                 self.load_bot_memory(false, cx);
+            }
+            After::Teams => {
+                self.bots.editor = None;
+                self.bots.selected_team = value["team"]["id"].as_str().map(str::to_owned);
+                self.load_bot_teams(cx);
             }
             After::Tasks => {
                 self.bots.editor = None;

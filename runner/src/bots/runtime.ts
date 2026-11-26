@@ -1,11 +1,13 @@
 import { join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import type { Clock } from '../clock.ts';
-import { ErrorCode, RpcError } from '../protocol.ts';
+import { ErrorCode, RpcError, type PermissionMode } from '../protocol.ts';
+import { lowerMode, raises } from '../access.ts';
+import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -13,6 +15,8 @@ import { BotReviews, type BotReviewOptions } from './reviews.ts';
 import { botMethods, botRequestMethods } from './rpc.ts';
 import { BotRequests } from './request-service.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
+import { BotTeams } from './teams.ts';
+import { teamMethods } from './team-rpc.ts';
 import { TaskJournal } from './task-journal.ts';
 import { BotTaskThreads } from './task-threads.ts';
 import { botTaskMethods } from './task-rpc.ts';
@@ -43,6 +47,8 @@ export class BotRuntime {
   private reviewService?: BotReviews;
   private requestService?: BotRequests;
   private taskService?: BotTaskThreads;
+  private teamService?: BotTeams;
+  private permissionChanges?: PermissionChanges;
   private readonly taskWake = new Set<string>();
   private requestListener?: () => void;
   private readonly requestWake = new Set<string>();
@@ -50,10 +56,14 @@ export class BotRuntime {
   private reviewDeps?: ReviewDeps;
   private stopListening?: () => void;
 
-  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat(), () => this.requestsAvailable()), botRequestMethods(() => this.requests()), botTaskMethods(() => this.tasks()), {
+  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat(), () => this.requestsAvailable()), botRequestMethods(() => this.requests()), botTaskMethods(() => this.tasks()),
+    teamMethods(() => ({
+      repo: this.getWorkspace().repo, teams: this.teams(), now: () => this.options.runner().isoNow(),
+      protect: () => this.protectTeamData(), setCeiling: (bot, rev, cap) => this.setBotCeiling(bot, rev, cap),
+    })), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), reason };
+      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), reason };
     },
   });
 
@@ -81,6 +91,88 @@ export class BotRuntime {
         protectBotData(home, BOT_REQUEST_FORMAT);
       },
       warn: () => runner().notice('error', 'A Bot request could not be reconciled.'),
+    });
+  }
+
+  permissionCeiling(rec: ThreadRecord): PermissionMode | undefined {
+    if (!rec.botLink || rec.copied) return undefined;
+    return this.repo().get(rec.botLink.botId).permissionCeiling;
+  }
+
+  private async setBotCeiling(botId: string, revision: number, ceiling: PermissionMode) {
+    if (!this.teamsAvailable() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.notAllowed, 'Bot permission limits need the updated Runner supervisor to finish handing over.');
+    const runner = this.options.runner();
+    const { repo } = this.getWorkspace();
+    const threads = (id: string) => [...runner.threads.values()]
+      .filter(st => st.rec.botLink?.botId === id && !st.rec.copied && !st.rt.deleted)
+      .map(st => st.rec.id);
+    this.permissionChanges ??= new PermissionChanges({
+      read: id => {
+        const current = repo.get(id);
+        return { revision: current.revision, ceiling: current.permissionCeiling ?? 'full' };
+      },
+      threads,
+      apply: async (threadId, wanted) => {
+        const mode = wanted();
+        if (mode !== undefined) this.narrowBotThread(threadId, mode);
+      },
+      snapshot: id => {
+        const st = runner.threads.get(id);
+        if (!st) return undefined;
+        const { permissionMode, modeBeforePlan } = st.rec;
+        return () => {
+          if (st.rt.deleted) return;
+          runner.update({ threadId: id, permissionMode });
+          st.rec.modeBeforePlan = modeBeforePlan;
+          runner.store.save(st.rec);
+        };
+      },
+      commit: (id, expected, mode) => {
+        for (const thread of threads(id)) this.narrowBotThread(thread, mode);
+        this.protectTeamData();
+        repo.setPermissionCeiling(id, expected, mode);
+      },
+      warn: () => runner.notice('warning', 'The Runner could not restore a Bot conversation’s previous permission.'),
+    });
+    await this.permissionChanges.set(botId, revision, ceiling);
+    return { bot: repo.get(botId) };
+  }
+
+  private narrowBotThread(threadId: string, cap: PermissionMode): void {
+    const runner = this.options.runner();
+    const st = runner.threads.get(threadId);
+    if (!st || st.rt.deleted) return;
+    if (raises(st.rec.permissionMode, cap)) {
+      runner.update({ threadId, permissionMode: cap });
+      try { runner.interrupt(threadId, { byMike: true }); }
+      finally { st.rt.session?.kill(); }
+    }
+    if (st.rec.modeBeforePlan !== undefined) st.rec.modeBeforePlan = lowerMode(st.rec.modeBeforePlan, cap);
+    runner.store.save(st.rec);
+  }
+
+  teamsAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_TEAM_FORMAT);
+  }
+
+  private protectTeamData(): void {
+    if (!this.teamsAvailable() || !this.options.canChangePrivacy?.()) {
+      throw new RpcError(ErrorCode.busy, 'Team changes need the updated Runner supervisor to finish handing over.');
+    }
+    protectBotData(this.options.home, BOT_TEAM_FORMAT);
+  }
+
+  teams(): BotTeams {
+    if (!this.teamsAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot teams need an updated Runner supervisor.');
+    const runner = this.options.runner();
+    return this.teamService ??= new BotTeams({
+      repo: this.getWorkspace().repo, runner, protect: () => this.protectTeamData(),
+      redact: text => this.reviewDeps?.redact(text) ?? 'Team management request',
+      tasks: async id => {
+        const tasks = this.tasks();
+        const result = await tasks.cancel(id, tasks.get(id).revision);
+        if (!result.saved) throw new Error('The task stopped but the Runner could not save that stop.');
+      },
     });
   }
 
