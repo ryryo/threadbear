@@ -89,6 +89,22 @@ test('a fresh Bot conversation hears the shared note and a resumed CLI hears onl
   resumed.runner.send(b.threadId, '最後の記事');
   await tick();
   assert.equal(resumed.adapter.last.sent.at(-1)?.text, '最後の記事');
+  assert.deepEqual(resumed.events(b.threadId).filter(event => event.type === 'user.message').map(event => event.text), ['次の記事も', '最後の記事']);
+  resumed.adapter.last.result('completed');
+  await tick();
+
+  service!.remember(editor.id, a.threadId, '敬体で書く');
+  const session = resumed.adapter.last;
+  const send = session.send.bind(session);
+  session.send = () => { throw new Error('test send failure'); };
+  const thread = resumed.runner.threads.get(b.threadId)!;
+  const before = thread.rec.botContextTold;
+  assert.throws(() => resumed.runner.sendWithInstructionsNews(thread, { id: 'failed-send', text: '再試行', images: [] }), /test send failure/);
+  assert.equal(thread.rec.botContextTold, before);
+  session.send = send;
+  resumed.runner.send(b.threadId, '次の記事');
+  await tick();
+  assert.match(session.sent.at(-1)?.text ?? '', /敬体で書く[\s\S]*次の記事/);
 });
 
 test('the owner can create and read Bot conversations over RPC and a Full thread key cannot', async t => {
