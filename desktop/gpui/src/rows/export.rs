@@ -8,6 +8,7 @@ use threadbear_core::reducer::{
     cost_text, duration, ApprovalDecision, DiffHunk, Event, EventsPage, PlanCardState, PlanStatus,
     Row, RowContent, RowKind, TranscriptModel, TurnOutcome,
 };
+use threadbear_core::{tr, trf};
 
 /// The row's own content, for "Copy message". None for rows with nothing to
 /// copy (the working line, the background line).
@@ -200,7 +201,7 @@ pub(crate) enum RowMenuAction {
 pub(crate) fn row_menu(row: &Row, open: bool) -> Vec<(&'static str, RowMenuAction)> {
     let mut items = vec![];
     if message_text(row).is_some() {
-        items.push(("Copy message", RowMenuAction::CopyMessage));
+        items.push((tr!("Copy message"), RowMenuAction::CopyMessage));
         let folding_review =
             matches!(&row.content, RowContent::LabReview(review) if review.folds());
         if folding_review
@@ -210,13 +211,16 @@ pub(crate) fn row_menu(row: &Row, open: bool) -> Vec<(&'static str, RowMenuActio
             )
         {
             items.push((
-                if open { "Collapse" } else { "Expand" },
+                if open { tr!("Collapse") } else { tr!("Expand") },
                 RowMenuAction::Toggle,
             ));
         }
     }
-    items.push(("Copy transcript as Markdown", RowMenuAction::CopyTranscript));
-    items.push(("Copy debug info", RowMenuAction::CopyDebugInfo));
+    items.push((
+        tr!("Copy transcript as Markdown"),
+        RowMenuAction::CopyTranscript,
+    ));
+    items.push((tr!("Copy debug info"), RowMenuAction::CopyDebugInfo));
     items
 }
 
@@ -309,7 +313,11 @@ impl ThreadPane {
                 RowMenuAction::CopyDebugInfo => "ladybug",
             };
             let busy = copying && action == RowMenuAction::CopyTranscript;
-            let title = if busy { "Copying transcript…" } else { title };
+            let title = if busy {
+                tr!("Copying transcript…")
+            } else {
+                title
+            };
             let (row, pane) = (row.clone(), pane.clone());
             menu = menu.item(
                 PopupMenuItem::new(title)
@@ -423,7 +431,7 @@ impl ThreadPane {
             // From the app's own update (a menu), so not from inside this one.
             if !app
                 .update(cx, |app, cx| {
-                    app.begin_note(&key, "Copying the transcript…", cx)
+                    app.begin_note(&key, tr!("Copying the transcript…"), cx)
                 })
                 .unwrap_or(true)
             {
@@ -447,7 +455,8 @@ impl ThreadPane {
                 };
                 let Some(page) = page else {
                     failed = Some(
-                        "The runner sent a page of the thread this app couldn't read.".to_owned(),
+                        tr!("The runner sent a page of the thread this app couldn't read.")
+                            .to_owned(),
                     );
                     break;
                 };
@@ -474,8 +483,10 @@ impl ThreadPane {
             app.update(cx, |app, cx| {
                 app.end_note(&key, cx);
                 match failed {
-                    None => app.flash_done("Transcript copied", cx),
-                    Some(e) => app.show_error(format!("Couldn't copy the transcript: {e}"), cx),
+                    None => app.flash_done(tr!("Transcript copied"), cx),
+                    Some(e) => {
+                        app.show_error(trf!("Couldn't copy the transcript: {error}", error = e), cx)
+                    }
                 }
             })
             .ok();

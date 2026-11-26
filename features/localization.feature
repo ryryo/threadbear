@@ -47,6 +47,13 @@ Feature: Desktop language
     And the transcript shows a reply starting "Done"
 
   @settings.language @swift-pending
+  Scenario: A Japanese reply menu copies the original message
+    When I choose Japanese as the desktop language
+    And I open the thread "Make uploads resume after a crash"
+    And I choose "メッセージをコピー" from the menu of the reply starting "Uploads now pick up"
+    Then the clipboard holds "Uploads now pick up where they stopped"
+
+  @settings.language @swift-pending
   Scenario: Japanese inbox actions still move the thread to the right section
     When I choose Japanese as the desktop language
     Then the "受信トレイ" section lists "Morning brief"
