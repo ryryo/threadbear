@@ -687,6 +687,7 @@ export type RunnerDeps = {
   standingInstructions?: () => string;
   botContext?: (rec: ThreadRecord) => string;
   botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
+  pendingBotPrivacy?: (threadId: string) => string | undefined;
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
@@ -796,6 +797,7 @@ export class Runner {
   standingInstructions?: () => string;
   private botContext?: (rec: ThreadRecord) => string;
   private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
+  private pendingBotPrivacy?: (threadId: string) => string | undefined;
   coordinators?: Coordinators;
   activity = new Set<(a: ThreadActivity) => void>();
   patchCache: PatchCache = new Map();
@@ -927,6 +929,7 @@ export class Runner {
     this.standingInstructions = deps.standingInstructions;
     this.botContext = deps.botContext;
     this.botFolderRefusal = deps.botFolderRefusal;
+    this.pendingBotPrivacy = deps.pendingBotPrivacy;
     this.appRestartAsked = deps.appRestartAsked;
     this.awaitingAppRestart = deps.awaitingAppRestart;
     this.appRestartWant = deps.appRestartWant;
@@ -1913,7 +1916,7 @@ export class Runner {
   }
 
   privateBotOf(threadId: string): string | undefined {
-    return this.threads.get(threadId)?.rec.privateBotId;
+    return this.threads.get(threadId)?.rec.privateBotId ?? this.pendingBotPrivacy?.(threadId);
   }
 
   checkBotFolder(cwd: string, privateBotId?: string): void {
@@ -2127,7 +2130,8 @@ export class Runner {
 
   sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
-    if (rec.privateBotId) this.checkBotFolder(rec.cwd, rec.privateBotId);
+    const privateBotId = this.privateBotOf(rec.id);
+    if (privateBotId) this.checkBotFolder(rec.cwd, privateBotId);
     if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
     // Written with less access than it has now: Mike's to read, not its
     // agent's (runner/ceiling.ts). Checked again as it leaves the queue.
@@ -2549,7 +2553,8 @@ export class Runner {
 
   async deliver(st: ThreadState, msg: QueuedSend, live?: LiveLook): Promise<void> {
     const { rec, rt } = st;
-    if (rec.privateBotId) this.checkBotFolder(rec.cwd, rec.privateBotId);
+    const privateBotId = this.privateBotOf(rec.id);
+    if (privateBotId) this.checkBotFolder(rec.cwd, privateBotId);
     // Deleted (which leaves rt.turn as it was) or interrupted meanwhile.
     const gone = () => rt.deleted || rt.turn?.turnId !== msg.turnId;
     // Looks at the folder's Claude Code settings on the trust worker, as a
@@ -4112,6 +4117,7 @@ export class Runner {
     noted?: boolean;
     // Why, for that line, when the caller knows and hasn't said it.
     why?: string;
+    settingBotPrivacy?: true;
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
@@ -4160,7 +4166,7 @@ export class Runner {
     }
     if (params.cwd !== undefined && !params.cwd.trim()) throw new RpcError(ErrorCode.badParams, 'cwd must not be blank');
     const newCwd = params.cwd !== undefined ? path.resolve(expandHome(params.cwd.trim())) : undefined;
-    if (newCwd !== undefined) this.checkBotFolder(newCwd, rec.privateBotId);
+    if (newCwd !== undefined && !params.settingBotPrivacy) this.checkBotFolder(newCwd, this.privateBotOf(rec.id));
     if (newCwd !== undefined && !isDirectory(newCwd)) throw new RpcError(ErrorCode.badParams, `Folder not found: ${newCwd}`);
     const newAccount = toAccountId !== undefined ? this.accounts.get(toAccountId) : undefined;
     if (toAccountId !== undefined && !newAccount) {
@@ -5111,10 +5117,11 @@ export class Runner {
     // Asks the agent said wait for its shell jobs count them too.
     const afterJobs = this.asksHeld(st);
     const unfinished = running || (this.coordinators?.forThread(rec.id) ? afterJobs : agentsStillWorking(background, afterJobs));
+    const privateBotId = rec.privateBotId ?? this.pendingBotPrivacy?.(rec.id);
     const s: ThreadSummary = {
       id: rec.id,
       ...(rec.botLink ? { botLink: rec.botLink } : {}),
-      ...(rec.privateBotId ? { privateBotId: rec.privateBotId } : {}),
+      ...(privateBotId ? { privateBotId } : {}),
       title: rec.title,
       cwd: rec.cwd,
       accountId: rec.accountId,
@@ -5246,7 +5253,7 @@ export class Runner {
   share(threadId: string, args: { access: ShareAccess; newLink?: boolean }): { thread: ThreadSummary } {
     const st = this.mustGet(threadId);
     if (args.access !== 'off' && args.access !== 'link') throw new RpcError(ErrorCode.badParams, 'access is "off" or "link"');
-    if (st.rec.privateBotId && args.access === 'link') throw new RpcError(ErrorCode.notAllowed, 'A private Bot conversation cannot have a shared link.');
+    if (this.privateBotOf(threadId) && args.access === 'link') throw new RpcError(ErrorCode.notAllowed, 'A private Bot conversation cannot have a shared link.');
     const slug = !st.rec.share || args.newLink ? crypto.randomBytes(16).toString('base64url') : st.rec.share.slug;
     st.rec.share = { access: args.access, slug, updatedAt: this.isoNow() };
     this.markDirty(st);

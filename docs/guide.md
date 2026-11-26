@@ -2077,10 +2077,10 @@ from History while the affected notes are unchanged.
 conversation. Turn it on after choosing the Bot's model and login. You can
 accept, edit or reject a proposed change and review the same messages again.
 
-Before a Bot's first conversation, **Set private work folder** gives it a
-dedicated folder. Its conversations stay on their owning Runner and the app
-keeps them out of shared links, agent search and phone sync. Processes on the
-same OS account still have that account's filesystem access.
+**Set private work folder** gives a Bot a dedicated folder. Stop any existing
+conversations before using it. The Runner withdraws their shared copies and
+keeps Private conversations out of shared links, agent search and phone sync.
+Processes on the same OS account still have that account's filesystem access.
 
 ## Connectors
 <!-- slug: connectors -->

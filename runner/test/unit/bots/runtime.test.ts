@@ -51,7 +51,7 @@ test('Bot Threads cannot be packed for moving, and a copy retains its read-only 
   assert.throws(() => runtime.context(copied), /copy/i);
 });
 
-test('Private is guarded before the first conversation and children keep the dedicated folder', () => {
+test('Private is guarded before the first conversation and children keep the dedicated folder', async () => {
   const home = tmpDir();
   const folder = realpathSync.native(tmpDir());
   const marker = join(home, 'bots-format.json');
@@ -66,16 +66,16 @@ test('Private is guarded before the first conversation and children keep the ded
   });
   const { bot } = runtime.methods['bots.create']({ name: 'Private Writer' }) as { bot: { id: string; revision: number } };
   const params = { botId: bot.id, expectedRevision: bot.revision, folder, operationId: randomUUID() };
-  assert.throws(() => runtime.methods['bots.settings.privacy'](params), /finish handing over/);
+  await assert.rejects(Promise.resolve(runtime.methods['bots.settings.privacy'](params)), /finish handing over/);
   assert.equal(readFileSync(marker, 'utf8').trim(), '1');
   canChangePrivacy = true;
-  assert.throws(() => runtime.methods['bots.settings.privacy']({ ...params, folder: h.runner.cfg.defaults.cwd }), /dedicated Bot folder/);
-  const changed = runtime.methods['bots.settings.privacy'](params);
+  await assert.rejects(Promise.resolve(runtime.methods['bots.settings.privacy']({ ...params, folder: h.runner.cfg.defaults.cwd })), /dedicated Bot folder/);
+  const changed = await runtime.methods['bots.settings.privacy'](params);
   assert.equal(readFileSync(marker, 'utf8').trim(), '2');
   const { thread } = runtime.methods['bots.conversations.create']({ botId: bot.id, operationId: 'p' }) as { thread: { id: string; privateBotId: string; cwd: string } };
   assert.equal(thread.privateBotId, bot.id);
   assert.equal(thread.cwd, folder);
-  assert.deepEqual(runtime.methods['bots.settings.privacy'](params), changed);
+  assert.deepEqual(await runtime.methods['bots.settings.privacy'](params), changed);
   const child = h.runner.makeThread({ text: '', startedBy: { kind: 'thread', label: 'Agent', threadId: thread.id } }).st.rec;
   assert.equal(child.privateBotId, bot.id);
   assert.equal(child.cwd, folder);
@@ -86,4 +86,46 @@ test('Private is guarded before the first conversation and children keep the ded
   enabled = false;
   assert.equal(h.store.load(thread.id)?.privateBotId, bot.id);
   assert.throws(() => h.runner.makeThread({ text: '', cwd: folder }), /overlaps a private Bot/);
+});
+
+test('existing Bot conversations stay locally protected across failure and resume withdrawal after restart', async () => {
+  const home = tmpDir();
+  const folder = realpathSync.native(tmpDir());
+  let runtime: BotRuntime;
+  let fail = true;
+  let masked: string[] = [];
+  const make = () => makeHarness(home, {}, {
+    botContext: rec => runtime.context(rec), botFolderRefusal: (cwd, id) => runtime.folderRefusal(cwd, id),
+    pendingBotPrivacy: id => runtime.pendingPrivateThread(id),
+  });
+  const open = (runner: ReturnType<typeof make>['runner']) => new BotRuntime({
+    home, runner: () => runner, owner: () => 'local', enabled: () => true, guarded: () => true, owns: () => true,
+    canChangePrivacy: () => true,
+    protectPrivacy: () => { writeFileSync(join(home, 'bots-format.json'), '2\n'); },
+    withdrawShared: async ids => {
+      masked = [...ids];
+      assert.ok(ids.every(id => runner.privateBotOf(id)));
+      if (fail) throw new Error('The sync fixture is offline');
+    },
+  });
+  const h = make();
+  runtime = open(h.runner);
+  const { bot } = runtime.methods['bots.create']({ name: 'Writer' }) as { bot: { id: string; revision: number } };
+  const { thread } = runtime.methods['bots.conversations.create']({ botId: bot.id, operationId: 'old-chat' }) as { thread: { id: string } };
+  h.runner.share(thread.id, { access: 'link' });
+  const child = h.runner.makeThread({ text: '', startedBy: { kind: 'thread', label: 'Agent', threadId: thread.id } }).st.rec;
+  const params = { botId: bot.id, expectedRevision: bot.revision, folder, operationId: randomUUID() };
+  await assert.rejects(Promise.resolve(runtime.methods['bots.settings.privacy'](params)), /fixture is offline/);
+  assert.deepEqual(new Set(masked), new Set([thread.id, child.id]));
+  assert.equal(h.store.load(thread.id)?.share, undefined);
+  assert.throws(() => h.runner.send(thread.id, 'Wait for the move'), /Finish moving/);
+  assert.throws(() => runtime.methods['bots.conversations.create']({ botId: bot.id, operationId: 'new-chat' }), /Finish moving/);
+  const restarted = h.restart();
+  runtime = open(restarted.runner);
+  fail = false;
+  const complete = await runtime.methods['bots.settings.privacy'](params) as { bot: { privacy: { folder: string; moving?: string[] } } };
+  assert.equal(complete.bot.privacy.moving, undefined);
+  assert.equal(complete.bot.privacy.folder, folder);
+  assert.equal(restarted.store.load(thread.id)?.privateBotId, bot.id);
+  assert.equal(restarted.store.load(child.id)?.cwd, folder);
 });

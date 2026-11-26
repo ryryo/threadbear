@@ -100,11 +100,15 @@ change those rules. Private protects these Runner interfaces. It does not
 provide filesystem isolation from another process using the same OS account.
 
 `bots.settings.privacy` takes `botId`, `expectedRevision`, `operationId` and an
-existing dedicated `folder`. The Runner can make a Bot Private before any of
-its conversations have been reserved. It rejects overlapping work folders,
+existing dedicated `folder`. It rejects overlapping work folders,
 including filesystem aliases. The Runner writes the new data format marker
 before saving Private state. New conversations and their child threads keep
 the Private identity on disk from creation, including after archive.
+Converting a Bot with existing conversations requires all affected threads
+to be stopped. It records a pending conversion and blocks further sync and
+execution before changing the folders. It reports success after the old
+mirror rows and their sidebar entries have been withdrawn. The same operation
+can resume a pending conversion after an interruption or a failed withdrawal.
 An agent's `send_message` from a Private Bot to a local ordinary thread
 requires a one-use approval card. The card carries the destination thread
 ID, the entire text and its SHA-256 hash. Approval is local and owner-only.

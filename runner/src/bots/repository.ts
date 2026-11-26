@@ -17,7 +17,7 @@ const bot = z.looseObject({
   archivedAt: z.iso.datetime().optional(),
   modelBinding: modelBinding.optional(),
   reviewEnabled: z.boolean().optional(),
-  privacy: z.object({ folder: z.string().min(1), operationId: botOperationId }).optional(),
+  privacy: z.object({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
 });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
@@ -163,7 +163,7 @@ export class BotRepository {
     return structuredClone(updated);
   }
 
-  setPrivate(id: string, expectedRevision: number, folder: string, operationId: string, authorize: () => void): Bot {
+  setPrivate(id: string, expectedRevision: number, folder: string, operationId: string, moving: string[], authorize: () => void): Bot {
     const current = this.get(id);
     if (current.privacy?.operationId === operationId) {
       if (current.privacy.folder !== folder) throw new Error('The operation id already names a different private folder');
@@ -172,11 +172,23 @@ export class BotRepository {
     const entry = this.editable(id, expectedRevision);
     if (entry.privacy) throw new Error('This Bot already has a private folder');
     if (this.current.bots.some(bot => bot.privacy?.operationId === operationId)) throw new Error('The operation id already belongs to another Bot');
-    if ([...this.current.conversations, ...this.current.pendingConversations].some(link => link.botId === id)) {
-      throw new Error('This Bot already has conversations. Its shared history must be removed before it can become private.');
+    if (this.current.pendingConversations.some(link => link.botId === id)) {
+      throw new Error('Finish creating this Bot’s conversation before changing its privacy.');
     }
     authorize();
-    return this.saveBot({ ...entry, privacy: { folder, operationId } });
+    return this.saveBot({ ...entry, privacy: { folder, operationId, ...(moving.length ? { moving } : {}) } });
+  }
+
+  movingPrivateBot(threadId: string): string | undefined {
+    return this.current.bots.find(bot => bot.privacy?.moving?.includes(threadId))?.id;
+  }
+
+  confirmPrivate(id: string, operationId: string): Bot {
+    const entry = this.get(id);
+    if (!entry.privacy || entry.privacy.operationId !== operationId) throw new Error('Unknown Private conversion');
+    if (!entry.privacy.moving) return entry;
+    const { moving: _moving, ...privacy } = entry.privacy;
+    return this.saveBot({ ...entry, privacy });
   }
 
   conversations(botId: string): Conversation[] {
@@ -186,6 +198,7 @@ export class BotRepository {
   reserveConversation(botId: string, operationId: string): Conversation | PendingConversation {
     const entry = this.get(botId);
     if (entry.archivedAt) throw new Error('This Bot is archived');
+    if (entry.privacy?.moving) throw new Error('Finish moving this Bot to its private folder first');
     const previous = this.current.conversations.find(link => link.operationId === operationId) ??
       this.current.pendingConversations.find(link => link.operationId === operationId);
     if (previous) {

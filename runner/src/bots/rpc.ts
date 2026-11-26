@@ -66,7 +66,7 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => memory(scope, 'read').historyPage(before)),
     'bots.memory.scope.restore': method(scopeWrite.extend({ changeId: z.uuid() }), p => change(p, { op: 'restore', changeId: p.changeId })),
     ...(reviews && protectFormat && { 'bots.memory.scope.tidy': method(scopeWrite.extend({ botId }), p => reviews().tidy(p.botId, () => memory(p.scope, 'write'), p.expectedRevision, p.operationId, protectFormat)) }),
-    ...(makePrivate && { 'bots.settings.privacy': method(privacy, p => ({ bot: makePrivate(p) })) }),
+    ...(makePrivate && { 'bots.settings.privacy': method(privacy, async p => ({ bot: await makePrivate(p) })) }),
     ...(reviews && {
       'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean(), operationId: botOperationId }), ({ botId, expectedRevision, enabled, operationId }) => {
         return { bot: repo().setReviewEnabled(botId, expectedRevision, enabled, operationId, () => {

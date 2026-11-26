@@ -655,6 +655,7 @@ type Host = {
   onNotification(fn: (n: Notification) => void): () => void;
   list(include: ('inbox' | 'snoozed' | 'archived')[]): ThreadSummary[];
   get(threadId: string): ThreadSummary;
+  isPrivate?: (threadId: string) => boolean;
   events(threadId: string, opts: { afterSeq?: number; beforeSeq?: number; limit?: number }): { events: PersistedEvent[] };
   // The seq ranges edits cut out of a thread (docs/protocol/threads.md, "Editing a
   // message"), never sent up. Absent in small tests.
@@ -2564,6 +2565,27 @@ export class ConvexSync {
     await this.flush();
   }
 
+  /** Withdraw already-mirrored rows after the local privacy transition is durable. */
+  async removeForBotPrivacy(threadIds: readonly string[]): Promise<void> {
+    if (threadIds.some(id => !this.deps.runner.isPrivate?.(id))) throw new Error('Persist the private thread identities before removing their mirror rows.');
+    if (!this.running) throw new Error('The Runner must reach its sync service to withdraw shared Bot conversations.');
+    if ((this.backendApiVersion ?? 0) < REMOVE_OWN_ROWS_API_VERSION) throw new Error('The sync service cannot yet confirm which Runner owns the shared rows.');
+    const end = Date.now() + 30_000;
+    while (this.flushing) {
+      if (Date.now() > end) throw new Error('Shared Bot data is still being synchronized.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    for (const id of threadIds) this.forgetMoved(id);
+    this.index?.hidePrivate(threadIds);
+    await this.index?.flushAll(Math.max(1, end - Date.now()));
+    for (let at = 0; at < threadIds.length; at += SYNC_BATCH) {
+      await this.post('mutation', 'sync:removeThreads', { key: this.deps.key, runnerId: this.runnerId, threadIds: threadIds.slice(at, at + SYNC_BATCH) });
+    }
+    const remaining = await this.post('query', 'sync:threadsOf', { key: this.deps.key, runnerId: this.runnerId }) as ThreadDoc[];
+    const ids = new Set(threadIds);
+    if (!Array.isArray(remaining) || remaining.some(thread => ids.has(thread.threadId))) throw new Error('The sync service has not withdrawn all the shared Bot conversations.');
+  }
+
   // ------------------------------------------------------------ changes
 
   private onNotification(n: Notification): void {
@@ -2597,7 +2619,7 @@ export class ConvexSync {
       case 'schedules.updated':
         // Ones that live in the backend are written there by the scheduler.
         if (this.deps.schedules?.inBackend() || this.schedulesRefused) break;
-        this.lists.schedules = n.params.schedules;
+        this.lists.schedules = n.params.schedules.filter(schedule => !schedule.threadId || !this.deps.runner.isPrivate?.(schedule.threadId));
         this.dirtyLists.add('schedules');
         this.scheduleFlush();
         break;
@@ -2614,6 +2636,7 @@ export class ConvexSync {
   // Text messages go up as they're persisted; an approval or question
   // the thread is waiting on goes on its row until it's resolved.
   private onEvent(threadId: string, e: PersistedEvent): void {
+    if (this.deps.runner.isPrivate?.(threadId)) return;
     if (typeof (e as { seq?: unknown }).seq !== 'number') return; // a delta
     // A shared thread's new pictures follow, unless its whole history is
     // about to be looked through anyway.
@@ -2756,7 +2779,7 @@ export class ConvexSync {
     for (const { thread, events } of found) {
       // One a draining runner answered in a shape not known here is skipped,
       // not the rest with it (Daybreak 122).
-      if (!Array.isArray(events)) continue;
+      if (!Array.isArray(events) || thread.privateBotId || this.deps.runner.isPrivate?.(thread.id)) continue;
       let added = false;
       for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
         if (e.type === 'approval.resolved' || !('approvalId' in e)) continue;
@@ -2877,6 +2900,7 @@ export class ConvexSync {
   }
 
   private mark(t: ThreadSummary, now_ = false): void {
+    if (t.privateBotId || this.deps.runner.isPrivate?.(t.id)) return;
     if (this.cardChanged.delete(t.id)) now_ = true;
     this.missing.delete(t.id);
     if (this.removedFromFile.delete(t.id)) {

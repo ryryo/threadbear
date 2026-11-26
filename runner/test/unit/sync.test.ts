@@ -746,7 +746,7 @@ type Fake = { h: ReturnType<typeof makeHarness>; sync: ConvexSync; calls: Call[]
 // What the fake deployment's photos were fetched from, across setupFull calls in a test.
 const downloads: string[] = [];
 
-function setupFull(opts: { elsewhereThread?: (threadId: string) => ThreadSummary | undefined; heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger; apiVersion?: number; hold?: (fn: string, args: Record<string, unknown>) => Promise<void> | undefined; holdDownload?: (url: string) => Promise<void> | undefined; answer?: (fn: string, args: Record<string, unknown>) => unknown } = {}): Fake {
+function setupFull(opts: { elsewhereThread?: (threadId: string) => ThreadSummary | undefined; heads?: { threadId: string; lastSeq: number }[]; taken?: Set<string>; failApply?: boolean | 'async'; log?: Logger; apiVersion?: number; isPrivate?: (threadId: string) => boolean; hold?: (fn: string, args: Record<string, unknown>) => Promise<void> | undefined; holdDownload?: (url: string) => Promise<void> | undefined; answer?: (fn: string, args: Record<string, unknown>) => unknown } = {}): Fake {
   const h = makeHarness();
   const calls: Call[] = [];
   // In the order they finish, with hold() keeping some back.
@@ -792,8 +792,9 @@ function setupFull(opts: { elsewhereThread?: (threadId: string) => ThreadSummary
     },
     runner: {
       onNotification: (fn) => h.runner.onNotification(fn),
-      list: (i) => h.runner.list(i),
+      list: (i) => h.runner.list(i).filter(thread => !opts.isPrivate?.(thread.id)),
       get: (id) => h.runner.get(id),
+      isPrivate: opts.isPrivate,
       events: (id, o) => h.runner.events(id, o),
       listProjects: () => [{ id: 'p1', title: 'Threadbear', folders: ['/w'], goals: 'g', state: 's', notes: 'n', links: [], createdBy: 'mike', createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', threadCount: 1 }],
       listSchedules: () => [{ id: 's1', title: 'Nightly', text: 'go', cron: '0 3 * * *', whenText: 'every day at 3 am', paused: false, createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z', runs: 2, lastRun: { at: '2026-10-27T03:00:00.000Z', outcome: 'sent', threadId: 't9' } }],
@@ -867,6 +868,26 @@ function setupFull(opts: { elsewhereThread?: (threadId: string) => ThreadSummary
   });
   return { h, sync, calls, push: (v) => onUpdate?.(v), applied, landed };
 }
+
+test('a private conversion withdraws the runner-owned index and waits for its mirror row to disappear', async () => {
+  const privateIds = new Set<string>();
+  let previous: { threadId: string }[] = [];
+  const f = setupFull({ apiVersion: BACKEND_API_VERSION, isPrivate: id => privateIds.has(id), answer: fn => fn === 'sync:threadsOf' ? previous : undefined });
+  const thread = f.h.runner.makeThread({ text: '', title: 'Previous shared thread' }).st.rec;
+  previous = [{ threadId: thread.id }];
+  f.sync.start();
+  await tick();
+  await f.sync.flushNow();
+  await assert.rejects(f.sync.removeForBotPrivacy([thread.id]), /Persist the private/);
+  privateIds.add(thread.id);
+  await assert.rejects(f.sync.removeForBotPrivacy([thread.id]), /has not withdrawn/);
+  previous = [];
+  await f.sync.removeForBotPrivacy([thread.id]);
+  const removals = f.calls.filter(call => call.fn === 'sync:removeThreads');
+  assert.ok(removals.some(call => call.args.runnerId === 'r1' && (call.args.threadIds as string[]).includes(thread.id)));
+  const index = f.calls.find(call => call.fn === 'sync:setThreadIndex' && (call.args.removed as string[] | undefined)?.includes(thread.id));
+  assert.ok(index);
+});
 
 const messagesSent = (calls: Call[]): MessageDoc[] => calls.filter((c) => c.fn === 'sync:appendMessages').flatMap((c) => c.args.messages as MessageDoc[]);
 const session = (h: ReturnType<typeof makeHarness>, threadId: string) => h.adapter.sessions.filter((s) => s.opts.threadId === threadId).at(-1)!;
@@ -1106,6 +1127,10 @@ test("handover: a draining runner's open card stays on its thread's row", async 
   assert.equal(f.calls.filter((c) => c.fn === 'sync:upsertThreads').length, 0);
   f.sync.seedCards([
     {
+      thread: { ...draining, id: 'private-drain', privateBotId: 'private-fixture' },
+      events: [{ type: 'question.requested', seq: 649, ts, approvalId: 'fixture-private-approval', questions: [{ question: 'Private question', multiSelect: false, options: [] }] }] as never,
+    },
+    {
       thread: draining,
       events: [
         { type: 'approval.requested', seq: 641, ts, approvalId: 'start-1', name: 'threadbear.start_thread', title: 'Start a thread on main?', input: {}, options: ['allow', 'deny'] },
@@ -1115,6 +1140,7 @@ test("handover: a draining runner's open card stays on its thread's row", async 
   ]);
   f.sync.release();
   await f.sync.flushNow();
+  assert.ok(!docs().some(row => row.threadId === 'private-drain'));
   const rows = docs().filter((d) => d.threadId === 'drain-1');
   // Its first row has the card. The newest is on it, the other behind, as when they came live.
   // (No seq: this fake backend is older than the relay's.)

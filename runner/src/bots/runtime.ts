@@ -23,12 +23,15 @@ type Options = {
   owns: () => boolean;
   canChangePrivacy?: () => boolean;
   protectPrivacy?: () => void;
+  withdrawShared?: (threadIds: readonly string[]) => Promise<void>;
 };
 type ReviewDeps = Pick<BotReviewOptions, 'redact' | 'askers' | 'privateFolder'> & { clock: Clock; onError: (id: string) => void };
 
 export class BotRuntime {
   private readonly options: Options;
   private repository?: BotRepository;
+  private privateData?: boolean;
+  private readonly privacyChange = new Map<string, Promise<unknown>>();
   private workspace?: { repo: BotRepository; conversations: BotConversations };
   private reviewService?: BotReviews;
   private reviewQueue?: ReviewQueue;
@@ -117,22 +120,64 @@ export class BotRuntime {
     if (!this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the old Runner to finish handing over.');
     const protect = this.options.protectPrivacy ?? (() => protectBotData(this.options.home, PRIVATE_BOT_FORMAT));
     protect();
+    this.privateData = true;
   }
 
   private makePrivate({ botId, expectedRevision, folder, operationId }: { botId: string; expectedRevision: number; folder: string; operationId: string }) {
     const { repo } = this.getWorkspace();
     const runner = this.options.runner();
     const canonical = realpathSync.native(folder);
-    return repo.setPrivate(botId, expectedRevision, canonical, operationId, () => {
+    const moving = new Set(repo.conversations(botId).map(link => link.threadId));
+    const all = [...runner.threads.values()];
+    for (let size = -1; size !== moving.size;) {
+      size = moving.size;
+      for (const { rec } of all) if (rec.startedBy?.threadId && moving.has(rec.startedBy.threadId)) moving.add(rec.id);
+    }
+    const changed = repo.setPrivate(botId, expectedRevision, canonical, operationId, [...moving], () => {
       if (!this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the old Runner to finish handing over before making a Bot private.');
       if (!statSync(canonical).isDirectory()) throw new Error('Choose an existing work folder for this Bot');
       const otherFolders = repo.list().flatMap(bot => bot.id !== botId && bot.privacy ? bot.privacy.folder : []);
-      const threadFolders = [...runner.threads.values()].map(({ rec }) => rec.cwd);
+      if (moving.size && !this.options.withdrawShared) throw new Error('This Runner cannot yet withdraw previously shared conversations.');
+      const affected = all.filter(({ rec }) => moving.has(rec.id));
+      if (affected.some(({ rec, rt }) => rt.session || rt.turn || rt.tasks.length || rec.queue.length)) {
+        throw new Error('Stop the Bot’s conversations and background work before making it private.');
+      }
+      const threadFolders = all.filter(({ rec }) => !moving.has(rec.id)).map(({ rec }) => rec.cwd);
       if ([runner.cfg.defaults.cwd, ...threadFolders, ...otherFolders].some(path => foldersOverlap(canonical, path))) {
         throw new Error('Choose a dedicated Bot folder outside the Runner default and any existing work folders');
       }
       this.protectNewFormat();
     });
+    if (!changed.privacy?.moving) return changed;
+    const active = this.privacyChange.get(botId);
+    if (active) return active;
+    const completion = this.finishPrivacy(botId, changed.privacy).finally(() => this.privacyChange.delete(botId));
+    this.privacyChange.set(botId, completion);
+    return completion;
+  }
+
+  private async finishPrivacy(botId: string, privacy: { folder: string; operationId: string; moving?: string[] }) {
+    const { runner: running, withdrawShared, owns } = this.options;
+    if (!withdrawShared || !privacy.moving || !owns() || !this.options.canChangePrivacy?.()) throw new Error('This Runner cannot finish moving the Bot’s conversations now.');
+    const runner = running();
+    for (const threadId of privacy.moving) {
+      const st = runner.threads.get(threadId);
+      if (!st || st.rt.deleted) continue;
+      if (st.rt.session || st.rt.turn || st.rt.tasks.length || st.rec.queue.length) throw new Error('A Bot conversation is still running.');
+      st.rec.privateBotId = botId;
+      delete st.rec.share;
+      runner.update({ threadId, cwd: privacy.folder, settingBotPrivacy: true });
+      runner.store.save(st.rec);
+      runner.markDirty(st);
+    }
+    await withdrawShared(privacy.moving);
+    if (!owns()) throw new Error('This Runner handed over before the private conversion finished.');
+    return this.repo().confirmPrivate(botId, privacy.operationId);
+  }
+
+  pendingPrivateThread(threadId: string): string | undefined {
+    this.privateData ??= hasPrivateBotData(this.options.home);
+    return this.privateData ? this.repo().movingPrivateBot(threadId) : undefined;
   }
 
   folderRefusal(cwd: string, privateBotId?: string): string | undefined {
@@ -140,7 +185,9 @@ export class BotRuntime {
     const entries = this.repo().list();
     if (privateBotId !== undefined) {
       if (!this.options.enabled()) return 'The Bots experiment is turned off.';
-      const root = entries.find(bot => bot.id === privateBotId)?.privacy?.folder;
+      const privacy = entries.find(bot => bot.id === privateBotId)?.privacy;
+      if (privacy?.moving) return 'Finish moving this Bot to its private folder first.';
+      const root = privacy?.folder;
       if (!root || cwd !== root || realpathSync.native(cwd) !== root) return 'This private Bot uses its dedicated work folder.';
       return undefined;
     }

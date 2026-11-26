@@ -546,7 +546,18 @@ export class ThreadIndex {
     this.schedule();
   }
 
+  hidePrivate(threadIds: readonly string[]): void {
+    for (const id of threadIds) {
+      this.dirty.delete(id);
+      this.sent.delete(id);
+      this.removed.add(id);
+    }
+    this.deps.onSent?.();
+    this.schedule();
+  }
+
   private mark(t: ThreadSummary): void {
+    if (t.privateBotId) return;
     const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true, this.deps.takesStars?.() ?? true, this.deps.takesAsked?.() ?? true, this.deps.takesKeywords?.() ?? true, this.deps.takesMode?.() ?? true, this.deps.takesWaitState?.() ?? true, this.deps.takesPool?.() ?? true, this.deps.takesCoordinator?.() ?? true);
     if (this.sent.get(t.id) === writeKey(row)) {
       this.dirty.delete(t.id);

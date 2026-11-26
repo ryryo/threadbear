@@ -533,6 +533,11 @@ async function main(): Promise<void> {
     guarded: () => supervisorGuardsBotData(cfg.home),
     owns: () => !box && !draining,
     canChangePrivacy: () => !draining && peers.status().length === 0,
+    withdrawShared: async ids => {
+      if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json')) || fs.existsSync(path.join(cfg.home, 'sync-sent.json'))) {
+        await sync.removeForBotPrivacy(ids);
+      }
+    },
   });
   // Not in box mode: its spawn gate (spawn-gate.ts) holds processes on the
   // main thread only, and the look runs git.
@@ -553,7 +558,7 @@ async function main(): Promise<void> {
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
     botContext: (rec) => bots.context(rec),
-    ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id) }),
+    ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id), pendingBotPrivacy: id => bots.pendingPrivateThread(id) }),
     projects,
     atMac: () => atMac,
     config: cfg,
@@ -939,6 +944,7 @@ async function main(): Promise<void> {
           fn(n);
         }),
       list: (include) => runner.list(include).filter((t) => !t.privateBotId && !movesRef?.gone(t.id)),
+      isPrivate: (id) => Boolean(privateBotThread(id)),
       get: (id) => { requireMirrorThread(id); return runner.get(id); },
       events: (id, o) => { requireMirrorThread(id); return runner.events(id, o); },
       cuts: (id) => { requireMirrorThread(id); return runner.cuts(id); },

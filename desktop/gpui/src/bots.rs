@@ -32,8 +32,11 @@ struct Profile {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Privacy {
     folder: String,
+    operation_id: String,
+    moving: Option<Vec<String>>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -753,17 +756,37 @@ impl Threadbear {
         }
         section = section.child(self.render_bot_model(bot, disabled, cx));
         if let Some(privacy) = &bot.privacy {
+            let title = if privacy.moving.is_some() {
+                "Moving to a private work folder"
+            } else {
+                "Private work folder"
+            };
             section = section.child(
                 v_flex()
                     .gap(px(4.))
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Private work folder"),
-                    )
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
                     .child(div().child(privacy.folder.clone())),
             );
-        } else if detail.capabilities.privacy && detail.conversations.is_empty() {
+            if privacy.moving.is_some() {
+                let retry = json!({ "botId": bot.id, "expectedRevision": bot.revision, "folder": privacy.folder, "operationId": privacy.operation_id });
+                section = section.child(
+                    bot_button("bot-retry-privacy", "Retry making private", self.bots.busy)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.bot_write(
+                                "bots.settings.privacy",
+                                retry.clone(),
+                                After::Profile,
+                                window,
+                                cx,
+                            )
+                        })),
+                );
+            }
+        } else if detail.capabilities.privacy {
+            if !detail.conversations.is_empty() {
+                section = section.child(div().text_color(style::secondary_text(cx))
+                    .child("Stop the Bot’s conversations first. Making them private withdraws their copies from sync."));
+            }
             section = section.child(
                 bot_button("bot-make-private", "Set private work folder", disabled).on_click(
                     cx.listener(|this, _, window, cx| {
@@ -1542,12 +1565,13 @@ impl Threadbear {
         if self.bots.busy {
             return;
         }
-        if method.starts_with("bots.reviews.")
-            || method.starts_with("bots.memory.scope.")
-            || matches!(
-                method,
-                "bots.settings.privacy" | "bots.settings.automaticReview"
-            )
+        if params["operationId"].is_null()
+            && (method.starts_with("bots.reviews.")
+                || method.starts_with("bots.memory.scope.")
+                || matches!(
+                    method,
+                    "bots.settings.privacy" | "bots.settings.automaticReview"
+                ))
         {
             let operation = match &self.bots.pending_write {
                 Some((previous, payload, id)) if *previous == method && *payload == params => {
