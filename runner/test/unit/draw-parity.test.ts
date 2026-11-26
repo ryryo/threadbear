@@ -70,7 +70,7 @@ function desktopKinds(): string[] {
     // A turn's end: the footer, the needs-you and done cards, and the done
     // card's loose ends (which come on the thread's summary, not the event).
     turn: [...decodedKeys(block(event, /impl TurnCompletion \{/, 'reducer/event.rs')), ...(/pub struct LooseEnds\b/.test(event) ? ['looseEnds'] : [])],
-    section: all(read('inbox.rs'), /\("(\w+)", "[A-Z][\w ]*", \w+\)/g),
+    section: all(read('inbox.rs'), /\(\s*"(\w+)",\s*(?:"[A-Z][\w ]*"|crate::tr!\("[A-Z][\w ]*"\)),\s*\w+,?\s*\)/g),
     status: variants(sidebar, 'RowStatus', 'sidebar.rs'),
     look: all(block(sidebar, /pub struct RowLook \{/, 'sidebar.rs'), /pub (\w+): bool/g),
     block: [...all(read('rich_block.rs'), /RichKind::\w+ => "([a-z]+)"/g), ...all(read('draft_block.rs'), /DraftKind::\w+ => "([a-z]+)"/g)],
