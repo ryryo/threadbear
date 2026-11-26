@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpDir } from '../helpers/fakes.ts';
 import { markGood, pointCurrentAt, readState, releaseHome, runnerVersion, staleRelease, statePath, takeRollbackNotice, type RunnerState } from '../../src/release.ts';
@@ -193,7 +194,7 @@ async function nthListening(out: () => string, n: number, ms = PATIENCE_MS): Pro
   }
 }
 
-test('a managed Bot release writes the marker and reopens its workspace after restarting', async () => {
+test('a managed Bot release protects both storage formats and reopens its private workspace after restarting', async () => {
   const home = tmpDir();
   const id = '20261127T000000Z-abc1234';
   const release = makeRelease(home, id);
@@ -216,11 +217,18 @@ test('a managed Bot release writes the marker and reopens its workspace after re
       const { note } = await c.call('bots.memory.add', { botId: bot.id, threadId: a.threadId, text: '見出しは短くする' });
       const { conversation: b } = await c.call('bots.conversations.create', { botId: bot.id, operationId: 'conversation-b' });
       assert.notEqual(a.threadId, b.threadId);
+      const folder = fs.realpathSync.native(tmpDir());
+      const { bot: protectedBot } = await c.call('bots.settings.privacy', { botId: bot.id, expectedRevision: bot.revision, folder, operationId: randomUUID() });
+      assert.equal(protectedBot.privacy.moving, undefined);
+      assert.equal(fs.readFileSync(marker, 'utf8').trim(), '2');
       await c.call('runner.restart', { reason: 'Bot workspace verification' });
       const { c: after } = await connectAfterRestart(home, await nthListening(r.out, 2));
       try {
-        assert.deepEqual(await after.call('bots.list'), { bots: [bot] });
+        assert.deepEqual(await after.call('bots.list'), { bots: [protectedBot] });
         assert.deepEqual(await after.call('bots.memory.read', { botId: bot.id, threadId: b.threadId }), { notes: [note] });
+        const { threads } = await after.call('threads.list', { ids: [a.threadId, b.threadId] });
+        assert.equal(threads.length, 2);
+        assert.ok(threads.every((thread: { cwd: string; privateBotId?: string }) => thread.cwd === folder && thread.privateBotId === bot.id));
       } finally {
         after.close();
       }
