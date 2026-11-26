@@ -168,31 +168,55 @@ pub(crate) fn open_link(url: &str, origin: Origin, cwd: &str, cx: &mut App) {
 /// is refused as `open_web` refuses it, and without Chrome the page goes to
 /// the default browser.
 pub(crate) fn open_in_chrome_profile(url: &str, directory: &str, cx: &mut App) {
+    open_chrome_request(url, Some(directory), cx);
+}
+
+/// Offer Chrome even when the user's default browser is another app.
+#[cfg(target_os = "macos")]
+pub(crate) fn can_open_chrome() -> bool {
+    !crate::scripted::scripted() && Path::new(CHROME_APP).is_dir()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn can_open_chrome() -> bool {
+    false
+}
+
+pub(crate) fn open_chrome(url: &str, cx: &mut App) {
+    open_chrome_request(url, None, cx);
+}
+
+fn open_chrome_request(url: &str, directory: Option<&str>, cx: &mut App) {
     let LinkKind::Web(web) = policy::link_kind(url) else {
         open_web(url, cx);
         return;
     };
-    if scripted_opens(&format!("chrome {directory} {web}")) {
+    let command = match directory {
+        Some(directory) => format!("chrome {directory} {web}"),
+        None => format!("chrome {web}"),
+    };
+    if scripted_opens(&command) {
         return;
     }
     #[cfg(target_os = "macos")]
     {
-        // The Chrome that's running (the profiles are only offered while it
-        // is), never whichever bundle Launch Services has for Chrome's id:
-        // any folder's .app can claim that id, and `open -na` starts the
-        // bundle it's given (Daybreak 112, 13 Nov 2026). Its signature is
-        // checked off the main thread (a quarter of a second), with a note
-        // up meanwhile, and anything but Google's own Chrome isn't started.
-        let Some(chrome) = running_chrome().filter(|p| {
-            policy::real_path(Path::new(p)).is_ok_and(|r| installed_where_apps_are(&r))
-        }) else {
+        // Use the verified running Chrome for a profile, or the copy in
+        // Applications for a plain URL. Never look up an executable by id.
+        let chrome = if directory.is_some() {
+            running_chrome().filter(|p| {
+                policy::real_path(Path::new(p)).is_ok_and(|r| installed_where_apps_are(&r))
+            })
+        } else {
+            Some(CHROME_APP.to_owned())
+        };
+        let Some(chrome) = chrome else {
             system_open(&web, cx);
             return;
         };
         let Some(app) = cx.try_global::<GateNotices>().and_then(|n| n.0.upgrade()) else {
             return;
         };
-        let directory = directory.to_owned();
+        let directory = directory.map(ToOwned::to_owned);
         cx.defer(move |cx| {
             if !app.update(cx, |app, cx| {
                 app.begin_note("opening-chrome", "Opening Chrome…", cx)
@@ -200,10 +224,9 @@ pub(crate) fn open_in_chrome_profile(url: &str, directory: &str, cx: &mut App) {
                 return;
             }
             cx.spawn(async move |cx| {
-                let page = web.clone();
                 let result = cx
                     .background_executor()
-                    .spawn(async move { start_chrome_profile(&chrome, &page, &directory) })
+                    .spawn(async move { start_chrome_profile(&chrome, &web, directory.as_deref()) })
                     .await;
                 cx.update(|cx| {
                     app.update(cx, |app, cx| app.end_note("opening-chrome", cx));
@@ -214,53 +237,6 @@ pub(crate) fn open_in_chrome_profile(url: &str, directory: &str, cx: &mut App) {
             })
             .detach();
         });
-    }
-    #[cfg(not(target_os = "macos"))]
-    system_open(&web, cx);
-}
-
-/// Offer Chrome even when the user's default browser is another app.
-#[cfg(target_os = "macos")]
-pub(crate) fn can_open_chrome() -> bool {
-    !crate::scripted::scripted() && Path::new("/Applications/Google Chrome.app").is_dir()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn can_open_chrome() -> bool {
-    false
-}
-
-pub(crate) fn open_chrome(url: &str, cx: &mut App) {
-    let LinkKind::Web(web) = policy::link_kind(url) else {
-        open_web(url, cx);
-        return;
-    };
-    #[cfg(target_os = "macos")]
-    {
-        if scripted_opens(&format!("chrome {web}")) {
-            return;
-        }
-        cx.spawn(async move |cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    let app = signed_as("/Applications/Google Chrome.app", GOOGLE_CHROME).map_err(
-                        |_| "Couldn't verify the installed copy of Google Chrome.".to_owned(),
-                    )?;
-                    std::process::Command::new("/usr/bin/open")
-                        .arg("-a")
-                        .arg(app)
-                        .arg(web)
-                        .spawn()
-                        .map(|_| ())
-                        .map_err(|e| format!("Chrome didn't open: {e}"))
-                })
-                .await;
-            if let Err(why) = result {
-                cx.update(|cx| refuse(why, cx));
-            }
-        })
-        .detach();
     }
     #[cfg(not(target_os = "macos"))]
     system_open(&web, cx);
@@ -306,12 +282,23 @@ fn installed_where_apps_are(real: &Path) -> bool {
 const GOOGLE_CHROME: &str = "anchor apple generic and identifier \"com.google.Chrome\" and certificate leaf[subject.OU] = \"EQHXZ8M8AV\"";
 
 #[cfg(target_os = "macos")]
-fn start_chrome_profile(path: &str, web: &str, directory: &str) -> Result<(), String> {
-    let real = signed_as(path, GOOGLE_CHROME).map_err(|_| "The Chrome that's running isn't Google's Chrome, so Threadbear didn't open the page in it.".to_owned())?;
-    std::process::Command::new("/usr/bin/open")
-        .arg("-na")
-        .arg(&real)
-        .args(["--args", &format!("--profile-directory={directory}"), web])
+const CHROME_APP: &str = "/Applications/Google Chrome.app";
+
+#[cfg(target_os = "macos")]
+fn start_chrome_profile(path: &str, web: &str, directory: Option<&str>) -> Result<(), String> {
+    let real = signed_as(path, GOOGLE_CHROME)
+        .map_err(|_| "Couldn't verify this copy of Google Chrome.".to_owned())?;
+    let mut command = std::process::Command::new("/usr/bin/open");
+    if let Some(directory) = directory {
+        command.arg("-na").arg(&real).args([
+            "--args",
+            &format!("--profile-directory={directory}"),
+            web,
+        ]);
+    } else {
+        command.arg("-a").arg(&real).arg(web);
+    }
+    command
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Chrome didn't open: {e}"))
