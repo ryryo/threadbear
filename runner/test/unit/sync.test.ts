@@ -1886,7 +1886,20 @@ test('toMessageDoc keeps text and tool calls, nothing else, and a schedule origi
 
 // ------------------------------------------------------------ push text
 
-import { pushText, PUSH_BODY_CHARS } from '../../../convex/pushText.ts';
+import { pushLocale, pushText, testNotification, PUSH_BODY_CHARS } from '../../../convex/pushText.ts';
+
+test('pushText uses the device language and leaves thread text intact', () => {
+  const thread = { title: 'Backup', mac: 'Mac mini', status: 'error', preview: 'usage limit' };
+  assert.equal(pushLocale('ja-JP'), 'ja');
+  assert.equal(pushLocale('en-US'), 'en');
+  assert.equal(pushLocale(undefined), 'en');
+  assert.deepEqual(pushText(thread, 'ja'), { title: 'Mac mini · Backup', body: '失敗：usage limit' });
+  assert.equal(pushText({ ...thread, preview: '' }, 'ja').body, '直前のターンが失敗しました');
+  assert.equal(pushText({ ...thread, pendingApproval: { kind: 'question', questions: [] } }, 'ja').body, '質問があります');
+  assert.equal(pushText({ ...thread, pendingApproval: { kind: 'secret', label: 'Recovery code' } }, 'ja').body, 'シークレットの入力を求められています：Recovery code');
+  assert.equal(testNotification('ja'), 'テスト通知');
+  assert.equal(testNotification(), 'Test notification');
+});
 
 test('pushText says why the thread needs Alex: the question, the approval, or the reply', () => {
   const base = { title: 'Fix the dock badge', status: 'idle', preview: 'Done, the badge clears when you open the thread.' };

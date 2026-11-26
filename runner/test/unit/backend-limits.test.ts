@@ -410,6 +410,19 @@ test('non-finite page sizes are refused, and a page reads only its own rows', as
 
 const apns = (n: number) => n.toString(16).padStart(64, '0');
 
+test('push registration keeps a language for each device and accepts old clients', async () => {
+  const s = await setup();
+  const registration = { token: TOKEN, apnsToken: apns(1), environment: 'production' };
+  await call(s.ctx, phone.registerDevice, { ...registration, locale: 'ja-JP' });
+  await call(s.ctx, phone.registerDevice, registration);
+  await call(s.ctx, phone.registerDevice, { ...registration, apnsToken: apns(2) });
+  const targets = await call(s.ctx, devices.targets, {}) as { apnsToken: string; locale?: string }[];
+  assert.equal(targets.find((t) => t.apnsToken === apns(1))?.locale, 'ja');
+  assert.equal(targets.find((t) => t.apnsToken === apns(2))?.locale, undefined);
+  await call(s.ctx, phone.registerDevice, { ...registration, locale: 'en-US' });
+  assert.equal(s.rows('devices').find((d) => d.apnsToken === apns(1))?.locale, 'en');
+});
+
 test('one phone token keeps at most a few registrations, and only real-looking ones', async () => {
   const s = await setup();
   for (let i = 0; i < 300; i++) await call(s.ctx, phone.registerDevice, { token: TOKEN, apnsToken: apns(i), environment: 'production' });

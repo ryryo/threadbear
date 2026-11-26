@@ -402,7 +402,10 @@ phone names must be one that has heartbeated (or `"any"`), else
   after a day, so the phone should ask again rather than expect them to
   stay.
 - `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
-  "production", pushKey?, platform? })`. `apnsToken` is the device token in hex.
+  "production", pushKey?, platform?, locale? })`. `apnsToken` is the device token in hex.
+  `locale` (API 104) selects the language for standard notification text.
+  The backend uses Japanese for Japanese language tags and English for
+  other tags. If the field is absent, a previously saved choice stays in use.
   `platform: "android"` (API 66) says it is instead the phone's Firebase token
   (letters, digits and `_ - :`); the row keeps the name and gets a `platform`,
   and its pushes go through the relay to Firebase, even from a backend with its

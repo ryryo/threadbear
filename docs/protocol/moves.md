@@ -674,6 +674,13 @@ Settings window's Phone & browser tab issues them through the runner,
 so nobody needs the Convex CLI (`ios/scripts/pair-qr.swift` and
 `web/scripts/sign-in.swift` still work from a terminal).
 
+On a backend with API 104 or later, a phone may send its language tag as
+`locale` with `phone:registerDevice`. A Japanese tag (such as `ja-JP`)
+selects Japanese for standard push notification text. Other tags use
+English. When the same phone omits the field, its saved language is
+kept. Devices that have never given a tag use English. Thread titles,
+approval details, and messages are sent as written.
+
 ```ts
 type Device = {
   id: string               // the token's row id, for devices.revoke

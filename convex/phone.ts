@@ -12,6 +12,7 @@ import { command as commandMachine, queued } from './machines';
 import { messageButton, threadFields, views } from './schema';
 import { checkPhoneToken, hasLiveKey, pageLimit, readRunnerOrder, runnerStatsRows, saveRunnerOrder, sha256, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
+import { pushLocale } from './pushText';
 import { pushOff } from './pushHealth';
 import { imagesFrom, phoneImage, replyImagesFrom, siteUrl } from './share';
 import { deleteIfUnused, endCommandFiles, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
@@ -1265,9 +1266,9 @@ export const registerDevice = mutation({
   // platform "webpush" (API 93, the Android app's F-Droid build): apnsToken is
   // its UnifiedPush endpoint, a public https address (webPushEndpoint.ts),
   // and webPush has the subscription's p256dh and auth, base64url.
-  args: { token: v.string(), apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), pushKey: v.optional(v.string()), platform: v.optional(v.union(v.literal('android'), v.literal('webpush'))), webPush: v.optional(v.object({ p256dh: v.string(), auth: v.string() })) },
+  args: { token: v.string(), apnsToken: v.string(), environment: v.union(v.literal('sandbox'), v.literal('production')), pushKey: v.optional(v.string()), platform: v.optional(v.union(v.literal('android'), v.literal('webpush'))), webPush: v.optional(v.object({ p256dh: v.string(), auth: v.string() })), locale: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { token, apnsToken, environment, pushKey, platform, webPush }) => {
+  handler: async (ctx, { token, apnsToken, environment, pushKey, platform, webPush, locale }) => {
     if (pushKey !== undefined && !/^[A-Za-z0-9+/]{43}=$/.test(pushKey)) throw new ConvexError({ kind: 'invalid', message: 'pushKey must be base64 of 32 bytes' });
     if (platform === 'webpush') {
       const problem = endpointProblem(apnsToken);
@@ -1284,7 +1285,8 @@ export const registerDevice = mutation({
       .withIndex('by_apnsToken', (q) => q.eq('apnsToken', apnsToken))
       .unique();
     const key = pushKey ?? existing?.pushKey;
-    const row = { apnsToken, environment, tokenName: t.name, tokenId: t.id, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}), ...(key ? { pushKey: key } : {}), ...(platform ? { platform } : {}), ...(webPush ? { webPush } : {}) };
+    const language = locale === undefined ? existing?.locale : pushLocale(locale);
+    const row = { apnsToken, environment, tokenName: t.name, tokenId: t.id, updatedAt: Date.now(), ...(existing?.notify ? { notify: existing.notify } : {}), ...(key ? { pushKey: key } : {}), ...(language ? { locale: language } : {}), ...(platform ? { platform } : {}), ...(webPush ? { webPush } : {}) };
     // A phone token's oldest registrations give way to a new one (or one it
     // takes over from another token), so a token holds at most
     // MAX_DEVICES_PER_TOKEN rows: a phone reinstalled gets a new APNs token,

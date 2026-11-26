@@ -15,17 +15,30 @@ export type PushThread = {
 
 export const PUSH_BODY_CHARS = 180;
 
-export function pushText(t: PushThread): { title: string; body: string } {
+export type PushLocale = 'en' | 'ja';
+
+export function pushLocale(tag: string | undefined): PushLocale {
+  return tag?.split('-')[0].toLowerCase() === 'ja' ? 'ja' : 'en';
+}
+
+export function testNotification(locale?: PushLocale): string {
+  return locale === 'ja' ? 'テスト通知' : 'Test notification';
+}
+
+export function pushText(t: PushThread, locale?: PushLocale): { title: string; body: string } {
   // A thread on a Mac with a runner key says which, so a push asking for a
   // secret or an approval can't pass for one from the main Mac.
   const title = t.mac ? `${t.mac} · ${t.title || 'Threadbear'}` : t.title || 'Threadbear';
   const p = t.pendingApproval;
+  const japanese = locale === 'ja';
   let body: string;
-  if (p?.kind === 'question') body = p.questions[0]?.question ?? 'Has a question for you';
-  else if (p?.kind === 'secret') body = `Asking for a secret: ${p.label}`;
-  else if (p?.kind === 'approval') body = p.inputSummary ? `${p.title}: ${p.inputSummary}` : p.title;
-  else if (t.status === 'error') body = t.preview ? `Failed: ${t.preview}` : 'The last turn failed';
-  else body = t.preview || 'Finished';
+  if (p?.kind === 'question') body = p.questions[0]?.question ?? (japanese ? '質問があります' : 'Has a question for you');
+  else if (p?.kind === 'secret') body = japanese ? `シークレットの入力を求められています：${p.label}` : `Asking for a secret: ${p.label}`;
+  else if (p?.kind === 'approval') body = p.inputSummary ? `${p.title}${japanese ? '：' : ': '}${p.inputSummary}` : p.title;
+  else if (t.status === 'error') {
+    if (t.preview) body = japanese ? `失敗：${t.preview}` : `Failed: ${t.preview}`;
+    else body = japanese ? '直前のターンが失敗しました' : 'The last turn failed';
+  } else body = t.preview || (japanese ? '完了しました' : 'Finished');
   body = body.replace(/\s+/g, ' ').trim();
   if (body.length > PUSH_BODY_CHARS) body = body.slice(0, PUSH_BODY_CHARS - 1) + '…';
   return { title, body };

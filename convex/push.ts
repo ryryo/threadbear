@@ -13,7 +13,7 @@ import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalAction, type ActionCtx } from './_generated/server';
 import { failureText } from './pushHealth';
-import { pushText } from './pushText';
+import { pushText, testNotification, type PushLocale } from './pushText';
 import { seal } from './pushSeal';
 import { API_VERSION } from './version';
 import { RELAY_REGISTER_MS, RELAY_REGISTER_TIMEOUT_MS } from './relayInstallStates';
@@ -31,7 +31,7 @@ const RELAY_URL = 'https://impartial-hound-393.ap-southeast-2.convex.site';
 // key of its own, which has no use for Android.
 // platform "webpush" (API 93, the F-Droid build): apnsToken is a UnifiedPush
 // endpoint and this deployment posts to it itself (sendWebPush), relay or not.
-type Target = { apnsToken: string; environment: 'sandbox' | 'production'; notify: 'away' | 'always' | 'off'; pushKey?: string; platform?: 'android' | 'webpush'; webPush?: { p256dh: string; auth: string } };
+type Target = { apnsToken: string; environment: 'sandbox' | 'production'; notify: 'away' | 'always' | 'off'; locale?: PushLocale; pushKey?: string; platform?: 'android' | 'webpush'; webPush?: { p256dh: string; auth: string } };
 
 // This deployment's own site address (relay registration, the VAPID subject).
 const siteUrl = (): string | undefined => process.env.CONVEX_SITE_URL;
@@ -112,7 +112,7 @@ async function relaySend(url: string, install: Install, alert: { title: string; 
 // Through the relay. A phone that sent its pushKey gets the title and text
 // sealed with it, so the relay forwards only ciphertext; an older app
 // without one gets the relay's plain "A thread needs you", never the text.
-async function sendViaRelay(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, targets: Target[]): Promise<SendSummary> {
+async function sendViaRelay(ctx: ActionCtx, alert: AlertFor, targets: Target[]): Promise<SendSummary> {
   if (process.env.PUSH_RELAY === 'off') return { sent: 0, failed: 0, skipped: 'relayOff' };
   const url = process.env.PUSH_RELAY_URL || RELAY_URL;
   const first = await relayInstall(ctx, url);
@@ -126,7 +126,8 @@ async function sendViaRelay(ctx: ActionCtx, alert: { title: string; body: string
   // refusing every key can't keep it registering.
   let renewed = install.fresh === true;
   for (const [i, t] of targets.entries()) {
-    let { status, r } = await relaySend(url, install, alert, t);
+    const words = alert(t.locale);
+    let { status, r } = await relaySend(url, install, words, t);
     if (status === 401) {
       // The relay doesn't know this key: it forgot the install, or another
       // registration replaced it. Register again (unless another send
@@ -135,7 +136,7 @@ async function sendViaRelay(ctx: ActionCtx, alert: { title: string; body: string
       renewed = true;
       if (again && !('failure' in again)) {
         install = again;
-        ({ status, r } = await relaySend(url, install, alert, t));
+        ({ status, r } = await relaySend(url, install, words, t));
       }
       if (status === 401 || (again && 'failure' in again)) {
         // No key the relay takes: cleared (if it's still the one held, and
@@ -244,7 +245,10 @@ type SendSummary = { sent: number; failed: number; skipped?: string; broken?: nu
 const vSendResult = v.object({ sent: v.number(), failed: v.number(), skipped: v.optional(v.string()) });
 
 // The payload the phone app expects (docs/convex-backend.md, section 6).
-async function sendAlert(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, which: (notify: 'away' | 'always' | 'off') => boolean = (n) => n !== 'off'): Promise<SendSummary> {
+type Alert = { title: string; body: string; threadId: string };
+type AlertFor = (locale?: PushLocale) => Alert;
+
+async function sendAlert(ctx: ActionCtx, alert: AlertFor, which: (notify: 'away' | 'always' | 'off') => boolean = (n) => n !== 'off'): Promise<SendSummary> {
   const viaRelay = !apnsConfig() || process.env.PUSH_VIA === 'relay';
   // A throw (a malformed APNS_KEY_P8 makes signing throw) counts as a
   // failure too, or a broken key would never be reported.
@@ -267,7 +271,7 @@ function both(a: SendSummary, b: SendSummary): SendSummary {
   return { sent: a.sent + b.sent, failed: a.failed + b.failed, ...(bad ? { broken: bad } : {}), ...(why ? { failure: why } : {}) };
 }
 
-async function deliver(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, which: (notify: 'away' | 'always' | 'off') => boolean): Promise<SendSummary> {
+async function deliver(ctx: ActionCtx, alert: AlertFor, which: (notify: 'away' | 'always' | 'off') => boolean): Promise<SendSummary> {
   const all: Target[] = await ctx.runQuery(internal.devices.targets, {});
   const chosen = all.filter((t) => which(t.notify));
   if (!chosen.length) return { sent: 0, failed: 0, skipped: 'noDevices' };
@@ -284,27 +288,30 @@ async function deliver(ctx: ActionCtx, alert: { title: string; body: string; thr
   return both(w, rest);
 }
 
-async function deliverRest(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, targets: Target[]): Promise<SendSummary> {
+async function deliverRest(ctx: ActionCtx, alert: AlertFor, targets: Target[]): Promise<SendSummary> {
   const cfg = apnsConfig();
   if (!cfg || process.env.PUSH_VIA === 'relay') return await sendViaRelay(ctx, alert, targets);
   // An Apple key is no use for an Android phone: those go through the relay,
   // to Firebase, after the Apple ones are sent.
   const apple = targets.filter((t) => t.platform !== 'android');
   const android = targets.filter((t) => t.platform === 'android');
-  const payload = JSON.stringify({ aps: { alert: { title: alert.title, body: alert.body }, sound: 'default', 'thread-id': alert.threadId }, threadId: alert.threadId });
+  const payload = (locale?: PushLocale) => {
+    const words = alert(locale);
+    return JSON.stringify({ aps: { alert: { title: words.title, body: words.body }, sound: 'default', 'thread-id': words.threadId }, threadId: words.threadId });
+  };
   const jwt = providerToken(cfg);
   let sent = 0;
   let failed = 0;
   let broken = 0;
   let failure: string | undefined;
   for (const env of ['sandbox', 'production'] as const) {
-    const tokens = apple.filter((t) => t.environment === env).map((t) => t.apnsToken);
-    if (!tokens.length) continue;
+    const devices = apple.filter((t) => t.environment === env);
+    if (!devices.length) continue;
     const host = env === 'production' ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
     const session = http2.connect(host);
     session.on('error', (e) => console.error(`[apns] session error: ${e.message}`));
     try {
-      const results = await Promise.all(tokens.map((t) => sendOne(session, cfg, jwt, t, payload)));
+      const results = await Promise.all(devices.map((t) => sendOne(session, cfg, jwt, t.apnsToken, payload(t.locale))));
       for (const r of results) {
         if (r.status === 200) sent++;
         else {
@@ -343,7 +350,7 @@ async function vapid(ctx: ActionCtx): Promise<VapidKey> {
 // the phone's own key, so its distributor's server sees neither. A 404 or 410
 // means the phone or its distributor dropped the registration, so the row
 // goes, as a gone Apple token's does.
-async function sendWebPush(ctx: ActionCtx, alert: { title: string; body: string; threadId: string }, targets: Target[]): Promise<SendSummary> {
+async function sendWebPush(ctx: ActionCtx, alert: AlertFor, targets: Target[]): Promise<SendSummary> {
   if (!targets.length) return { sent: 0, failed: 0 };
   const key = await vapid(ctx);
   // RFC 8292 wants an https: or mailto: subject; a dev deployment's site is http.
@@ -351,7 +358,7 @@ async function sendWebPush(ctx: ActionCtx, alert: { title: string; body: string;
   const subject = site?.startsWith('https://') ? site : 'https://threadbear.mikecann.app';
   // All at once (a phone token has at most 5, MAX_DEVICES_PER_TOKEN), each
   // with its own 10-second limit, so one slow server can't hold up the rest.
-  const results = await Promise.all(targets.map((t) => webPushOne(t, alert, key, subject).catch((e: Error) => ({ status: 0, reason: e.message }))));
+  const results = await Promise.all(targets.map((t) => webPushOne(t, alert(t.locale), key, subject).catch((e: Error) => ({ status: 0, reason: e.message }))));
   let sent = 0;
   let failed = 0;
   let broken = 0;
@@ -454,7 +461,7 @@ export const notify = internalAction({
     const t: { title: string; status: string; preview: string; pendingApproval?: any; needsYou: boolean; atMac: boolean; mac?: string } | null = await ctx.runQuery(internal.devices.threadForPush, { threadId });
     // It may have been seen on the Mac in the meantime.
     if (!t || !t.needsYou) return { sent: 0, failed: 0, skipped: 'noLongerNeedsYou' };
-    const alert = { ...pushText(t), threadId };
+    const alert: AlertFor = (locale) => ({ ...pushText(t, locale), threadId });
     // A held push only goes to the phones that waited for it. He may be
     // back at the Mac by now (a Mac that slept with him at it, its held
     // pushes sent by sync:sendStaleHeldPushes, woke before this ran): then
@@ -483,7 +490,7 @@ export const notify = internalAction({
 export const test = internalAction({
   args: { title: v.optional(v.string()), body: v.optional(v.string()) },
   returns: vSendResult,
-  handler: async (ctx, { title, body }): Promise<SendSummary> => await sendAlert(ctx, { title: title ?? 'Threadbear', body: body ?? 'Test notification', threadId: 'test' }),
+  handler: async (ctx, { title, body }): Promise<SendSummary> => await sendAlert(ctx, (locale) => ({ title: title ?? 'Threadbear', body: body ?? testNotification(locale), threadId: 'test' })),
 });
 
 // The thread stopped needing Mike after a push went out for it (sync:upsertThreads):

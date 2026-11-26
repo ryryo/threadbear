@@ -10,6 +10,7 @@
 // does (relay/convex/relay.ts registerVerified, admit).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createDecipheriv } from 'node:crypto';
 import { call, load, memoryBackend, THREAD_BASICS } from '../helpers/convex-memory.ts';
 
 const push = load('push');
@@ -82,6 +83,35 @@ async function world(phones = 2) {
   const state = () => b.rows('relayRegistrations')[0]?.installState;
   return { ...b, send, state, actionCtx };
 }
+
+test('one relay send uses each phone’s saved language', async () => {
+  fakeRelay();
+  const w = await world();
+  const [japanese, english] = w.rows('devices');
+  const key = Buffer.alloc(32);
+  await w.ctx.db.patch(japanese._id, { locale: 'ja', pushKey: key.toString('base64') });
+  await w.ctx.db.patch(english._id, { pushKey: key.toString('base64') });
+  const send = globalThis.fetch;
+  const received = new Map<string, string>();
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    if (String(input) === `${RELAY}/send`) {
+      const { deviceToken, encrypted } = JSON.parse(String(init?.body)) as { deviceToken: string; encrypted: string };
+      const bytes = Buffer.from(encrypted, 'base64');
+      const decipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12));
+      decipher.setAuthTag(bytes.subarray(-16));
+      const text = Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]).toString('utf8');
+      received.set(deviceToken, (JSON.parse(text) as { body: string }).body);
+    }
+    return send(input, init);
+  }) as typeof fetch;
+  try {
+    assert.deepEqual(await w.send(), { sent: 2, failed: 0 });
+    assert.equal(received.get(japanese.apnsToken), 'テスト通知');
+    assert.equal(received.get(english.apnsToken), 'Test notification');
+  } finally {
+    globalThis.fetch = send;
+  }
+});
 
 test('a key the relay refuses is registered again and the push sent once more, and the rest go with the new key', async () => {
   const relay = fakeRelay();
