@@ -36,8 +36,6 @@ pub(crate) const CONTEXT: &str = "ThreadPane";
 /// streaming, a page of older history), before they're searched again.
 const REFRESH_AFTER: Duration = Duration::from_millis(150);
 
-/// What the bar says while the page before is on its way.
-
 /// The words last looked for in any thread: ⌘G with the bar down finds them
 /// again, as AppKit's find pasteboard does.
 static LAST_QUERY: Mutex<String> = Mutex::new(String::new());
