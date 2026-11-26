@@ -3,7 +3,7 @@
 // server with no display it gets a virtual one.
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +77,7 @@ async function waitForFile(file: string, what: string, ms: number): Promise<void
 export class GpuiDriver implements Driver {
   readonly name = 'gpui' as const;
   private home = '';
+  private ownsHome = false;
   private children: ChildProcess[] = [];
   private commands = new WeakMap<ChildProcess, string>();
   private socket?: net.Socket;
@@ -89,10 +90,11 @@ export class GpuiDriver implements Driver {
 
   private appProcess?: ChildProcess;
   private display?: string;
+  private managedPort?: number;
   /** This driver's folder on the home disk, on a remote.sh run (launchApp). */
   private homeDisk?: string;
 
-  private child(cmd: string, args: string[], env: NodeJS.ProcessEnv): ChildProcess {
+  private child(cmd: string, args: string[], env: NodeJS.ProcessEnv, inheritEnv = true): ChildProcess {
     // A process group of its own: `dbus-run-session`'s bus and the portals it
     // starts are grandchildren that outlive a plain kill, and the cloud box
     // ended up with thousands of them (9 Nov, "can't spawn worker thread").
@@ -101,7 +103,7 @@ export class GpuiDriver implements Driver {
     const registry = process.platform === 'win32' ? undefined : process.env.THREADBEAR_PERF_CHILDREN;
     const c = spawn(registry ? 'perl' : cmd,
       registry ? [path.join(root, 'scripts/perf-children.pl'), '--child', registry, cmd, ...args] : args,
-      { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+      { env: inheritEnv ? { ...process.env, ...env } : env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     this.commands.set(c, cmd);
     c.stdout?.on('data', (d) => (this.log += d));
     c.stderr?.on('data', (d) => (this.log += d));
@@ -245,21 +247,63 @@ export class GpuiDriver implements Driver {
     await this.launchApp();
   }
 
-  async start(): Promise<void> {
+  async start(managedBots = false): Promise<void> {
     if (!fs.existsSync(binary)) throw new Error(`No GPUI app at ${binary}: cargo build -p threadbear-gpui --features automation`);
     // TB_RUNNER_HOME points at a real runner's data folder (a dev runner's), for
     // a one-off check that the app works with the real thing and not just the mock.
     this.homeDisk = undefined;
-    this.home = process.env.TB_RUNNER_HOME ?? fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tb-spec-'));
+    const existingHome = managedBots ? undefined : process.env.TB_RUNNER_HOME;
+    this.ownsHome = !existingHome;
+    this.home = existingHome || fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tb-spec-'));
     const ready = path.join(this.home, 'mock-ready');
     // TB_MOCK_FIXTURES swaps the demo threads for that folder's, for one-off checks.
     // TB_MOCK_REMOTE: a scenario about other machines (@remote-threads).
     const fixtures = process.env.TB_MOCK_FIXTURES ? ['--fixtures', process.env.TB_MOCK_FIXTURES] : [];
-    if (!process.env.TB_RUNNER_HOME) {
+    if (managedBots) {
+      await this.startManagedBots();
+    } else if (!process.env.TB_RUNNER_HOME) {
       this.child(process.execPath, [path.join(root, 'mock-runner/server.mjs'), '--data-dir', this.home, '--port', '0', '--quiet', '--ready-file', ready, ...fixtures], { TB_MOCK_NO_REMOTE: process.env.TB_MOCK_REMOTE ? '' : '1' });
       await waitForFile(ready, 'The mock runner', 15_000);
     }
     await this.launchApp();
+  }
+
+  private async startManagedBots(): Promise<void> {
+    const { configureBotFixture, makeRelease, installLaunch, isolatedRunnerEnv } = await import('../../runner/test/helpers/managed-runner.ts');
+    const id = '20261127T000000Z-abc1234';
+    makeRelease(this.home, id);
+    const launch = installLaunch(this.home, id);
+    // Use one loopback port across the supervisor's replacement of the Runner.
+    const listener = net.createServer();
+    const port = await new Promise<number>((resolve, reject) => {
+      listener.once('error', reject);
+      listener.listen(0, '127.0.0.1', () => {
+        const { port } = listener.address() as AddressInfo;
+        listener.close(error => error ? reject(error) : resolve(port));
+      });
+    });
+    this.managedPort = port;
+    configureBotFixture(this.home, port);
+    const child = this.child(process.execPath, [launch], { ...isolatedRunnerEnv(this.home), THREADBEAR_PORT: String(port) }, false);
+    const deadline = Date.now() + 30_000;
+    while (!this.log.includes(`listening on ${port}`)) {
+      if (child.exitCode !== null || child.signalCode !== null || Date.now() >= deadline) {
+        throw new Error(`The isolated Bot Runner didn't start:\n${this.log}`);
+      }
+      await sleep(50);
+    }
+  }
+
+  async restartManagedRunner(): Promise<void> {
+    if (!this.managedPort) throw new Error('This scenario has no isolated Runner to restart');
+    const { RunnerClient } = await import('../../runner/src/client.ts');
+    const token = fs.readFileSync(path.join(this.home, 'secrets', 'runner-token'), 'utf8').trim();
+    const client = await RunnerClient.connect(`ws://127.0.0.1:${this.managedPort}/rpc`, token);
+    try {
+      await client.call('runner.restart', { reason: 'Bot workspace spec' });
+    } finally {
+      client.close();
+    }
   }
 
   /** The app's process, for tools that need to find its window. */
@@ -443,7 +487,9 @@ export class GpuiDriver implements Driver {
       c.stderr?.destroy();
     }
     await sleep(100);
-    if (this.home && !process.env.TB_RUNNER_HOME) await fs.promises.rm(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (this.ownsHome) await fs.promises.rm(this.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    this.ownsHome = false;
+    this.managedPort = undefined;
     if (this.homeDisk) await fs.promises.rm(this.homeDisk, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     this.homeDisk = undefined;
   }

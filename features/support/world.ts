@@ -179,8 +179,6 @@ Before(async function (this: ThreadbearWorld, { pickle }) {
   else delete process.env.TB_MOCK_RECIPES;
   if (pickle.tags.some((t) => t.name === '@coordinators')) process.env.TB_MOCK_COORDINATORS = '1';
   else delete process.env.TB_MOCK_COORDINATORS;
-  if (pickle.tags.some((t) => t.name === '@bots')) process.env.TB_MOCK_BOTS = '1';
-  else delete process.env.TB_MOCK_BOTS;
   // Example annotations only; the review board itself is always on.
   if (pickle.tags.some((t) => t.name === '@review.canvas')) process.env.TB_MOCK_REVIEW_NOTES = '1';
   else delete process.env.TB_MOCK_REVIEW_NOTES;
@@ -201,7 +199,8 @@ Before(async function (this: ThreadbearWorld, { pickle }) {
   } else delete process.env.BROWSERBEAR_HOME;
   // The web runtime's folder for this scenario (support/web-runtime.ts).
   if ((await webRuntimeSetup(pickle.tags.map((t) => t.name))) === 'skipped') return 'skipped';
-  await this.app.start();
+  if (this.app instanceof GpuiDriver && pickle.tags.some((t) => t.name === '@bots')) await this.app.start(true);
+  else await this.app.start();
   // The stress run's window size and look (tools/stress.mjs), before any step.
   const size = /^(\d+)x(\d+)$/.exec(process.env.TB_STRESS_SIZE ?? '');
   if (size) await this.app.do({ cmd: 'size', w: Number(size[1]), h: Number(size[2]) });

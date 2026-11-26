@@ -156,6 +156,7 @@ jobs:
         run: |
           npm ci --prefix mock-runner
           npm ci --prefix features
+          npm ci --omit=dev --prefix runner
       - name: The specs line up with their steps
         working-directory: features
         run: node verify-pairing.mjs

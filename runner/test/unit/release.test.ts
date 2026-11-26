@@ -10,10 +10,9 @@ import { execFileSync } from 'node:child_process';
 import { NO_LINKS_ON_WINDOWS } from '../helpers/platform.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { nullLogger } from '../../src/log.ts';
-import { MARK_NAMES } from '../../src/peer.ts';
 import { PATIENCE_MS, patiently } from '../helpers/patience.ts';
+import { cleanRunnerEnv, configureBotFixture, installLaunch, isolatedRunnerEnv, makeRelease, RUNNER_DIR } from '../helpers/managed-runner.ts';
 
-const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
 const PKG_VERSION = JSON.parse(fs.readFileSync(path.join(RUNNER_DIR, 'package.json'), 'utf8')).version as string;
 
 function writeState(home: string, state: Record<string, unknown>): void {
@@ -59,32 +58,10 @@ test('a rollback is reported once', () => {
 
 // ------------------------------------------------- the real entry point
 
-function cleanEnv(): NodeJS.ProcessEnv {
-  // A test run from inside a Threadbear thread inherits that runner's
-  // variables; none of them may reach the runner under test.
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) if (!/^THREADB(EAR|ARE)_/.test(k)) env[k] = v;
-  return env;
-}
-
 function startRunner(entry: string, home: string, extra: Record<string, string> = {}) {
   let out = '';
-  // dev-runner.sh preserves the starting thread's identity so the caller
-  // is the owner of this isolated Runner even if parent lookup times out.
-  const owner = Object.fromEntries(MARK_NAMES.flatMap(name => process.env[name] ? [[name, process.env[name]]] : []));
   const proc: ChildProcess = spawn(process.execPath, [entry], {
-    env: {
-      ...cleanEnv(),
-      ...owner,
-      THREADBEAR_HOME: home,
-      THREADBEAR_PORT: '0',
-      THREADBEAR_LOG: path.join(home, 'runner.log'),
-      THREADBEAR_CLAUDE_PATH: '/nonexistent/claude',
-      THREADBEAR_ACCOUNTS_DIR: path.join(home, 'no-accounts'),
-      THREADBEAR_CLAUDE_MAIN_DIR: path.join(home, 'no-main'),
-      THREADBEAR_CLAUDE_MAIN_JSON: path.join(home, 'no-main.json'),
-      ...extra,
-    },
+    env: { ...isolatedRunnerEnv(home), ...extra },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stdout!.on('data', (d) => (out += d));
@@ -123,18 +100,6 @@ async function connectAfterRestart(home: string, port: number) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-}
-
-// A release laid out the way deploy-runner.sh builds one, from this
-// working tree's code.
-function makeRelease(home: string, id: string): string {
-  const dir = path.join(home, 'runner', 'releases', id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.cpSync(path.join(RUNNER_DIR, 'src'), path.join(dir, 'src'), { recursive: true });
-  fs.copyFileSync(path.join(RUNNER_DIR, 'package.json'), path.join(dir, 'package.json'));
-  fs.symlinkSync(path.join(RUNNER_DIR, 'node_modules'), path.join(dir, 'node_modules'));
-  fs.writeFileSync(path.join(dir, 'release.json'), JSON.stringify({ id, commit: 'abc1234', dirty: false, builtAt: new Date().toISOString(), node: process.version }));
-  return dir;
 }
 
 test('a release reports its id, marks itself good, reports a rollback, and restarts by exiting 0', async () => {
@@ -217,13 +182,6 @@ test('a runner run from source says +source and leaves state.json alone', async 
 
 // ------------------------------------------------- under launch.mjs
 
-function installLaunch(home: string, current: string): string {
-  const launch = path.join(home, 'runner', 'launch.mjs');
-  fs.copyFileSync(path.join(RUNNER_DIR, 'launch.mjs'), launch);
-  fs.symlinkSync(path.join('releases', current), path.join(home, 'runner', 'current'));
-  return launch;
-}
-
 // The port the nth runner the supervisor started listens on.
 async function nthListening(out: () => string, n: number, ms = PATIENCE_MS): Promise<number> {
   const end = Date.now() + ms;
@@ -243,7 +201,7 @@ test('a managed Bot release writes the marker and reopens its workspace after re
     assert.deepEqual(fs.readFileSync(path.join(release, 'src', 'bots', 'ported', file)), fs.readFileSync(path.join(RUNNER_DIR, '..', 'third_party', 'dsbot', file)));
   }
   const launch = installLaunch(home, id);
-  fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ defaults: { cwd: home }, experiments: { nativeBots: true } }));
+  configureBotFixture(home);
   const marker = path.join(home, 'bots-format.json');
   const r = startRunner(launch, home, { THREADBEAR_RESTART_MS: '50' });
   try {
@@ -341,7 +299,7 @@ test('launch.mjs stops a release that never starts listening, and that start cou
 function ipcChild(code: string, env: Record<string, string> = { THREADBEAR_SUPERVISED: '1' }) {
   const src = path.join(RUNNER_DIR, 'src', 'release.ts');
   const proc = spawn(process.execPath, ['--input-type=module', '-e', `import * as release from ${JSON.stringify(src)};\n${code}`], {
-    env: { ...cleanEnv(), ...env },
+    env: { ...cleanRunnerEnv(), ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let out = '';

@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
-import { Then, When } from '@cucumber/cucumber';
+import { Given, Then, When } from '@cucumber/cucumber';
+import { GpuiDriver } from '../support/gpui.ts';
 import type { ThreadbearWorld } from '../support/world.ts';
 
 type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string };
+
+Given('the app is connected to an isolated Bot Runner', async function (this: BotWorld) {
+  await this.until('the app connected to the Bot Runner', d => d.connection === 'connected', 30_000);
+});
+
+When('the isolated Bot Runner restarts', async function (this: BotWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.restartManagedRunner();
+});
 
 async function click(world: ThreadbearWorld, tip: string) {
   const deadline = Date.now() + 10_000;
