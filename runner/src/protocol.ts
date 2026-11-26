@@ -239,7 +239,12 @@ export type ContextUsage = {
 };
 
 export type BotInputSource = { kind: 'owner' | 'runner' | 'schedule' | 'phone' | 'unknown' } | { kind: 'thread'; threadId: string };
-export type BotInputRef = { id: string; conversationId: string; source: BotInputSource };
+export type BotInputRef = {
+  id: string;
+  conversationId: string;
+  source: BotInputSource;
+  request?: { id: string; role: 'request' | 'result' };
+};
 
 export type ThreadSummary = {
   id: string;

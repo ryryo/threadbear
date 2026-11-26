@@ -5,16 +5,26 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-test('the ported DS-Bot memory format and recovery tests pass in the Runner', () => {
-  const files = ['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'review-lines.test.js', 'tidy-draft.test.js'];
+function runPorted(files: string[], count: number): void {
   const tests = files.map(file => fileURLToPath(new URL(`../../ported-dsbot/${file}`, import.meta.url)));
   // This is a separate test runner. Inheriting its parent's context makes
   // node:test skip nested test files and exit successfully without tests.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   const report = execFileSync(process.execPath, ['--test', '--test-reporter=tap', ...tests], { encoding: 'utf8', env });
-  assert.match(report, /^# tests 19\r?$/m);
-  assert.match(report, /^# pass 19\r?$/m);
+  assert.match(report, new RegExp(`^# tests ${count}\\r?$`, 'm'));
+  assert.match(report, new RegExp(`^# pass ${count}\\r?$`, 'm'));
+}
+
+test('the ported DS-Bot memory format and recovery tests pass in the Runner', () => {
+  runPorted(['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'review-lines.test.js', 'tidy-draft.test.js'], 19);
+});
+
+test('the ported DS-Bot request and delivery tests pass in the Runner', () => {
+  runPorted([
+    'request-receipts.test.js', 'request-ledger.test.ts', 'request-dispatch.test.ts', 'request-events.test.ts',
+    'request-graph.test.ts', 'request-return.test.ts', 'request-state.test.ts', 'handoff-result.test.ts',
+  ], 12);
 });
 
 test('the pinned DS-Bot baseline and direct ports match their recorded source', () => {

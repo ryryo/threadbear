@@ -6,6 +6,8 @@ import type { BotReviews } from './reviews.ts';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
 import type { ScopeChange } from './ported/personal-memory.js';
 import type { ScopeRef } from './scoped-memory.ts';
+import type { BotRequests } from './request-service.ts';
+import { NAME_MAX } from './ported/requests.js';
 
 const botId = z.uuid();
 const identity = z.object({ botId });
@@ -24,9 +26,31 @@ function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<str
   };
 }
 
+const requestSource = z.object({ threadId: z.uuid() });
+const requestIdentity = requestSource.extend({ requestId: z.uuid() });
+const requestWrite = requestIdentity.extend({ expectedRevision: z.int().positive() });
+const requestDestination = z.object({
+  botId: z.uuid(), conversationId: z.uuid().optional(), name: z.string().min(1).max(NAME_MAX),
+  text: z.string().min(1).max(30_000), when: z.enum(['queue', 'now']).default('queue'),
+});
+export function botRequestMethods(requests: () => BotRequests): Record<string, (p: Record<string, unknown>) => unknown> {
+  return {
+    'bots.requests.send': method(requestSource.extend(requestDestination.shape), ({ threadId, botId, ...input }) =>
+      requests().sendOwner(threadId, { ...input, to: botId })),
+    'bots.requests.list': method(requestSource, ({ threadId }) => ({ requests: requests().ownerList(threadId) })),
+    'bots.requests.get': method(requestIdentity, ({ threadId, requestId }) => requests().ownerRead(threadId, requestId)),
+    'bots.requests.cancel': method(requestWrite, ({ threadId, requestId, expectedRevision }) =>
+      ({ row: requests().ownerCancel(threadId, requestId, expectedRevision) })),
+    'bots.requests.retry': method(requestWrite, ({ threadId, requestId, expectedRevision }) =>
+      ({ row: requests().ownerRetry(threadId, requestId, expectedRevision) })),
+    'bots.requests.rerun': method(requestWrite.extend({ text: z.string().trim().min(1).max(30_000), operationId: botOperationId }),
+      ({ threadId, requestId, expectedRevision, text, operationId }) => requests().ownerRerun(threadId, requestId, expectedRevision, text, operationId)),
+  };
+}
+
 const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: botOperationId });
 
-export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown, protectFormat?: () => void): Record<string, (p: Record<string, unknown>) => unknown> {
+export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown, protectFormat?: () => void, requestsAvailable?: () => boolean): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
   const conversations = () => workspace().conversations;
   const memory = (scope: ScopeRef, access: 'read' | 'write') => conversations().scopedMemory.open(scope, { kind: 'owner' }, access);
@@ -43,7 +67,7 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.get': method(identity, ({ botId }) => {
       const store = repo();
       const bot = store.get(botId);
-      return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews) } };
+      return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
     }),
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
     'bots.update': method(settings.partial().extend({ botId, expectedRevision: z.int().positive() }), ({ botId, expectedRevision, ...p }) => ({ bot: repo().update(botId, expectedRevision, p) })),

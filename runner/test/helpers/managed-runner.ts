@@ -40,6 +40,35 @@ export function configureBotFixture(home: string, port?: number): void {
   }));
 }
 
+export const BOT_FIXTURE_REPLY = '日本語の見出し案。'.repeat(300);
+
+export function installBotFixtureCli(home: string): string {
+  const cli = path.join(home, 'claude-fixture');
+  fs.writeFileSync(cli, `#!${process.execPath}
+const readline = require('node:readline');
+const { randomUUID } = require('node:crypto');
+const session = randomUUID();
+const next = (frame) => console.log(JSON.stringify({ session_id: session, uuid: randomUUID(), ...frame }));
+const model = 'claude-haiku-5-5';
+const reply = ${JSON.stringify(BOT_FIXTURE_REPLY)};
+let started = false;
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const frame = JSON.parse(line);
+  if (frame.type === 'control_request') {
+    next({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: {} } });
+  }
+  if (frame.type !== 'user') return;
+  if (!started) {
+    next({ type: 'system', subtype: 'init', model });
+    started = true;
+  }
+  next({ type: 'assistant', message: { id: randomUUID(), role: 'assistant', model, content: [{ type: 'text', text: reply }] } });
+  next({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', duration_ms: 1, result: reply });
+});
+`, { mode: 0o700 });
+  return cli;
+}
+
 // Deploy's release layout, using the dependencies of this same checkout.
 export function makeRelease(home: string, id: string): string {
   const dir = path.join(home, 'runner', 'releases', id);

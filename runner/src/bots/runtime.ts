@@ -5,12 +5,14 @@ import { ErrorCode, RpcError } from '../protocol.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from './format.ts';
+import { BOT_REQUEST_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
 import { BotReviews, type BotReviewOptions } from './reviews.ts';
-import { botMethods } from './rpc.ts';
+import { botMethods, botRequestMethods } from './rpc.ts';
+import { BotRequests } from './request-service.ts';
+import type { BotInputRef } from '../protocol.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
 
@@ -35,19 +37,73 @@ export class BotRuntime {
   private readonly privacyChange = new Map<string, Promise<unknown>>();
   private workspace?: { repo: BotRepository; conversations: BotConversations };
   private reviewService?: BotReviews;
+  private requestService?: BotRequests;
+  private requestListener?: () => void;
+  private readonly requestWake = new Set<string>();
   private reviewQueue?: ReviewQueue;
   private reviewDeps?: ReviewDeps;
   private stopListening?: () => void;
 
-  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat()), {
+  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat(), () => this.requestsAvailable()), botRequestMethods(() => this.requests()), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, reason };
+      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), reason };
     },
   });
 
   constructor(options: Options) {
     this.options = options;
+  }
+
+  requestsAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_REQUEST_FORMAT);
+  }
+
+  requests(): BotRequests {
+    if (!this.requestsAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot requests need an updated Runner supervisor.');
+    const { home, runner, owns } = this.options;
+    return this.requestService ??= new BotRequests({
+      root: join(home, 'bots'), runner: runner(), repo: this.getWorkspace().repo, owns,
+      protect: () => {
+        if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+        protectBotData(home, BOT_REQUEST_FORMAT);
+      },
+      warn: () => runner().notice('error', 'A Bot request could not be reconciled.'),
+    });
+  }
+
+  requestQueue(threadId: string, ref: NonNullable<BotInputRef['request']>): 'allow' | 'wait' | 'drop' {
+    return this.requestsAvailable() ? this.requests().queue(threadId, ref) : 'wait';
+  }
+
+  startRequests(): void {
+    if (this.requestListener) return;
+    const runner = this.options.runner();
+    this.requestListener = runner.onNotification(note => {
+      if (note.method !== 'thread.event') return;
+      const { threadId, event } = note.params;
+      if (!runner.threads.get(threadId)?.rec.botLink) return;
+      if (event.type === 'turn.completed' || (event.type === 'user.message' && event.botInput?.request)) this.reconcileRequests(threadId);
+    });
+    this.reconcileRequests();
+  }
+
+  reconcileRequests(threadId?: string): void {
+    if (!this.requestsAvailable()) return;
+    const key = threadId ?? '';
+    if (this.requestWake.has(key)) return;
+    this.requestWake.add(key);
+    setImmediate(() => {
+      if (!this.requestWake.delete(key) || !this.requestsAvailable()) return;
+      try { this.requests().recover(threadId); }
+      catch { this.options.runner().notice('error', 'The Bot request journal could not be reopened.'); }
+    });
+  }
+
+  stopRequests(): void {
+    this.requestListener?.();
+    this.requestListener = undefined;
+    this.requestWake.clear();
   }
 
   startReviews(deps: ReviewDeps): void {

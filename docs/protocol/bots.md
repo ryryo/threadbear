@@ -119,3 +119,61 @@ requires a one-use approval card. The card carries the destination thread
 ID, the entire text and its SHA-256 hash. Approval is local and owner-only.
 If the destination changes or the sender loses its Private context while
 the card is open, the message is not delivered.
+
+## Requests between Bot conversations
+
+The owning Runner resolves a Bot's recipient conversation when it accepts
+a request. It keeps that conversation and Thread ID on the receipt. A retry
+keeps the same recipient even if a different conversation is selected later.
+The caller identity and source conversation come from its authenticated
+Thread, never from the message or tool arguments. A name and a fingerprint
+of the requested payload identify the same delivery within that conversation.
+Reusing the name for different words or a different destination is refused.
+
+An updated `bots.status` includes `requests` when the Runner can accept
+requests. The originating conversation can open its request list directly.
+Owner-only `bots.requests.send` accepts the originating `threadId`, recipient
+`botId`, optional recipient `conversationId`, `name`, `text` and a `when`
+of `queue` or `now`. The receipt returns `requestId`, `threadId`, `turnId`
+and the effective `when`. An unavailable steer becomes a queued message.
+Only the Runner can put `requestId` and its role on `botInput`. A queued
+request is saved in the recipient's Thread record before starting its CLI.
+An input joining an existing turn has a flushed `user.message` receipt
+with that ID before it reaches the CLI. Both use the same existing
+permission checks as a message from one Thread to another, including its
+saved ceiling when the input leaves the queue.
+
+`bots.requests.list` uses the originating `threadId`. `bots.requests.get`
+takes that ID and `requestId`. The request includes its source, destination,
+state and revision. `bots.requests.cancel` takes these IDs and
+`expectedRevision`. The durable cancellation stops queued input and
+prevents later returns, including if the recipient is in a turn that is
+doing other work. It does not stop unrelated work in that turn.
+`bots.requests.retry` takes the same fields and reconciles delivery state.
+`bots.requests.rerun` takes those fields, a new or edited `text` and an
+`operationId`. The owner creates a new attempt linked by `rerunOf` to the
+failed, cancelled or unconfirmed request. It keeps the exact recipient and
+origin. Repeating the operation returns the new attempt's previous receipt.
+
+The Runner resolves the parent link from the current authenticated Bot
+input. It rejects work addressed to the same Bot or an ancestor, and
+bounds the depth and the total number of children in each request tree.
+When a recipient delegates further, its original request waits for those
+results and for the recipient's continuation. Cancelling a request suppresses
+new inputs and replies for its descendants.
+A result goes to the exact original conversation. Its ID belongs to the
+original request, so two requests in one failed turn keep separate returns.
+The full result stays in the recipient Thread's saved events. A request
+also keeps a preview and the event reference. If the event is unavailable
+the owner can still read the preview with its incomplete status.
+On recovery the Runner checks the queued input, the saved event and the
+reply receipt before deciding whether it has any delivery left to do.
+Missing evidence of an input which could have run leaves it uncertain.
+No recovery or retry automatically creates a second run of it.
+
+Reply delivery uses the same conversation visibility and access checks.
+An archived or inaccessible source retains the request result for the
+owner to inspect. It is not redirected to another conversation. A Private
+request cannot send its input or reply outside the approval's recorded
+destination and text. These RPCs and their contents are local to the
+owning Runner. Older clients ignore the extra Bot input fields.

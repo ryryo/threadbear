@@ -12,7 +12,7 @@ import { NO_LINKS_ON_WINDOWS } from '../helpers/platform.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { nullLogger } from '../../src/log.ts';
 import { PATIENCE_MS, patiently } from '../helpers/patience.ts';
-import { cleanRunnerEnv, configureBotFixture, installLaunch, isolatedRunnerEnv, makeRelease, RUNNER_DIR } from '../helpers/managed-runner.ts';
+import { BOT_FIXTURE_REPLY, cleanRunnerEnv, configureBotFixture, installBotFixtureCli, installLaunch, isolatedRunnerEnv, makeRelease, RUNNER_DIR } from '../helpers/managed-runner.ts';
 
 const PKG_VERSION = JSON.parse(fs.readFileSync(path.join(RUNNER_DIR, 'package.json'), 'utf8')).version as string;
 
@@ -239,6 +239,52 @@ test('a managed Bot release protects both storage formats and reopens its privat
     assert.equal(await r.exited, 0);
   } finally {
     if (r.proc.exitCode === null && r.proc.signalCode === null) r.proc.kill('SIGTERM');
+  }
+});
+
+test('a managed Bot request keeps its full result and receipt after a Runner restart', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  configureBotFixture(home);
+  const fake = installBotFixtureCli(home);
+  const marker = path.join(home, 'bots-format.json');
+  const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_RESTART_MS: '50' });
+  try {
+    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    try {
+      assert.equal((await c.call('bots.status')).requests, true);
+      const { bot: editor } = await c.call('bots.create', { name: '編集者' });
+      const { bot: writer } = await c.call('bots.create', { name: 'ライター' });
+      const { conversation: source } = await c.call('bots.conversations.create', { botId: editor.id, operationId: 'source' });
+      const { conversation: destination } = await c.call('bots.conversations.create', { botId: writer.id, operationId: 'destination' });
+      assert.equal(fs.readFileSync(marker, 'utf8').trim(), '1');
+      const params = { threadId: source.threadId, botId: writer.id, name: '見出し', text: '見出しを提案してください。', when: 'queue' };
+      const accepted = await c.call('bots.requests.send', params);
+      assert.equal(accepted.threadId, destination.threadId);
+      assert.equal(fs.readFileSync(marker, 'utf8').trim(), '3');
+      const read = { threadId: source.threadId, requestId: accepted.requestId };
+      const statePath = path.join(home, 'bots', 'requests.json');
+      await patiently(() => fs.existsSync(statePath) && fs.readFileSync(statePath, 'utf8').includes('"status":"returned"'));
+      assert.deepEqual((await c.call('bots.requests.get', read)).result, { text: BOT_FIXTURE_REPLY, whole: true }, run.out());
+      await c.call('runner.restart', { reason: 'Bot request receipt verification' });
+      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      try {
+        assert.deepEqual(await reopened.call('bots.requests.send', params), accepted);
+        assert.deepEqual((await reopened.call('bots.requests.get', read)).result, { text: BOT_FIXTURE_REPLY, whole: true });
+        const { events } = await reopened.call('threads.events', { threadId: destination.threadId, limit: 100 });
+        assert.equal(events.filter((event: { type: string; text?: string }) => event.type === 'user.message' && event.text === params.text).length, 1);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      c.close();
+    }
+    run.proc.kill('SIGTERM');
+    assert.equal(await run.exited, 0);
+  } finally {
+    if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
   }
 });
 

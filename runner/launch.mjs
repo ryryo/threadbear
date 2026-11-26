@@ -447,7 +447,7 @@ async function main() {
     // launch: v8.setFlagsFromString can't resize it once the heap exists.
     const proc = spawn(process.execPath, ['--max-semi-space-size=2', path.join(root, 'src', 'main.ts')], {
       cwd: root,
-      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1', THREADBEAR_BOT_FORMAT_GUARD_VERSION: '2', THREADBEAR_BOT_FORMAT_HOME: path.dirname(dir) },
+      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1', THREADBEAR_BOT_FORMAT_GUARD_VERSION: '3', THREADBEAR_BOT_FORMAT_HOME: path.dirname(dir) },
       stdio: ['ignore', 'pipe', logFd === 2 ? 'inherit' : logFd, 'ipc'],
     });
     const boot = plan.state.boots.at(-1);

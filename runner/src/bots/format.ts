@@ -6,6 +6,7 @@ import { atomicWriteFileSync } from '../fsutil.ts';
 import { supervised } from '../release.ts';
 
 export const PRIVATE_BOT_FORMAT = 2;
+export const BOT_REQUEST_FORMAT = 3;
 
 // launch.mjs is installed on its own. Keep its reader in step with this one.
 function readFormatRequirement(home: string): number | undefined {
@@ -33,13 +34,14 @@ export function checkBotDataFormat(home: string, expected: number | readonly num
 }
 
 export function hasPrivateBotData(home: string): boolean {
-  return readFormatRequirement(home) === PRIVATE_BOT_FORMAT;
+  return (readFormatRequirement(home) ?? 0) >= PRIVATE_BOT_FORMAT;
 }
 
 export function supervisorGuardsBotData(home: string, required = baseline): boolean {
   const guardedHome = process.env.THREADBEAR_BOT_FORMAT_HOME;
   if (!supervised() || !process.connected || process.env.THREADBEAR_BOT_FORMAT_GUARD !== '1' || !guardedHome) return false;
-  if (required > baseline && process.env.THREADBEAR_BOT_FORMAT_GUARD_VERSION !== String(required)) return false;
+  const supported = Number(process.env.THREADBEAR_BOT_FORMAT_GUARD_VERSION ?? baseline);
+  if (required > baseline && (!Number.isSafeInteger(supported) || supported < required)) return false;
   try {
     return realpathSync(home) === realpathSync(guardedHome);
   } catch {
@@ -53,7 +55,7 @@ export function protectBotData(home: string, required = baseline): void {
   const current = readFormatRequirement(home);
   if (current !== undefined && !supported.includes(current)) throw new Error('This release does not support the required Bot data format');
   if (required > baseline && !supervisorGuardsBotData(home, required)) {
-    throw new Error('Private Bots need the updated Bot supervisor to be running');
+    throw new Error('This Bot feature needs the updated Bot supervisor to be running');
   }
   if (current === undefined || current < required) atomicWriteFileSync(join(home, 'bots-format.json'), `${required}\n`, 0o600);
 }

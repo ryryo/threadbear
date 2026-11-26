@@ -911,10 +911,21 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async send(threadId: string, text: string, images: Parameters<Runner['send']>[2] = [], opts: Parameters<Runner['send']>[3] = {}): Promise<{ turnId: string }> {
-    const { away: e, privateBotId } = await this.target(threadId);
-    const actor = this.privateActor();
-    if (actor && actor !== privateBotId) await this.approvePrivateSend(actor, threadId, text, images, opts.agentSignal);
+    const e = await this.authorizeSend(threadId, text, images, opts.agentSignal);
     return e ? e.call('threads.send', { threadId, text, images, ...(opts.answers ? { answers: opts.answers } : {}), ...(opts.ceiling ? { ceiling: opts.ceiling } : {}) }) : this.runner.send(threadId, text, images, this.actor ? { ...opts, botSource: { kind: 'thread', threadId: this.actor } } : opts);
+  }
+
+  async authorizeBotSend(threadId: string, text: string, signal?: AbortSignal): Promise<void> {
+    if (await this.authorizeSend(threadId, text, [], signal)) {
+      throw new RpcError(ErrorCode.notAllowed, 'Bot requests stay on their owning Runner.');
+    }
+  }
+
+  private async authorizeSend(threadId: string, text: string, images: unknown[], signal?: AbortSignal): Promise<Elsewhere | undefined> {
+    const { away, privateBotId } = await this.target(threadId);
+    const actor = this.privateActor();
+    if (actor && actor !== privateBotId) await this.approvePrivateSend(actor, threadId, text, images, signal);
+    return away;
   }
 
   private async approvePrivateSend(botId: string, threadId: string, text: string, images: unknown[], signal?: AbortSignal): Promise<void> {

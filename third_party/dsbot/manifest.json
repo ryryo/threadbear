@@ -109,7 +109,9 @@
       "sha256": "492d785294aa3b08db336fcb508b1224dbf39365ba685b8beb42ce11a225cd95",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/requests.js",
       "phase": 3,
-      "portMode": "A"
+      "portMode": "A",
+      "portPath": "runner/src/bots/ported/requests.js",
+      "changes": "Implementation preserved byte-for-byte after attribution. Runner atomic writes and the workspace owner lock adapt the port."
     },
     {
       "upstreamPath": "ds-bot/test/request-id.test.js",
@@ -117,7 +119,9 @@
       "sha256": "a17d7aadf16b0eac2d434d199da7cc580c20d16c5cc35cc0b9472d5b1be9da43",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/request-id.test.js",
       "phase": 3,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/request-receipts.test.js",
+      "changes": "The original old-identity test is copied. Other applicable concurrent, conflicting, interrupted and persistence-failure fixtures use the Runner adapter."
     },
     {
       "upstreamPath": "ds-bot/src/shared/mentions.js",
@@ -192,6 +196,66 @@
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/permissions.test.js",
       "phase": 2,
       "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/handoffs.js",
+      "upstreamBlob": "4e4733eb45d2b5af06ccfb87c23e490c5a60546b",
+      "sha256": "adf95d4fc6ff8feeb6cfc94bd1c3768e1a8c89543940a7bb6e14ff4828818ba6",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/handoffs.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/src/bots/handoff-result.ts",
+      "changes": "Retain the DS-Bot preview and incomplete-result behavior. Read the full answer from its durable ThreadStore event instead of copying it to a second file."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/delivery.js",
+      "upstreamBlob": "f7fe963271b57fc934fd9e1665c4bd1a42d909ea",
+      "sha256": "5def34d6cf20831ff32a305242efc1be87d04c98b3cabc45da820d93f6efac1b",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/delivery.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/src/bots/request-return.ts",
+      "changes": "Use the per-request result identity and check the recipient queue and flushed ThreadStore event on replay."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/turns.js",
+      "upstreamBlob": "ed0c2cfab908a1b6a48e89e837829c203bb65b13",
+      "sha256": "147b87e0a271c43e1110c4948180b9d3284f89212b86ecd3ecfe382fd569f442",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/turns.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/src/bots/request-events.ts",
+      "changes": "Resolve the reply from the recipient turn after the correlated input, through ThreadStore."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/tools.js",
+      "upstreamBlob": "0b9ee2bef73aa2da3e26faec98e0d213c26343b3",
+      "sha256": "a5c743b7c75c96498775808f029a5f15c7e08dbe6eaf33089d29b3c2a9ffb382",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/tools.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/src/bots/request-dispatch.ts",
+      "changes": "Adapt pinned destination, queue/steer and delegated ancestry to the local Runner. Reuse the existing thread tool approval and access checks."
+    },
+    {
+      "upstreamPath": "ds-bot/test/handoff-results.test.js",
+      "upstreamBlob": "9ec4072a1a2ad2b969ef55a8dc5d8b2ca79c10eb",
+      "sha256": "9b5c9e9681be8fedd6e3278c5c9ea44cf18354e1079564cb38b8469aa2a4eb96",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/handoff-results.test.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/handoff-result.test.ts",
+      "changes": "Keep long-answer and missing-answer cases with a referenced ThreadStore event."
+    },
+    {
+      "upstreamPath": "ds-bot/test/delivery-dedup.test.js",
+      "upstreamBlob": "3cb310bc923679ac838c90f76383ab128bb57a9c",
+      "sha256": "ea6da10af31c5b6bc582a89fbabf2a0ebb6d2a06538418d4d5e072c1cb7da244",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/delivery-dedup.test.js",
+      "phase": 3,
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/request-return.test.ts",
+      "changes": "Adapt duplicate completion and distinct parent work on a shared failed turn to the Runner receipt model."
     }
   ]
 }

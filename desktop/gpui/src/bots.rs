@@ -70,6 +70,50 @@ struct Capabilities {
     privacy: bool,
     #[serde(default)]
     scoped_memory: bool,
+    #[serde(default)]
+    requests: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestCard {
+    id: String,
+    revision: u64,
+    target_bot_id: String,
+    target_thread_id: String,
+    when: String,
+    state: RequestStatus,
+}
+
+#[derive(Deserialize)]
+struct RequestStatus {
+    status: String,
+    reason: Option<String>,
+    #[serde(default)]
+    failed: bool,
+}
+
+impl RequestStatus {
+    fn label(&self) -> &'static str {
+        match self.status.as_str() {
+            "admitted" => "Accepted",
+            "queued" => "Queued",
+            "running" => "In progress",
+            "returning" => "Returning result",
+            "returned" if self.failed => "Failed with result",
+            "returned" => "Result received",
+            "failed" => "Failed",
+            "uncertain" => "Delivery unconfirmed",
+            "cancelled" => "Cancelled",
+            _ => "Status unavailable",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RequestResult {
+    text: String,
+    whole: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -146,6 +190,7 @@ enum Tab {
     Conversations,
     Memory,
     Reviews,
+    Requests,
     Settings,
 }
 
@@ -158,6 +203,7 @@ enum Edit {
     Note(Option<String>),
     Privacy,
     Review(String, usize),
+    RequestRerun(String, u64),
 }
 
 impl Edit {
@@ -169,6 +215,7 @@ impl Edit {
             Self::Note(_) => "Note",
             Self::Privacy => "Dedicated work folder",
             Self::Review(_, _) => "Proposed note",
+            Self::RequestRerun(_, _) => "Instructions for the new run",
         }
     }
 }
@@ -185,6 +232,7 @@ struct Editor {
 pub(crate) struct BotsState {
     offered: bool,
     available: bool,
+    requests_available: bool,
     reason: Option<String>,
     list: Vec<Profile>,
     selected: Option<String>,
@@ -199,6 +247,8 @@ pub(crate) struct BotsState {
     memory_revision: Option<String>,
     reports: Vec<ReviewReport>,
     review_unavailable: Option<String>,
+    requests: Vec<RequestCard>,
+    request_result: Option<(String, RequestResult)>,
     editor: Option<Editor>,
     pending_conversation: Option<(String, String)>,
     pending_write: Option<(&'static str, Value, String)>,
@@ -222,6 +272,7 @@ impl Threadbear {
                 let value = status.unwrap_or_default();
                 this.bots.offered = value["enabled"].as_bool().unwrap_or(false);
                 this.bots.available = value["available"].as_bool().unwrap_or(false);
+                this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
                     this.load_bot_list(cx);
@@ -276,6 +327,7 @@ impl Threadbear {
         self.bots.detail = None;
         self.bots.source = source;
         self.bots.scope = None;
+        self.bots.request_result = None;
         self.bots.tab = if self.bots.source.is_some() {
             Tab::Memory
         } else {
@@ -322,6 +374,8 @@ impl Threadbear {
                                 this.load_bot_memory(false, cx);
                             } else if this.bots.tab == Tab::Reviews {
                                 this.load_bot_reviews(cx);
+                            } else if this.bots.tab == Tab::Requests {
+                                this.load_bot_requests(cx);
                             }
                         }
                         Err(_) => {
@@ -435,6 +489,77 @@ impl Threadbear {
         })
         .detach();
     }
+    fn load_bot_requests(&mut self, cx: &mut Context<Self>) {
+        self.bots.requests.clear();
+        self.bots.request_result = None;
+        let Some(thread_id) = self.bots.source.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        self.bots.busy = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = call(
+                client,
+                "bots.requests.list",
+                json!({ "threadId": thread_id }),
+            )
+            .await;
+            this.update(cx, |this, cx| {
+                this.bots.busy = false;
+                match result {
+                    Ok(value) => match serde_json::from_value(value["requests"].clone()) {
+                        Ok(requests) => {
+                            this.bots.requests = requests;
+                            this.bots.error = None;
+                        }
+                        Err(_) => this.bots.error = Some("Could not read the Bot requests.".into()),
+                    },
+                    Err(error) => this.bots.error = Some(error.message),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn load_bot_request_result(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.bots.busy {
+            return;
+        }
+        let Some(thread_id) = self.bots.source.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        self.bots.busy = true;
+        self.bots.error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = call(
+                client,
+                "bots.requests.get",
+                json!({ "threadId": thread_id, "requestId": id }),
+            )
+            .await;
+            this.update(cx, |this, cx| {
+                this.bots.busy = false;
+                match result {
+                    Ok(value) => match serde_json::from_value(value["result"].clone()) {
+                        Ok(result) => this.bots.request_result = Some((id, result)),
+                        Err(_) => {
+                            this.bots.error = Some("Could not read the request result.".into())
+                        }
+                    },
+                    Err(error) => this.bots.error = Some(error.message),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn load_bot_reviews(&mut self, cx: &mut Context<Self>) {
         self.bots.reports.clear();
         self.bots.review_unavailable = None;
@@ -581,7 +706,7 @@ impl Threadbear {
                         .child("Archived"),
                 )
             })
-            .child(self.render_bot_tabs(detail.capabilities.reviews, cx));
+            .child(self.render_bot_tabs(&detail.capabilities, cx));
         if let Some(editor) = editor {
             page = page.child(self.render_bot_editor(editor, cx));
         } else {
@@ -589,13 +714,14 @@ impl Threadbear {
                 Tab::Conversations => self.render_bot_conversations(detail, cx),
                 Tab::Memory => self.render_bot_memory(detail, cx),
                 Tab::Reviews => self.render_bot_reviews(detail, cx),
+                Tab::Requests => self.render_bot_requests(detail, cx),
                 Tab::Settings => self.render_bot_settings(detail, cx),
             });
         }
         page.into_any_element()
     }
 
-    fn render_bot_tabs(&self, reviews: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_bot_tabs(&self, capabilities: &Capabilities, cx: &mut Context<Self>) -> AnyElement {
         let disabled = self.bots.busy || self.bots.editor.is_some();
         h_flex()
             .gap(px(8.))
@@ -604,10 +730,15 @@ impl Threadbear {
                     (Tab::Conversations, "bot-tab-conversations", "Conversations"),
                     (Tab::Memory, "bot-tab-memory", "Memory"),
                     (Tab::Reviews, "bot-tab-reviews", "Memory review"),
+                    (Tab::Requests, "bot-tab-requests", "Requests"),
                     (Tab::Settings, "bot-tab-settings", "Settings"),
                 ]
                 .into_iter()
-                .filter(|(tab, _, _)| *tab != Tab::Reviews || reviews)
+                .filter(|(tab, _, _)| match tab {
+                    Tab::Reviews => capabilities.reviews,
+                    Tab::Requests => capabilities.requests,
+                    _ => true,
+                })
                 .map(|(tab, id, label)| {
                     bot_button(id, label, disabled)
                         .when(self.bots.tab == tab, |button| button.primary())
@@ -618,12 +749,200 @@ impl Threadbear {
                                 this.load_bot_memory(false, cx);
                             } else if tab == Tab::Reviews {
                                 this.load_bot_reviews(cx);
+                            } else if tab == Tab::Requests {
+                                this.load_bot_requests(cx);
                             }
                             cx.notify();
                         }))
                 }),
             )
             .into_any_element()
+    }
+
+    fn render_bot_requests(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
+        let busy = self.bots.busy;
+        let mut page = v_flex().gap(px(12.)).max_w(px(680.));
+        if detail.conversations.is_empty() {
+            return page
+                .child("Start a conversation to see its requests.")
+                .into_any_element();
+        }
+        page = page.child(h_flex().gap(px(6.)).flex_wrap().children(
+            detail.conversations.iter().enumerate().map(|(index, row)| {
+                let id = row.thread_id.clone();
+                let selected = self.bots.source.as_ref() == Some(&id);
+                let title = self.bot_conversation_title(index, &id, &detail.bot.name);
+                bot_button(
+                    SharedString::from(format!("bot-request-source-{id}")),
+                    title,
+                    busy,
+                )
+                .when(selected, |button| button.primary())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.bots.source = Some(id.clone());
+                    this.load_bot_requests(cx);
+                }))
+            }),
+        ));
+        page = page.child(
+            bot_button("bot-refresh-requests", "Refresh requests", busy)
+                .loading(busy)
+                .on_click(cx.listener(|this, _, _, cx| this.load_bot_requests(cx))),
+        );
+        if self.bots.requests.is_empty() && !busy {
+            page = page.child("No requests from this conversation yet.");
+        }
+        for request in self.bots.requests.iter().rev() {
+            page = page.child(self.render_bot_request_card(request, cx));
+        }
+        page.into_any_element()
+    }
+
+    fn render_bot_request_card(&self, request: &RequestCard, cx: &mut Context<Self>) -> AnyElement {
+        let id = &request.id;
+        let busy = self.bots.busy;
+        let status = request.state.status.as_str();
+        let name = self
+            .bots
+            .list
+            .iter()
+            .find(|bot| bot.id == request.target_bot_id)
+            .map_or("Recipient Bot", |bot| bot.name.as_str());
+        let target = request.target_thread_id.clone();
+        let payload = json!({ "threadId": self.bots.source, "requestId": id, "expectedRevision": request.revision });
+        let presentation = if request.when == "now" {
+            "Joined a running turn"
+        } else {
+            "Queued for the conversation"
+        };
+        let mut row = v_flex()
+            .gap(px(7.))
+            .p(px(10.))
+            .rounded(px(8.))
+            .bg(style::primary_opacity(cx, 0.04))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("{name} · {}", request.state.label())),
+            )
+            .child(
+                div()
+                    .text_color(style::secondary_text(cx))
+                    .child(presentation),
+            );
+        if let Some(reason) = &request.state.reason {
+            row = row.child(
+                div()
+                    .text_color(style::secondary_text(cx))
+                    .child(reason.clone()),
+            );
+        }
+        row = row.child(
+            bot_button(
+                SharedString::from(format!("bot-request-recipient-{id}")),
+                "Open recipient",
+                busy || !self.threads.contains_key(&target),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_thread_from_page(target.clone(), window, cx)
+            })),
+        );
+        if matches!(
+            status,
+            "admitted" | "queued" | "running" | "returning" | "uncertain"
+        ) {
+            let params = payload.clone();
+            row = row.child(
+                bot_button(
+                    SharedString::from(format!("bot-request-cancel-{id}")),
+                    "Cancel request",
+                    busy,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.bot_write(
+                        "bots.requests.cancel",
+                        params.clone(),
+                        After::Requests,
+                        window,
+                        cx,
+                    )
+                })),
+            );
+        }
+        if matches!(status, "returning" | "uncertain") {
+            row = row.child(
+                bot_button(
+                    SharedString::from(format!("bot-request-check-{id}")),
+                    "Check delivery",
+                    busy,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.bot_write(
+                        "bots.requests.retry",
+                        payload.clone(),
+                        After::Requests,
+                        window,
+                        cx,
+                    )
+                })),
+            );
+        }
+        if matches!(status, "failed" | "cancelled" | "uncertain") || request.state.failed {
+            let request_id = id.clone();
+            let revision = request.revision;
+            row = row.child(
+                bot_button(
+                    SharedString::from(format!("bot-request-rerun-{id}")),
+                    "Start another run",
+                    busy,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.edit_bot(
+                        Edit::RequestRerun(request_id.clone(), revision),
+                        String::new(),
+                        window,
+                        cx,
+                    )
+                })),
+            );
+        }
+        if matches!(status, "returning" | "returned") {
+            if let Some((_, result)) = self
+                .bots
+                .request_result
+                .as_ref()
+                .filter(|(selected, _)| selected == id)
+            {
+                row = row.child(
+                    div()
+                        .id("bot-request-result")
+                        .test_support()
+                        .a11y_role(gpui_kit::Role::GenericContainer)
+                        .aria_label(result.text.clone())
+                        .child(result.text.clone()),
+                );
+                if !result.whole {
+                    row = row.child(
+                        div()
+                            .text_color(style::secondary_text(cx))
+                            .child("The full result is unavailable."),
+                    );
+                }
+            } else {
+                let reply = id.clone();
+                row = row.child(
+                    bot_button(
+                        SharedString::from(format!("bot-request-result-{id}")),
+                        "Read result",
+                        busy,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.load_bot_request_result(reply.clone(), cx)
+                    })),
+                );
+            }
+        }
+        row.into_any_element()
     }
 
     fn render_bot_editor(&self, editor: &Editor, cx: &mut Context<Self>) -> AnyElement {
@@ -1420,6 +1739,7 @@ impl Threadbear {
         }
         let link = thread.bot_link.as_ref()?;
         let (bot_id, thread_id) = (link.bot_id.clone(), thread.id.clone());
+        let (request_bot, request_source) = (bot_id.clone(), thread_id.clone());
         let label = self
             .bots
             .list
@@ -1428,29 +1748,51 @@ impl Threadbear {
             .map_or("Bot", |bot| bot.name.as_str())
             .to_owned();
         let tip = "Show the Bot’s notes and settings";
+        let chip = div()
+            .id("thread-bot-chip")
+            .flex_none()
+            .px(px(7.))
+            .py(px(2.))
+            .rounded_full()
+            .cursor_pointer()
+            .bg(style::primary_opacity(cx, 0.06))
+            .test_support()
+            .a11y_role(gpui_kit::Role::Button)
+            .aria_label(tip)
+            .tip(tip)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_bot_from_thread(bot_id.clone(), thread_id.clone(), cx)
+            }))
+            .child(label);
         Some(
-            div()
-                .id("thread-bot-chip")
-                .flex_none()
-                .px(px(7.))
-                .py(px(2.))
-                .rounded_full()
-                .cursor_pointer()
-                .bg(style::primary_opacity(cx, 0.06))
-                .test_support()
-                .a11y_role(gpui_kit::Role::Button)
-                .aria_label(tip)
-                .tip(tip)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_bot_from_thread(bot_id.clone(), thread_id.clone(), cx)
-                }))
-                .child(label)
+            h_flex()
+                .gap(px(4.))
+                .child(chip)
+                .when(self.bots.requests_available, |row| {
+                    row.child(
+                        bot_button(
+                            "thread-bot-requests",
+                            "Requests from this conversation",
+                            self.bots.busy,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_bot_from_thread(
+                                request_bot.clone(),
+                                request_source.clone(),
+                                cx,
+                            );
+                            this.bots.tab = Tab::Requests;
+                            cx.notify();
+                        })),
+                    )
+                })
                 .into_any_element(),
         )
     }
 }
 
 enum After {
+    Requests,
     Profile,
     Conversation,
     Memory,
@@ -1511,6 +1853,11 @@ impl Threadbear {
                 "bots.reviews.approve",
                 json!({ "botId": id, "threadId": self.bots.source, "reportId": report_id, "index": index, "text": text }),
                 After::Reviews,
+            ),
+            Edit::RequestRerun(request_id, expected_revision) => (
+                "bots.requests.rerun",
+                json!({ "threadId": self.bots.source, "requestId": request_id, "expectedRevision": expected_revision, "text": text }),
+                After::Requests,
             ),
             Edit::Note(entry) => {
                 let scoped = self.bots.scope.is_some();
@@ -1600,6 +1947,7 @@ impl Threadbear {
                     "bots.settings.privacy"
                         | "bots.settings.automaticReview"
                         | "bots.settings.automaticTidy"
+                        | "bots.requests.rerun"
                 ))
         {
             let operation = match &self.bots.pending_write {
@@ -1683,6 +2031,10 @@ impl Threadbear {
             After::Memory => {
                 self.bots.editor = None;
                 self.load_bot_memory(false, cx);
+            }
+            After::Requests => {
+                self.bots.editor = None;
+                self.load_bot_requests(cx);
             }
             After::Reviews => {
                 self.bots.editor = None;

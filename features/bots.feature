@@ -27,3 +27,13 @@ Feature: Bot workspace
     And I add a Bot memory note saying "署名は不要"
     Then the Bot's notes show "署名は不要"
     And the Bot's notes do not show "見出しに日付を入れる"
+
+  @bots.requests @bots @swift-pending
+  Scenario: The original Bot conversation opens its saved request after a reconnect
+    Given the app is connected to an isolated Bot Runner
+    When I open a Bot conversation with a completed request
+    And the isolated Bot Runner restarts
+    Then the app is connected again
+    When I open requests from the original Bot conversation
+    And I read the saved Bot request result
+    Then I see the full saved request result

@@ -453,6 +453,8 @@ async function main(): Promise<void> {
     const s = experimentOn(cfg.home, ARCHIVE_EXPERIMENT) && !bots.hasPrivateBots() ? archiveMcpServer() : undefined;
     return s ? { [ARCHIVE_MCP_NAME]: s } : {};
   };
+  const requestTools = (threadId: string) => bots.requestsAvailable() && runner.threads.get(threadId)?.rec.botLink
+    ? bots.requests() : undefined;
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
     registry,
@@ -463,7 +465,7 @@ async function main(): Promise<void> {
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
-        () => privateAgent(threadId) ? undefined : runner.coordinators),
+        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId)),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -481,6 +483,7 @@ async function main(): Promise<void> {
       pocket: () => localOnly ? undefined : pocketControl(), gateway: () => localOnly ? undefined : cfg.connectorsUrl,
       gatewayHealth: localOnly ? undefined : gatewayHealth, remote: () => localOnly ? undefined : remoteControl(),
       coordinators: () => localOnly ? undefined : runner.coordinators,
+      botRequests: requestTools(threadId),
     });
   };
   // One app-server per live Codex thread, each starting what E says is
@@ -573,6 +576,7 @@ async function main(): Promise<void> {
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
     botContext: (rec) => bots.context(rec),
+    botRequestQueue: (threadId, ref) => bots.requestQueue(threadId, ref),
     ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id), pendingBotPrivacy: id => bots.pendingPrivateThread(id) }),
     projects,
     atMac: () => atMac,
@@ -632,6 +636,7 @@ async function main(): Promise<void> {
         // A review the old runner couldn't start (runner/lab-review.ts),
         // after the resume, which it would otherwise turn away.
         runner.startOwedReviews(threadId);
+        bots.reconcileRequests(threadId);
         // It may have finished on the old runner while a thread waiting on
         // it had already come across. After its own carry-ons, which are
         // new work, so a finish they replace doesn't count.
@@ -665,6 +670,7 @@ async function main(): Promise<void> {
   const coordinators = new Coordinators({ home: cfg.home, host: runner, projects, clock: realClock, log, enabled: () => !box && experimentOn(cfg.home, 'coordinators'), elsewhere: (id) => peers.find(id) });
   runner.coordinators = coordinators;
   runner.start({ skip: kept });
+  if (!box) bots.startRequests();
   // App-restart watches with words from before ceilings: bound now.
   appRestarts.bindOldCeilings((id) => (runner.has(id) ? runner.authoritySaved(id).mode : undefined));
   bootStep('threads');
@@ -1945,6 +1951,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     bots.stopReviews();
+    bots.stopRequests();
     // Leaving after an uncaught error: this process may be half way through
     // something, so the stop gets a deadline (error-exits.ts).
     if (leavingAfterError) armStopDeadline();

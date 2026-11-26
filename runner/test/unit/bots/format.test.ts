@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkBotDataFormat, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
+import { BOT_REQUEST_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -99,4 +99,25 @@ test('private data needs the new supervisor and private-capable releases cannot 
   assert.equal(checkBotDataFormat(home), true);
   protectBotData(home, 1);
   assert.equal(readFileSync(marker, 'utf8').trim(), '2');
+});
+
+
+test('request data requires a compatible supervisor and preserves the prior Private requirement', t => {
+  const { home, dir, marker } = fixture(t);
+  for (const [id, versions] of [['private', [1, 2]], ['requests', [1, 2, 3]]] as const) {
+    const release = join(dir, 'releases', id, 'src', 'bots');
+    mkdirSync(release, { recursive: true });
+    writeFileSync(join(release, 'format.json'), '1\n');
+    writeFileSync(join(release, 'format-compatible.json'), JSON.stringify(versions) + '\n');
+  }
+  writeFileSync(marker, '2\n');
+  assert.throws(() => protectBotData(home, BOT_REQUEST_FORMAT), /updated Bot supervisor/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '2');
+  writeFileSync(marker, '3\n');
+  assert.equal(launch.releaseCanUseBotData(dir, 'private'), false);
+  assert.equal(launch.releaseCanUseBotData(dir, 'requests'), true);
+  assert.equal(checkBotDataFormat(home), true);
+  assert.equal(hasPrivateBotData(home), true);
+  protectBotData(home, 1);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '3');
 });

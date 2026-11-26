@@ -895,6 +895,10 @@ the owning runner.
   write adds `<home>/bots-format.json` so a managed release without support
   for that data cannot start. Bot notes go to the CLI of a linked conversation
   as context. Bot controls and notes files stay on the owning Runner.
+  Its request journal and receipt store under `<home>/bots/` keep the original
+  and recipient conversation IDs and a reference to the result. The full
+  result lives in the recipient's Thread events. The first request raises the
+  required format to 3 after the updated supervisor has been confirmed.
   The workspace team and project scopes have their own directories and
   journals there. Memory reviews keep their cursor, model, event range and
   decisions under `<home>/bots/reviews/`. An opted-in review or a requested

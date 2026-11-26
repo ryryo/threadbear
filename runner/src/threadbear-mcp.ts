@@ -60,7 +60,13 @@ import { FINDINGS_REFUSALS, FINDINGS_REFUSED, MAX_FINDINGS, findingsProblem, ref
 // the other runner, which is why every call may be a promise.
 type Aw<T> = T | Promise<T>;
 type Async<T, K extends keyof T> = { [P in K]: T[P] extends (...a: infer A) => infer R ? (...a: A) => Aw<R> : never };
+import type { BotRequests } from './bots/request-service.ts';
+import { NAME_MAX } from './bots/ported/requests.js';
+
+type BotTools = Pick<BotRequests, 'sendBot'>;
+
 export type ThreadControl = {
+  authorizeBotSend?(threadId: string, text: string, signal?: AbortSignal): Promise<void>;
   hello: Runner['hello'];
   createReview?: (...args: Parameters<Runner['createReview']>) => Aw<ReturnType<Runner['createReview']>>;
   createButton?: (...args: Parameters<Runner['createButton']>) => Aw<ReturnType<Runner['createButton']>>;
@@ -287,8 +293,10 @@ export function buildThreadbearTools(
     // (needs.ts, projectStepNudge), off likewise.
     projectStepNote?: boolean;
     coordinators?: () => Coordinators | undefined;
+    botRequests?: BotTools;
   } = {},
 ) {
+  const botRequests = opts.botRequests;
   const codex = opts.provider === 'codex';
   // A schedule's check (schedule-check.ts).
   const checkArg = (update: boolean): Record<string, z.ZodOptional<z.ZodTypeAny>> => ({
@@ -657,6 +665,12 @@ export function buildThreadbearTools(
     const t = await accessOf(id);
     return above(t, caller) ? [`${verb} "${t.title}", which has ${accessName(t)}`] : [];
   };
+  async function confirmMessage(name: 'send_message' | 'message_bot', id: string, head: string, text: string, signal?: AbortSignal): Promise<PermissionMode> {
+    const sender = await restricted();
+    const before = (await accessOf(id)).mode;
+    await confirm(name, await sendReason(id, sender), { threadId: id, from: head.trim(), text }, signal);
+    return sender ? asCeiling(higherOf(sender.mode, lowerOf(before, (await accessOf(id)).mode))) : 'full';
+  }
   // What a card for a schedule's check approves, from a thread that asks
   // first: a check runs by itself from then on, bound to what it runs (the
   // answer goes to the Scheduler, which binds it as it saves, or refuses if
@@ -2477,10 +2491,7 @@ export function buildThreadbearTools(
         // the receiver's access if more, as the card shows it and as it is
         // after (the less of the two, so a raise while the card waits gives
         // it nothing more, nor a look that changes between the two reads).
-        const sender = await restricted();
-        const before = (await accessOf(id)).mode;
-        await confirm('send_message', await sendReason(id, sender), { threadId: id, from: head.trim(), text }, extra?.signal);
-        const ceiling: PermissionMode = sender ? asCeiling(higherOf(sender.mode, lowerOf(before, (await accessOf(id)).mode))) : 'full';
+        const ceiling = await confirmMessage('send_message', id, head, text, extra?.signal);
         const remote = opts.remote?.();
         if (hit.other && remote) {
           // A send command for that runner, as the Mac app's (relay.ts).
@@ -2495,6 +2506,28 @@ export function buildThreadbearTools(
         return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
     ),
+    ...(botRequests && control.authorizeBotSend ? [tool(
+      'message_bot',
+      'Ask another Bot in this workspace. Reuse the same request name when retrying the same brief. The result returns here.',
+      {
+        bot: z.string().min(1).max(128),
+        conversationId: z.uuid().optional(),
+        request: z.string().min(1).max(NAME_MAX),
+        text: z.string().min(1).max(30_000),
+        when: z.enum(['queue', 'now']).optional(),
+      },
+      handle(async ({ bot, conversationId, request, text, when }, extra) => {
+        const head = await from();
+        const receipt = await botRequests.sendBot(selfId, { to: bot, conversationId, name: request, text, when: when ?? 'queue' }, async (target, body) => {
+          const ceiling = await confirmMessage('message_bot', target.threadId, head, body, extra?.signal);
+          await control.authorizeBotSend!(target.threadId, body, extra?.signal);
+          if (extra?.signal?.aborted) throw new Error('The Bot request was cancelled before sending.');
+          return ceiling;
+        });
+        const mode = receipt.when === 'now' ? 'Sent to its running turn.' : 'Queued for the selected conversation.';
+        return `${mode} Request ${receipt.requestId}.`;
+      }),
+    )] : []),
     tool(
       'update_thread',
       "Changes a thread's title, model or permissions, snoozes it, or archives it. Leave threadId out for this thread. This thread can be renamed or have its model or permissions changed, but not snoozed or archived while it's working (that would stop this turn). If the user asks for this thread to be archived or snoozed, pass archive: true or snooze to end_turn instead.",
@@ -2824,14 +2857,14 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const isHelper = Boolean(coordinators?.()?.helperOwner(selfId));
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: isHelper ? COORDINATOR_WORKER_PROMPT : serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), livePages: livePages?.() ?? false }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

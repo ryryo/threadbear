@@ -269,7 +269,7 @@ export class GpuiDriver implements Driver {
   }
 
   private async startManagedBots(): Promise<void> {
-    const { configureBotFixture, makeRelease, installLaunch, isolatedRunnerEnv } = await import('../../runner/test/helpers/managed-runner.ts');
+    const { configureBotFixture, installBotFixtureCli, makeRelease, installLaunch, isolatedRunnerEnv } = await import('../../runner/test/helpers/managed-runner.ts');
     const id = '20261127T000000Z-abc1234';
     makeRelease(this.home, id);
     const launch = installLaunch(this.home, id);
@@ -284,7 +284,10 @@ export class GpuiDriver implements Driver {
     });
     this.managedPort = port;
     configureBotFixture(this.home, port);
-    const child = this.child(process.execPath, [launch], { ...isolatedRunnerEnv(this.home), THREADBEAR_PORT: String(port) }, false);
+    const fixture = process.platform === 'win32' ? undefined : installBotFixtureCli(this.home);
+    const child = this.child(process.execPath, [launch], {
+      ...isolatedRunnerEnv(this.home), THREADBEAR_PORT: String(port), ...(fixture ? { THREADBEAR_CLAUDE_PATH: fixture } : {}),
+    }, false);
     const deadline = Date.now() + 30_000;
     while (!this.log.includes(`listening on ${port}`)) {
       if (child.exitCode !== null || child.signalCode !== null || Date.now() >= deadline) {
@@ -294,16 +297,20 @@ export class GpuiDriver implements Driver {
     }
   }
 
-  async restartManagedRunner(): Promise<void> {
-    if (!this.managedPort) throw new Error('This scenario has no isolated Runner to restart');
+  async withManagedRunner<T>(use: (client: import('../../runner/src/client.ts').RunnerClient) => Promise<T>): Promise<T> {
+    if (!this.managedPort) throw new Error('This scenario has no isolated Runner');
     const { RunnerClient } = await import('../../runner/src/client.ts');
     const token = fs.readFileSync(path.join(this.home, 'secrets', 'runner-token'), 'utf8').trim();
     const client = await RunnerClient.connect(`ws://127.0.0.1:${this.managedPort}/rpc`, token);
     try {
-      await client.call('runner.restart', { reason: 'Bot workspace spec' });
+      return await use(client);
     } finally {
       client.close();
     }
+  }
+
+  async restartManagedRunner(): Promise<void> {
+    await this.withManagedRunner(client => client.call('runner.restart', { reason: 'Bot workspace spec' }));
   }
 
   /** The app's process, for tools that need to find its window. */
