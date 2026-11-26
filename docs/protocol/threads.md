@@ -57,7 +57,8 @@ read, model call or save can retry that range. A malformed reply advances the
 checkpoint with a diagnostic code and retains no raw answer. A result with
 proposed changes waits for the owner to decide. Its evidence includes the
 Thread, conversation, Bot settings revision, model and sequence range.
-`bots.settings.automaticReview` takes `botId`, `expectedRevision` and `enabled`.
+`bots.settings.automaticReview` takes `botId`, `expectedRevision`, `operationId`
+and `enabled`.
 `bots.reviews.list` takes `botId` and a linked `threadId`; `bots.reviews.reject`
 also takes `reportId`, zero-based `index` and `operationId`. These methods are
 local owner operations, with the same authentication as the Bot settings.
@@ -66,6 +67,9 @@ replacement `text` for an add or edit. The Runner checks that the previous
 note still matches and is unpinned at the time of the write. It records the
 decision, source and operation ID in memory history and can recover the
 decision after a restart if the history write completed first.
+`bots.reviews.retry` takes `botId`, `threadId`, `reportId` and `operationId`
+to review the same event range again with the Bot's current binding. It adds
+a report linked to the previous one and leaves the automatic cursor alone.
 
 Memory access uses the actor established by the Runner and current scope
 membership. A Bot's own scope, a team, a group and a project are distinct
@@ -79,9 +83,13 @@ entry, query or change fields. The owning Runner resolves the scope IDs.
 The initial shared team is the Bot workspace. Project IDs resolve against
 Threadbear Projects. Each scope has its own notes and change journal.
 Scope reads report the current `revision`. Scope writes require that revision
-as `expectedRevision` and a UUID `operationId`. Repeating an accepted operation
+as `expectedRevision` and an `operationId`. Repeating an accepted operation
 returns its recorded result. A different payload with that ID or a stale
 revision is refused before touching any notes.
+`bots.memory.scope.tidy` uses a Bot's selected login and model for a changed
+scope. It takes the scope write fields and `botId`. It reports merged, moved
+and retired counts. Pinned notes are out of scope. The journal retains the
+affected files and can undo the batch if none of those files has changed.
 
 Private conversations and their notes are owner-local. Thread RPC and agent
 tools enforce visibility at each read, including filtered lists and searches,

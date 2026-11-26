@@ -35,7 +35,7 @@ export class BotRuntime {
   private reviewDeps?: ReviewDeps;
   private stopListening?: () => void;
 
-  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p)), {
+  readonly methods = Object.assign(botMethods(() => this.getWorkspace(), () => this.reviews(), p => this.makePrivate(p), () => this.protectNewFormat()), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
       return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, reason };
@@ -113,6 +113,12 @@ export class BotRuntime {
     return this.repository ??= new BotRepository(join(home, 'bots'), owner(), () => protectBotData(home));
   }
 
+  private protectNewFormat(): void {
+    if (!this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the old Runner to finish handing over.');
+    const protect = this.options.protectPrivacy ?? (() => protectBotData(this.options.home, PRIVATE_BOT_FORMAT));
+    protect();
+  }
+
   private makePrivate({ botId, expectedRevision, folder, operationId }: { botId: string; expectedRevision: number; folder: string; operationId: string }) {
     const { repo } = this.getWorkspace();
     const runner = this.options.runner();
@@ -125,8 +131,7 @@ export class BotRuntime {
       if ([runner.cfg.defaults.cwd, ...threadFolders, ...otherFolders].some(path => foldersOverlap(canonical, path))) {
         throw new Error('Choose a dedicated Bot folder outside the Runner default and any existing work folders');
       }
-      const protect = this.options.protectPrivacy ?? (() => protectBotData(this.options.home, PRIVATE_BOT_FORMAT));
-      protect();
+      this.protectNewFormat();
     });
   }
 

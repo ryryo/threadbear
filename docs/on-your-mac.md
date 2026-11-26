@@ -895,6 +895,13 @@ the owning runner.
   write adds `<home>/bots-format.json` so a managed release without support
   for that data cannot start. Bot notes go to the CLI of a linked conversation
   as context. Bot controls and notes files stay on the owning Runner.
+  The workspace team and project scopes have their own directories and
+  journals there. Memory reviews keep their cursor, model, event range and
+  decisions under `<home>/bots/reviews/`. An opted-in review or a requested
+  tidy feeds scrubbed text to that Bot's selected Claude or Codex login, using
+  its official CLI with tools disabled. Private conversations stay out of
+  Convex and require a dedicated work folder. Private protection and the first
+  tidy use format 2 and need the updated supervisor before the Runner can write.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac. A runner that signs releases with a Touch ID key also reads

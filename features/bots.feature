@@ -14,3 +14,16 @@ Feature: Bot workspace
     Then the app is connected again
     When I open memory from the current Bot conversation
     Then the Bot's notes show "見出しは短くする"
+
+  @bots.scoped_notes @bots @swift-pending
+  Scenario: A workspace note stays in the workspace's memory
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Writer" from the Bots page
+    And I open the Bot's Memory tab
+    And I select "Workspace team" in Bot memory
+    And I add a Bot memory note saying "見出しに日付を入れる"
+    Then the Bot's notes show "見出しに日付を入れる"
+    When I select "Bot: Writer" in Bot memory
+    And I add a Bot memory note saying "署名は不要"
+    Then the Bot's notes show "署名は不要"
+    And the Bot's notes do not show "見出しに日付を入れる"

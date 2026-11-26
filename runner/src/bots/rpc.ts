@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { BotConversations } from './conversations.ts';
-import type { BotRepository } from './repository.ts';
+import { botOperationId, type BotRepository } from './repository.ts';
 import type { BotReviews } from './reviews.ts';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
 import type { ScopeChange } from './ported/personal-memory.js';
@@ -11,9 +11,9 @@ const botId = z.uuid();
 const identity = z.object({ botId });
 const settings = z.object({ name: z.string().min(1), role: z.string().optional(), instructions: z.string().optional() });
 const memoryTarget = identity.extend({ threadId: z.uuid() });
-const proposal = memoryTarget.extend({ reportId: z.uuid(), index: z.int().nonnegative(), operationId: z.uuid() });
+const proposal = memoryTarget.extend({ reportId: z.uuid(), index: z.int().nonnegative(), operationId: botOperationId });
 const scoped = z.object({ scope: z.object({ kind: z.enum(['bot', 'team', 'group', 'project']), id: z.string().min(1).max(128) }) });
-const scopeWrite = scoped.extend({ operationId: z.uuid(), expectedRevision: z.union([z.literal('empty'), z.uuid()]) });
+const scopeWrite = scoped.extend({ operationId: botOperationId, expectedRevision: z.union([z.literal('empty'), z.uuid()]) });
 
 function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
   return (p) => {
@@ -23,9 +23,9 @@ function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<str
   };
 }
 
-const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: z.uuid() });
+const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: botOperationId });
 
-export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown): Record<string, (p: Record<string, unknown>) => unknown> {
+export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown, protectFormat?: () => void): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
   const conversations = () => workspace().conversations;
   const memory = (scope: ScopeRef, access: 'read' | 'write') => conversations().scopedMemory.open(scope, { kind: 'owner' }, access);
@@ -33,7 +33,11 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
   const change = (target: z.infer<typeof scopeWrite>, mutation: ScopeChange) => memory(target.scope, 'write').change(mutation, target.operationId, target.expectedRevision, now());
   return {
     'bots.list': () => ({ bots: repo().list() }),
-    'bots.get': method(identity, ({ botId }) => { const store = repo(); return { bot: store.get(botId), conversations: store.conversations(botId) }; }),
+    'bots.get': method(identity, ({ botId }) => {
+      const store = repo();
+      const bot = store.get(botId);
+      return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews) } };
+    }),
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
     'bots.update': method(settings.partial().extend({ botId, expectedRevision: z.int().positive() }), ({ botId, expectedRevision, ...p }) => ({ bot: repo().update(botId, expectedRevision, p) })),
     'bots.archive': method(identity.extend({ expectedRevision: z.int().positive() }), p => ({ bot: conversations().archive(p.botId, p.expectedRevision) })),
@@ -61,13 +65,14 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.scope.remove': method(scopeWrite.extend({ entryId: z.string().min(1) }), p => change(p, { op: 'remove', entryId: p.entryId })),
     'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => memory(scope, 'read').historyPage(before)),
     'bots.memory.scope.restore': method(scopeWrite.extend({ changeId: z.uuid() }), p => change(p, { op: 'restore', changeId: p.changeId })),
+    ...(reviews && protectFormat && { 'bots.memory.scope.tidy': method(scopeWrite.extend({ botId }), p => reviews().tidy(p.botId, () => memory(p.scope, 'write'), p.expectedRevision, p.operationId, protectFormat)) }),
     ...(makePrivate && { 'bots.settings.privacy': method(privacy, p => ({ bot: makePrivate(p) })) }),
     ...(reviews && {
-      'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean() }), ({ botId, expectedRevision, enabled }) => {
-        const service = reviews();
-        const reason = enabled ? service.unavailable(repo().get(botId)) : undefined;
-        if (reason) throw new RpcError(ErrorCode.notAllowed, reason);
-        return { bot: repo().setReviewEnabled(botId, expectedRevision, enabled) };
+      'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean(), operationId: botOperationId }), ({ botId, expectedRevision, enabled, operationId }) => {
+        return { bot: repo().setReviewEnabled(botId, expectedRevision, enabled, operationId, () => {
+          const reason = enabled ? reviews().unavailable(repo().get(botId)) : undefined;
+          if (reason) throw new RpcError(ErrorCode.notAllowed, reason);
+        }) };
       }),
       'bots.reviews.list': method(memoryTarget, p => ({
         reports: reviews().reports(p.botId, p.threadId), unavailable: reviews().unavailable(repo().get(p.botId)),
@@ -78,6 +83,10 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
       }),
       'bots.reviews.approve': method(proposal.extend({ text: z.string().trim().min(1).max(MEMORY_LIMITS.entry).optional() }), p => {
         reviews().approve(p.botId, p.threadId, p.reportId, p.index, p.operationId, p.text);
+        return {};
+      }),
+      'bots.reviews.retry': method(proposal.omit({ index: true }), async p => {
+        await reviews().retry(p.botId, p.threadId, p.reportId, p.operationId);
         return {};
       }),
     }),

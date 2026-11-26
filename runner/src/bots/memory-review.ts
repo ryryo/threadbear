@@ -92,7 +92,7 @@ export async function reviewBatch({ bot, lines, through, notes, redact, ask, gro
     who: group ? `The group: ${keeper.name}.` : `The Bot: ${keeper.name}${keeper.role ? `, ${keeper.role}` : ''}.`,
     tag: group ? 'group' : 'own',
     numbered: notes.map(note => ({
-      scope: group ? 'group' : 'own', file: {}, meta: { pinned: note.pinned }, text: redact(note.text),
+      scope: group ? 'group' : 'own', file: { ...(note.topic ? { topic: redact(note.topic) } : {}) }, meta: { pinned: note.pinned }, text: redact(note.text),
     })),
     where: group ? 'the group chat' : 'its own chat with the user',
     earlier: [], fresh: texts, more, language: writtenIn(owner.map(line => redact(line.text).replace(/^User: /, '')), 'the user’s language'),

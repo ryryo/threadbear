@@ -117,7 +117,7 @@ export class BotConversations {
     if (bot.archivedAt) throw new Error('This Bot is archived');
     this.conversationRecord(bot.id, rec.id);
     const memory = this.scopedMemory.open({ kind: 'bot', id: bot.id }, { kind: 'bot', id: bot.id, private: Boolean(bot.privacy), grants: [] }, 'read');
-    const notes = memory.list(this.runner.isoNow().slice(0, 10));
+    const notes = memory.list(this.runner.isoNow().slice(0, 10)).filter(note => !note.topic);
     return [
       `Bot name: ${bot.name}`,
       bot.role ? `Role: ${bot.role}` : '',

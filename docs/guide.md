@@ -2068,6 +2068,20 @@ To use one conversation's model and login for future conversations, open the
 Bot from that conversation, go to **Settings** and choose **Use this
 conversation’s model**. You can return to the Runner defaults there too.
 
+In **Memory**, choose the Bot, the workspace team or a Threadbear project to
+see its notes and history. **Tidy this memory** uses the selected Bot's model
+to review the scope. Its changes keep pinned notes in place and can be undone
+from History while the affected notes are unchanged.
+
+**Memory review** can propose changes from the user's messages after a
+conversation. Turn it on after choosing the Bot's model and login. You can
+accept, edit or reject a proposed change and review the same messages again.
+
+Before a Bot's first conversation, **Set private work folder** gives it a
+dedicated folder. Its conversations stay on their owning Runner and the app
+keeps them out of shared links, agent search and phone sync. Processes on the
+same OS account still have that account's filesystem access.
+
 ## Connectors
 <!-- slug: connectors -->
 

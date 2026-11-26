@@ -27,6 +27,13 @@ struct Profile {
     revision: u64,
     archived_at: Option<String>,
     model_binding: Option<ModelBinding>,
+    review_enabled: Option<bool>,
+    privacy: Option<Privacy>,
+}
+
+#[derive(Clone, Deserialize)]
+struct Privacy {
+    folder: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -46,6 +53,68 @@ struct Conversation {
 struct Details {
     bot: Profile,
     conversations: Vec<Conversation>,
+    #[serde(default)]
+    capabilities: Capabilities,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Capabilities {
+    #[serde(default)]
+    reviews: bool,
+    #[serde(default)]
+    privacy: bool,
+    #[serde(default)]
+    scoped_memory: bool,
+}
+
+#[derive(Clone, Deserialize)]
+struct MemoryScope {
+    kind: String,
+    id: String,
+    title: String,
+    archived: bool,
+}
+
+impl MemoryScope {
+    fn target(&self) -> Value {
+        json!({ "kind": self.kind, "id": self.id })
+    }
+}
+
+#[derive(Deserialize)]
+struct ReviewReport {
+    id: String,
+    source: ReviewSource,
+    changes: Vec<ReviewChange>,
+    diagnostic: Option<String>,
+    rejected: u64,
+    usage: Option<ReviewUsage>,
+}
+
+#[derive(Deserialize)]
+struct ReviewSource {
+    model: String,
+    first: u64,
+    through: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewUsage {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    notional_usd: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewChange {
+    op: String,
+    decision: String,
+    text: Option<String>,
+    before: Option<String>,
+    accepted_text: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -54,6 +123,7 @@ struct Note {
     text: String,
     pinned: bool,
     until: Option<String>,
+    topic: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -71,6 +141,7 @@ enum Tab {
     #[default]
     Conversations,
     Memory,
+    Reviews,
     Settings,
 }
 
@@ -81,6 +152,8 @@ enum Edit {
     Role,
     Instructions,
     Note(Option<String>),
+    Privacy,
+    Review(String, usize),
 }
 
 impl Edit {
@@ -90,6 +163,8 @@ impl Edit {
             Self::Role => "Role",
             Self::Instructions => "Instructions",
             Self::Note(_) => "Note",
+            Self::Privacy => "Dedicated work folder",
+            Self::Review(_, _) => "Proposed note",
         }
     }
 }
@@ -99,6 +174,7 @@ struct Editor {
     field: Entity<TextareaState>,
     // Edits keep the revision seen at the start, including after reloads.
     revision: Option<u64>,
+    memory_revision: Option<String>,
 }
 
 #[derive(Default)]
@@ -114,8 +190,14 @@ pub(crate) struct BotsState {
     notes: Vec<Note>,
     changes: Vec<Change>,
     more: Option<String>,
+    scopes: Vec<MemoryScope>,
+    scope: Option<MemoryScope>,
+    memory_revision: Option<String>,
+    reports: Vec<ReviewReport>,
+    review_unavailable: Option<String>,
     editor: Option<Editor>,
     pending_conversation: Option<(String, String)>,
+    pending_write: Option<(&'static str, Value, String)>,
     operation: u64,
     busy: bool,
     error: Option<String>,
@@ -189,6 +271,7 @@ impl Threadbear {
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
         self.bots.source = source;
+        self.bots.scope = None;
         self.bots.tab = if self.bots.source.is_some() {
             Tab::Memory
         } else {
@@ -233,6 +316,8 @@ impl Threadbear {
                             this.bots.error = None;
                             if this.bots.tab == Tab::Memory {
                                 this.load_bot_memory(false, cx);
+                            } else if this.bots.tab == Tab::Reviews {
+                                this.load_bot_reviews(cx);
                             }
                         }
                         Err(_) => {
@@ -249,43 +334,129 @@ impl Threadbear {
     }
 
     fn load_bot_memory(&mut self, append: bool, cx: &mut Context<Self>) {
-        let (Some(bot_id), Some(thread_id)) =
-            (self.bots.selected.clone(), self.bots.source.clone())
-        else {
+        let scoped = self.bots.scope.is_some();
+        let catalog = !append
+            && self
+                .bots
+                .detail
+                .as_ref()
+                .is_some_and(|detail| detail.capabilities.scoped_memory);
+        let request = if let Some(scope) = &self.bots.scope {
+            Some(json!({ "scope": scope.target() }))
+        } else {
+            self.bots
+                .selected
+                .as_ref()
+                .zip(self.bots.source.as_ref())
+                .map(|(bot_id, thread_id)| json!({ "botId": bot_id, "threadId": thread_id }))
+        };
+        if request.is_none() {
             self.bots.notes.clear();
             self.bots.changes.clear();
             self.bots.more = None;
-            return;
-        };
+            self.bots.memory_revision = None;
+            if !catalog {
+                return;
+            }
+        }
+        if !append {
+            self.bots.notes.clear();
+            self.bots.changes.clear();
+            self.bots.more = None;
+            self.bots.memory_revision = None;
+        }
         self.bots.busy = true;
         let before = if append { self.bots.more.clone() } else { None };
-        let source = json!({ "botId": bot_id, "threadId": thread_id });
         let client = self.client.clone();
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let mut history = source.clone();
-            if let Some(before) = before {
-                history["before"] = json!(before);
-            }
             let result = async {
-                let notes = call(client.clone(), "bots.memory.read", source).await?;
-                let history = call(client, "bots.memory.history", history).await?;
-                Ok::<_, crate::RpcError>((notes, history))
+                let scopes = if catalog {
+                    Some(call(client.clone(), "bots.memory.scopes", json!({})).await?)
+                } else {
+                    None
+                };
+                let memory = if let Some(source) = request {
+                    let mut history = source.clone();
+                    if let Some(before) = before {
+                        history["before"] = json!(before);
+                    }
+                    let read = if scoped {
+                        "bots.memory.scope.read"
+                    } else {
+                        "bots.memory.read"
+                    };
+                    let recent = if scoped {
+                        "bots.memory.scope.history"
+                    } else {
+                        "bots.memory.history"
+                    };
+                    let notes = call(client.clone(), read, source).await?;
+                    let history = call(client, recent, history).await?;
+                    Some((notes, history))
+                } else {
+                    None
+                };
+                Ok::<_, crate::RpcError>((scopes, memory))
             }
             .await;
             this.update(cx, |this, cx| {
                 this.bots.busy = false;
                 match result {
-                    Ok((notes, history)) => {
-                        this.bots.notes =
-                            serde_json::from_value(notes["notes"].clone()).unwrap_or_default();
-                        let rows: Vec<Change> =
-                            serde_json::from_value(history["rows"].clone()).unwrap_or_default();
-                        if !append {
-                            this.bots.changes.clear();
+                    Ok((scopes, memory)) => {
+                        if let Some(scopes) = scopes {
+                            this.bots.scopes = serde_json::from_value(scopes["scopes"].clone())
+                                .unwrap_or_default();
                         }
-                        this.bots.changes.extend(rows);
-                        this.bots.more = history["more"].as_str().map(str::to_owned);
+                        if let Some((notes, history)) = memory {
+                            this.bots.notes =
+                                serde_json::from_value(notes["notes"].clone()).unwrap_or_default();
+                            this.bots.memory_revision =
+                                notes["revision"].as_str().map(str::to_owned);
+                            let rows: Vec<Change> =
+                                serde_json::from_value(history["rows"].clone()).unwrap_or_default();
+                            if !append {
+                                this.bots.changes.clear();
+                            }
+                            this.bots.changes.extend(rows);
+                            this.bots.more = history["more"].as_str().map(str::to_owned);
+                        }
+                        this.bots.error = None;
+                    }
+                    Err(error) => this.bots.error = Some(error.message),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+    fn load_bot_reviews(&mut self, cx: &mut Context<Self>) {
+        self.bots.reports.clear();
+        self.bots.review_unavailable = None;
+        let (Some(bot_id), Some(thread_id)) =
+            (self.bots.selected.clone(), self.bots.source.clone())
+        else {
+            return;
+        };
+        let client = self.client.clone();
+        self.bots.busy = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = call(
+                client,
+                "bots.reviews.list",
+                json!({ "botId": bot_id, "threadId": thread_id }),
+            )
+            .await;
+            this.update(cx, |this, cx| {
+                this.bots.busy = false;
+                match result {
+                    Ok(value) => {
+                        this.bots.reports =
+                            serde_json::from_value(value["reports"].clone()).unwrap_or_default();
+                        this.bots.review_unavailable =
+                            value["unavailable"].as_str().map(str::to_owned);
                         this.bots.error = None;
                     }
                     Err(error) => this.bots.error = Some(error.message),
@@ -406,20 +577,21 @@ impl Threadbear {
                         .child("Archived"),
                 )
             })
-            .child(self.render_bot_tabs(cx));
+            .child(self.render_bot_tabs(detail.capabilities.reviews, cx));
         if let Some(editor) = editor {
             page = page.child(self.render_bot_editor(editor, cx));
         } else {
             page = page.child(match self.bots.tab {
                 Tab::Conversations => self.render_bot_conversations(detail, cx),
                 Tab::Memory => self.render_bot_memory(detail, cx),
-                Tab::Settings => self.render_bot_settings(&detail.bot, cx),
+                Tab::Reviews => self.render_bot_reviews(detail, cx),
+                Tab::Settings => self.render_bot_settings(detail, cx),
             });
         }
         page.into_any_element()
     }
 
-    fn render_bot_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_bot_tabs(&self, reviews: bool, cx: &mut Context<Self>) -> AnyElement {
         let disabled = self.bots.busy || self.bots.editor.is_some();
         h_flex()
             .gap(px(8.))
@@ -427,9 +599,11 @@ impl Threadbear {
                 [
                     (Tab::Conversations, "bot-tab-conversations", "Conversations"),
                     (Tab::Memory, "bot-tab-memory", "Memory"),
+                    (Tab::Reviews, "bot-tab-reviews", "Memory review"),
                     (Tab::Settings, "bot-tab-settings", "Settings"),
                 ]
                 .into_iter()
+                .filter(|(tab, _, _)| *tab != Tab::Reviews || reviews)
                 .map(|(tab, id, label)| {
                     bot_button(id, label, disabled)
                         .when(self.bots.tab == tab, |button| button.primary())
@@ -438,6 +612,8 @@ impl Threadbear {
                             this.bots.error = None;
                             if tab == Tab::Memory {
                                 this.load_bot_memory(false, cx);
+                            } else if tab == Tab::Reviews {
+                                this.load_bot_reviews(cx);
                             }
                             cx.notify();
                         }))
@@ -523,6 +699,7 @@ impl Threadbear {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.bots.tab = Tab::Memory;
                             this.bots.source = Some(source.clone());
+                            this.bots.scope = None;
                             this.load_bot_memory(false, cx);
                         })),
                     ),
@@ -541,7 +718,8 @@ impl Threadbear {
             )
     }
 
-    fn render_bot_settings(&self, bot: &Profile, cx: &mut Context<Self>) -> AnyElement {
+    fn render_bot_settings(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
+        let bot = &detail.bot;
         let disabled = self.bots.busy || bot.archived_at.is_some();
         let fields = [
             ("bot-edit-name", Edit::Name, &bot.name),
@@ -574,6 +752,26 @@ impl Threadbear {
             );
         }
         section = section.child(self.render_bot_model(bot, disabled, cx));
+        if let Some(privacy) = &bot.privacy {
+            section = section.child(
+                v_flex()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Private work folder"),
+                    )
+                    .child(div().child(privacy.folder.clone())),
+            );
+        } else if detail.capabilities.privacy && detail.conversations.is_empty() {
+            section = section.child(
+                bot_button("bot-make-private", "Set private work folder", disabled).on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.edit_bot(Edit::Privacy, String::new(), window, cx)
+                    }),
+                ),
+            );
+        }
         let (id, revision) = (bot.id.clone(), bot.revision);
         if bot.archived_at.is_none() {
             section = section.child(bot_button("bot-archive", "Archive Bot", disabled).on_click(
@@ -663,24 +861,83 @@ impl Threadbear {
     }
 
     fn render_bot_memory(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
-        let Some(source) = self.bots.source.clone() else {
-            return div()
-                .child("Start a conversation to save its first note.")
+        let mut section = v_flex().gap(px(12.)).max_w(px(640.));
+        let scope = self.bots.scope.as_ref();
+        let disabled = self.bots.busy
+            || scope.map_or(detail.bot.archived_at.is_some(), |scope| scope.archived);
+        if detail.capabilities.scoped_memory {
+            let options = self
+                .bots
+                .scopes
+                .iter()
+                .filter(|scope| scope.kind != "bot" || scope.id == detail.bot.id);
+            section = section.child(
+                h_flex()
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .child(
+                        bot_button(
+                            "bot-memory-personal",
+                            "Conversation notes",
+                            self.bots.busy || self.bots.source.is_none(),
+                        )
+                        .when(scope.is_none(), |button| button.primary())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.bots.scope = None;
+                            this.load_bot_memory(false, cx);
+                        })),
+                    )
+                    .children(options.map(|option| {
+                        let selected = scope.is_some_and(|scope| {
+                            scope.id == option.id && scope.kind == option.kind
+                        });
+                        let label = match option.kind.as_str() {
+                            "project" => format!("Project: {}", option.title),
+                            "bot" => format!("Bot: {}", option.title),
+                            _ => option.title.clone(),
+                        };
+                        let option = option.clone();
+                        bot_button(
+                            SharedString::from(format!(
+                                "bot-memory-scope-{}-{}",
+                                option.kind, option.id
+                            )),
+                            label,
+                            self.bots.busy,
+                        )
+                        .when(selected, |button| button.primary())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.bots.scope = Some(option.clone());
+                            this.load_bot_memory(false, cx);
+                        }))
+                    })),
+            );
+        }
+        let (target, caption) = if let Some(scope) = scope {
+            (
+                json!({ "scope": scope.target(), "expectedRevision": self.bots.memory_revision }),
+                scope.title.clone(),
+            )
+        } else if let Some(source) = self.bots.source.as_ref() {
+            let index = detail
+                .conversations
+                .iter()
+                .position(|row| row.thread_id == *source)
+                .unwrap_or(0);
+            (
+                json!({ "botId": detail.bot.id, "threadId": source }),
+                format!(
+                    "New notes are filed from {}.",
+                    self.bot_conversation_title(index, source, &detail.bot.name)
+                ),
+            )
+        } else {
+            return section
+                .child("Start a conversation to file notes from it.")
                 .into_any_element();
         };
-        let bot = detail.bot.id.clone();
-        let disabled = self.bots.busy || detail.bot.archived_at.is_some();
-        let mut section = v_flex().gap(px(12.)).max_w(px(640.));
-        let source_index = detail
-            .conversations
-            .iter()
-            .position(|row| row.thread_id == source)
-            .unwrap_or(0);
         section = section
-            .child(div().text_color(style::secondary_text(cx)).child(format!(
-                "New notes are filed from {}.",
-                self.bot_conversation_title(source_index, &source, &detail.bot.name)
-            )))
+            .child(div().text_color(style::secondary_text(cx)).child(caption))
             .child(
                 bot_button("bot-add-note", "Add note", disabled)
                     .primary()
@@ -688,33 +945,285 @@ impl Threadbear {
                         this.edit_bot(Edit::Note(None), String::new(), window, cx)
                     })),
             );
+        if scope.is_some() && detail.bot.model_binding.is_some() && !self.bots.notes.is_empty() {
+            let mut tidy = target.clone();
+            tidy["botId"] = json!(detail.bot.id);
+            section = section.child(
+                bot_button("bot-tidy-scope", "Tidy this memory", disabled).on_click(cx.listener(
+                    move |this, _, window, cx| {
+                        this.bot_write(
+                            "bots.memory.scope.tidy",
+                            tidy.clone(),
+                            After::Memory,
+                            window,
+                            cx,
+                        )
+                    },
+                )),
+            );
+        }
         if self.bots.notes.is_empty() && !self.bots.busy {
             section = section.child(div().child("No saved notes."));
         }
         for note in &self.bots.notes {
-            section = section.child(self.render_bot_note(note, &bot, &source, disabled, cx));
+            section = section.child(self.render_bot_note(note, &target, disabled, cx));
         }
         section
-            .child(self.render_bot_history(&bot, &source, disabled, cx))
+            .child(self.render_bot_history(&target, disabled, cx))
             .into_any_element()
+    }
+
+    fn render_bot_reviews(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
+        let bot = &detail.bot;
+        let enabled = bot.review_enabled.unwrap_or(false);
+        let disabled = self.bots.busy || bot.archived_at.is_some();
+        let settings =
+            json!({ "botId": bot.id, "expectedRevision": bot.revision, "enabled": !enabled });
+        let mut section = v_flex().gap(px(12.)).max_w(px(680.));
+        section = section.child(
+            bot_button(
+                "bot-review-toggle",
+                if enabled {
+                    "Turn off automatic review"
+                } else {
+                    "Turn on automatic review"
+                },
+                disabled
+                    || (!enabled
+                        && (bot.model_binding.is_none() || self.bots.review_unavailable.is_some())),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.bot_write(
+                    "bots.settings.automaticReview",
+                    settings.clone(),
+                    After::Profile,
+                    window,
+                    cx,
+                )
+            })),
+        );
+        if let Some(reason) = self.bots.review_unavailable.clone().or_else(|| {
+            bot.model_binding.is_none().then(|| {
+                "Choose a conversation’s login and model in Bot settings first.".to_owned()
+            })
+        }) {
+            section = section.child(div().text_color(style::secondary_text(cx)).child(reason));
+        }
+        if detail.conversations.is_empty() {
+            return section
+                .child("Start a conversation to see its memory reviews.")
+                .into_any_element();
+        }
+        section = section.child(h_flex().flex_wrap().gap(px(6.)).children(
+            detail.conversations.iter().enumerate().map(|(index, row)| {
+                let thread_id = row.thread_id.clone();
+                let selected = self.bots.source.as_ref() == Some(&thread_id);
+                let title = self.bot_conversation_title(index, &thread_id, &bot.name);
+                bot_button(
+                    SharedString::from(format!("bot-review-conversation-{thread_id}")),
+                    title,
+                    self.bots.busy,
+                )
+                .when(selected, |button| button.primary())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.bots.source = Some(thread_id.clone());
+                    this.load_bot_reviews(cx);
+                }))
+            }),
+        ));
+        section = section.child(
+            bot_button("bot-refresh-reviews", "Refresh reviews", self.bots.busy)
+                .on_click(cx.listener(|this, _, _, cx| this.load_bot_reviews(cx))),
+        );
+        if self.bots.reports.is_empty() && !self.bots.busy {
+            section = section.child("No memory reviews yet.");
+        }
+        for report in &self.bots.reports {
+            let source = &report.source;
+            let mut row = v_flex()
+                .gap(px(7.))
+                .p(px(10.))
+                .rounded(px(8.))
+                .bg(style::primary_opacity(cx, 0.04))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
+                    "{} · Events {}–{}",
+                    source.model, source.first, source.through
+                )));
+            if let Some(usage) = &report.usage {
+                let tokens = usage
+                    .input_tokens
+                    .zip(usage.output_tokens)
+                    .map(|(input, output)| format!("{input} input / {output} output tokens."));
+                let cost = usage
+                    .notional_usd
+                    .map(|cost| format!(" Estimated API cost ${cost:.4}."));
+                if tokens.is_some() || cost.is_some() {
+                    row = row.child(div().text_color(style::secondary_text(cx)).child(format!(
+                        "{}{}",
+                        tokens.unwrap_or_default(),
+                        cost.unwrap_or_default()
+                    )));
+                }
+            }
+            if report.diagnostic.is_some() {
+                row = row.child("The model reply could not be read.");
+            }
+            if report.rejected > 0 {
+                row = row.child(format!(
+                    "{} suggestions could not be used.",
+                    report.rejected
+                ));
+            }
+            let retry =
+                json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id });
+            row = row.child(
+                bot_button(
+                    SharedString::from(format!("bot-review-retry-{}", report.id)),
+                    "Review these messages again",
+                    disabled || self.bots.review_unavailable.is_some(),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.bot_write(
+                        "bots.reviews.retry",
+                        retry.clone(),
+                        After::Reviews,
+                        window,
+                        cx,
+                    )
+                })),
+            );
+            for (index, change) in report.changes.iter().enumerate() {
+                let action = match change.op.as_str() {
+                    "add" => "Add",
+                    "remove" => "Remove",
+                    _ => "Edit",
+                };
+                let proposal = change
+                    .accepted_text
+                    .as_ref()
+                    .or(change.text.as_ref())
+                    .or(change.before.as_ref())
+                    .cloned()
+                    .unwrap_or_default();
+                let status = match change.decision.as_str() {
+                    "approved" => "Accepted",
+                    "rejected" => "Rejected",
+                    _ => "Pending",
+                };
+                let mut item = v_flex()
+                    .gap(px(5.))
+                    .child(div().child(format!("{status} · {action}")))
+                    .child(div().child(proposal.clone()));
+                if change.op == "edit" {
+                    if let Some(previous) = &change.before {
+                        item = item.child(
+                            div()
+                                .text_color(style::secondary_text(cx))
+                                .child(format!("Previous note: {previous}")),
+                        );
+                    }
+                }
+                if change.decision == "pending" {
+                    let params = json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id, "index": index });
+                    let reject = params.clone();
+                    let report_id = report.id.clone();
+                    let mut buttons = h_flex()
+                        .gap(px(6.))
+                        .child(
+                            bot_button(
+                                SharedString::from(format!(
+                                    "bot-review-approve-{}-{index}",
+                                    report.id
+                                )),
+                                "Accept",
+                                disabled,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.bot_write(
+                                        "bots.reviews.approve",
+                                        params.clone(),
+                                        After::Reviews,
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        )
+                        .child(
+                            bot_button(
+                                SharedString::from(format!(
+                                    "bot-review-reject-{}-{index}",
+                                    report.id
+                                )),
+                                "Reject",
+                                disabled,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.bot_write(
+                                        "bots.reviews.reject",
+                                        reject.clone(),
+                                        After::Reviews,
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        );
+                    if change.op != "remove" {
+                        buttons = buttons.child(
+                            bot_button(
+                                SharedString::from(format!(
+                                    "bot-review-edit-{}-{index}",
+                                    report.id
+                                )),
+                                "Edit and accept",
+                                disabled,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.edit_bot(
+                                        Edit::Review(report_id.clone(), index),
+                                        proposal.clone(),
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )),
+                        );
+                    }
+                    item = item.child(buttons);
+                }
+                row = row.child(item);
+            }
+            section = section.child(row);
+        }
+        section.into_any_element()
     }
 
     fn render_bot_note(
         &self,
         note: &Note,
-        bot: &str,
-        source: &str,
+        target: &Value,
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let note_id = note.id.clone();
         let (edit_id, text) = (note_id.clone(), note.text.clone());
-        let params = json!({ "botId": bot, "threadId": source, "entryId": note_id });
+        let mut params = target.clone();
+        params["entryId"] = json!(note_id);
+        let remove = if self.bots.scope.is_some() {
+            "bots.memory.scope.remove"
+        } else {
+            "bots.memory.remove"
+        };
         let timing = match (&note.until, note.pinned) {
             (Some(until), _) => format!("Through {until}"),
             (None, true) => "Pinned".into(),
             (None, false) => String::new(),
         };
+        let topic = note.topic.as_ref().map(|topic| format!("Topic: {topic}"));
         v_flex()
             .gap(px(7.))
             .p(px(12.))
@@ -730,6 +1239,9 @@ impl Threadbear {
             )
             .when(!timing.is_empty(), |row| {
                 row.child(div().text_color(style::secondary_text(cx)).child(timing))
+            })
+            .when_some(topic, |row, topic| {
+                row.child(div().text_color(style::secondary_text(cx)).child(topic))
             })
             .child(
                 h_flex()
@@ -759,13 +1271,7 @@ impl Threadbear {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.bot_write(
-                                    "bots.memory.remove",
-                                    params.clone(),
-                                    After::Memory,
-                                    window,
-                                    cx,
-                                )
+                                this.bot_write(remove, params.clone(), After::Memory, window, cx)
                             },
                         )),
                     ),
@@ -775,8 +1281,7 @@ impl Threadbear {
 
     fn render_bot_history(
         &self,
-        bot: &str,
-        source: &str,
+        target: &Value,
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -796,6 +1301,7 @@ impl Threadbear {
                 _ if change.restored.is_some() => "Restored",
                 "add" => "Added",
                 "remove" => "Removed",
+                "tidy" => "Tidied",
                 _ => "Edited",
             };
             let text = change
@@ -814,7 +1320,13 @@ impl Threadbear {
                 .changes
                 .iter()
                 .any(|later| later.restored.as_ref() == Some(&change.id));
-            let params = json!({ "botId": bot, "threadId": source, "changeId": change.id });
+            let mut params = target.clone();
+            params["changeId"] = json!(change.id);
+            let restore = if self.bots.scope.is_some() {
+                "bots.memory.scope.restore"
+            } else {
+                "bots.memory.restore"
+            };
             history = history.child(
                 h_flex()
                     .gap(px(10.))
@@ -833,13 +1345,7 @@ impl Threadbear {
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
-                                this.bot_write(
-                                    "bots.memory.restore",
-                                    params.clone(),
-                                    After::Memory,
-                                    window,
-                                    cx,
-                                )
+                                this.bot_write(restore, params.clone(), After::Memory, window, cx)
                             },
                         )),
                     ),
@@ -898,6 +1404,7 @@ enum After {
     Profile,
     Conversation,
     Memory,
+    Reviews,
 }
 
 impl Threadbear {
@@ -930,6 +1437,7 @@ impl Threadbear {
             kind,
             field,
             revision: self.bots.detail.as_ref().map(|detail| detail.bot.revision),
+            memory_revision: self.bots.memory_revision.clone(),
         });
         self.bots.error = None;
         cx.notify();
@@ -944,13 +1452,36 @@ impl Threadbear {
         let revision = editor.revision;
         let (method, params, after) = match &editor.kind {
             Edit::New => ("bots.create", json!({ "name": text }), After::Profile),
+            Edit::Privacy => (
+                "bots.settings.privacy",
+                json!({ "botId": id, "expectedRevision": revision, "folder": text }),
+                After::Profile,
+            ),
+            Edit::Review(report_id, index) => (
+                "bots.reviews.approve",
+                json!({ "botId": id, "threadId": self.bots.source, "reportId": report_id, "index": index, "text": text }),
+                After::Reviews,
+            ),
             Edit::Note(entry) => {
-                let mut params = json!({ "botId": id, "threadId": self.bots.source, "text": text });
+                let scoped = self.bots.scope.is_some();
+                let mut params = if let Some(scope) = &self.bots.scope {
+                    json!({ "scope": scope.target(), "expectedRevision": editor.memory_revision, "text": text })
+                } else {
+                    json!({ "botId": id, "threadId": self.bots.source, "text": text })
+                };
                 let method = if let Some(entry) = entry {
                     params["entryId"] = json!(entry);
-                    "bots.memory.edit"
+                    if scoped {
+                        "bots.memory.scope.edit"
+                    } else {
+                        "bots.memory.edit"
+                    }
                 } else {
-                    "bots.memory.add"
+                    if scoped {
+                        "bots.memory.scope.add"
+                    } else {
+                        "bots.memory.add"
+                    }
                 };
                 (method, params, After::Memory)
             }
@@ -1003,13 +1534,38 @@ impl Threadbear {
     fn bot_write(
         &mut self,
         method: &'static str,
-        params: Value,
+        mut params: Value,
         after: After,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.bots.busy {
             return;
+        }
+        if method.starts_with("bots.reviews.")
+            || method.starts_with("bots.memory.scope.")
+            || matches!(
+                method,
+                "bots.settings.privacy" | "bots.settings.automaticReview"
+            )
+        {
+            let operation = match &self.bots.pending_write {
+                Some((previous, payload, id)) if *previous == method && *payload == params => {
+                    id.clone()
+                }
+                _ => {
+                    self.bots.operation += 1;
+                    let operation = format!(
+                        "desktop-{}-{}-{}",
+                        std::process::id(),
+                        now_ms(),
+                        self.bots.operation
+                    );
+                    self.bots.pending_write = Some((method, params.clone(), operation.clone()));
+                    operation
+                }
+            };
+            params["operationId"] = json!(operation);
         }
         self.bots.busy = true;
         self.bots.error = None;
@@ -1020,7 +1576,10 @@ impl Threadbear {
             this.update_in(cx, |this, window, cx| {
                 this.bots.busy = false;
                 match result {
-                    Ok(value) => this.bot_written(after, value, window, cx),
+                    Ok(value) => {
+                        this.bots.pending_write = None;
+                        this.bot_written(after, value, window, cx);
+                    }
                     Err(error) => this.bots.error = Some(error.message),
                 }
                 cx.notify();
@@ -1071,6 +1630,10 @@ impl Threadbear {
             After::Memory => {
                 self.bots.editor = None;
                 self.load_bot_memory(false, cx);
+            }
+            After::Reviews => {
+                self.bots.editor = None;
+                self.load_bot_reviews(cx);
             }
         }
     }

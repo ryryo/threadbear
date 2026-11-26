@@ -52,6 +52,20 @@ When("I open the Bot's Conversations tab", async function (this: BotWorld) {
   await click(this, 'Conversations');
 });
 
+When("I open the Bot's Memory tab", async function (this: BotWorld) {
+  await click(this, 'Memory');
+});
+
+When('I select {string} in Bot memory', async function (this: BotWorld, scope: string) {
+  await click(this, scope);
+});
+
+When('I add a Bot memory note saying {string}', async function (this: BotWorld, note: string) {
+  await click(this, 'Add note');
+  await this.app.do({ cmd: 'type', here: true, text: note });
+  await click(this, 'Save');
+});
+
 When('I open another Bot conversation', async function (this: BotWorld) {
   await click(this, 'New conversation');
   this.secondBotThread = await this.until('another Bot conversation', (d) => d.selection?.id !== this.firstBotThread && d.selection?.id);
@@ -74,4 +88,9 @@ Then("the Bot's notes show {string}", async function (this: BotWorld, note: stri
     await new Promise(resolve => setTimeout(resolve, 120));
   }
   assert.fail(`Could not find the note ${note} on the Bot page`);
+});
+
+Then("the Bot's notes do not show {string}", async function (this: BotWorld, note: string) {
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+  assert.ok(!labels.some(item => item.label === note));
 });

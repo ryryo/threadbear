@@ -1,8 +1,8 @@
-export type MemoryNote = { id: string; text: string; pinned: boolean; until?: string };
+export type MemoryNote = { id: string; text: string; pinned: boolean; until?: string; topic?: string };
 export type MemoryChange = {
   id: string;
   time: string;
-  op: 'add' | 'remove' | 'replace';
+  op: 'add' | 'remove' | 'replace' | 'tidy';
   before?: string;
   after?: string;
   restored?: string;
@@ -16,6 +16,9 @@ export type ScopeChange = { op: 'add'; text: string; until?: string }
   | { op: 'edit'; entryId: string; text: string }
   | { op: 'remove'; entryId: string }
   | { op: 'restore'; changeId: string };
+type TidyEntry = { text: string; file: { topic?: string }; meta: { added?: string } };
+export type TidyCounts = { merged: number; moved: number; retired: number };
+type TidyInput = { revision: string; numbered: TidyEntry[]; ended: TidyEntry[] };
 
 export class PersonalMemory {
   constructor(root: string, options?: { scope?: 'own' | 'team' | 'project' | 'group'; base?: string; redact?: (text: string) => string });
@@ -29,5 +32,8 @@ export class PersonalMemory {
   remove(id: string, time: string): void;
   restore(id: string, time: string): void;
   change(mutation: ScopeChange, operationId: string, expectedRevision: string, time: string): { revision: string; note?: MemoryNote };
+  tidyInput(today: string): TidyInput | undefined;
+  tidy(input: TidyInput, reply: string, operationId: string, time: string): { revision: string; counts: TidyCounts };
+  tidyResult(operationId: string): { revision: string; counts: TidyCounts } | undefined;
   approveReview(change: import('../memory-review.ts').ReviewChange, receipt: ReviewReceipt, time: string, redact: (text: string) => string): ReviewReceipt;
 }

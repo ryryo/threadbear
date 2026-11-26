@@ -36,7 +36,7 @@ test('opted-in review reads a linked Thread, pins its login, and restores propos
 
   await service.review(a.threadId);
   assert.deepEqual(picks, []);
-  repo.setReviewEnabled(editor.id, modelSaved.revision, true);
+  repo.setReviewEnabled(editor.id, modelSaved.revision, true, randomUUID());
   await service.review(a.threadId);
   await service.review(a.threadId);
   assert.deepEqual(picks, ['claude-3:claude-sonnet-4-6']);
@@ -59,4 +59,10 @@ test('opted-in review reads a linked Thread, pins its login, and restores propos
   assert.throws(() => reopened.approve(editor.id, a.threadId, report.id, 0, operationId, 'different'), /already decided/);
   assert.throws(() => reopened.reject(editor.id, a.threadId, report.id, 0, randomUUID()), /already decided/);
   assert.equal(conversations.history(editor.id, a.threadId).rows.length, 1);
+  const replay = randomUUID();
+  await service.retry(editor.id, a.threadId, report.id, replay);
+  await service.retry(editor.id, a.threadId, report.id, replay);
+  await service.review(a.threadId);
+  assert.deepEqual(picks, ['claude-3:claude-sonnet-4-6', 'claude-3:claude-sonnet-4-6']);
+  assert.deepEqual(reopened.reports(editor.id, a.threadId)[0].retry, { previous: report.id, operationId: replay });
 });

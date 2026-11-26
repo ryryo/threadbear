@@ -8,6 +8,7 @@ import type { ReviewChange } from './memory-review.ts';
 import { REVIEW_CHANGES_MAX } from './ported/memory-copy.js';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
 import type { ReviewReceipt } from './ported/personal-memory.js';
+import { botOperationId } from './repository.ts';
 
 const sequence = z.int().nonnegative();
 const evidence = z.object({
@@ -16,7 +17,7 @@ const evidence = z.object({
   first: sequence, through: sequence, provider: z.enum(PROVIDERS), model: z.string().min(1), accountId: z.string().min(1),
 }).refine(source => source.first <= source.through);
 const note = z.string().trim().min(1).max(MEMORY_LIMITS.entry);
-const decision = { decision: z.enum(['pending', 'rejected', 'approved']), operationId: z.uuid().optional(), acceptedText: note.optional() };
+const decision = { decision: z.enum(['pending', 'rejected', 'approved']), operationId: botOperationId.optional(), acceptedText: note.optional() };
 const change = z.discriminatedUnion('op', [
   z.object({ op: z.literal('add'), text: note, until: z.iso.date().optional(), ...decision }),
   z.object({ op: z.literal('edit'), id: z.string().min(1), before: note, text: note, ...decision }),
@@ -27,6 +28,7 @@ const report = z.object({
   id: z.uuid(), source: evidence, rejected: z.int().nonnegative(), changes: z.array(change).max(REVIEW_CHANGES_MAX),
   diagnostic: z.literal('invalid-reply').optional(),
   usage: usage.optional(),
+  retry: z.object({ previous: z.uuid(), operationId: botOperationId }).optional(),
 });
 const checkpoint = z.object({ conversationId: z.uuid(), cursor: sequence, reports: z.array(report) });
 
@@ -84,18 +86,35 @@ export class ReviewCheckpoints {
   record(source: ReviewEvidence, expectedCursor: number, result: Result): Report {
     const next = this.pending(source.conversationId, expectedCursor, source.through);
     if (source.first <= expectedCursor) throw new Error('The review range overlaps reviewed events');
+    return this.writeReport(next, source, result);
+  }
+
+  retry(source: ReviewEvidence, result: Result, previous: string, operationId: string): Report {
+    const checkpoint = this.read(source.conversationId);
+    const original = checkpoint.reports.find(row => row.id === previous);
+    if (!original || original.source.first !== source.first || original.source.through !== source.through) throw new Error('The source range changed');
+    const completed = checkpoint.reports.find(row => row.retry?.operationId === operationId);
+    if (completed) {
+      if (completed.retry?.previous !== previous) throw new Error('The operation id already belongs to a different review');
+      return completed;
+    }
+    return this.writeReport(checkpoint, source, result, { previous, operationId });
+  }
+
+  private writeReport(state: Checkpoint, source: ReviewEvidence, result: Result, retry?: Report['retry']): Report {
     const accepted = report.parse({
       id: randomUUID(), source, rejected: result.rejected,
       ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }),
       ...(result.usage === undefined ? {} : { usage: result.usage }),
+      ...(retry === undefined ? {} : { retry }),
       changes: result.changes.map(item => ({ ...item, decision: 'pending' })),
     });
-    this.save({ ...next, reports: [accepted, ...next.reports] });
+    this.save({ ...state, reports: [accepted, ...state.reports] });
     return accepted;
   }
 
   reject(conversationId: string, reportId: string, changeIndex: number, operationId: string): void {
-    z.uuid().parse(operationId);
+    botOperationId.parse(operationId);
     const saved = this.read(conversationId);
     const current = saved.reports.find(row => row.id === reportId)?.changes[changeIndex];
     if (!current) throw new Error('Unknown memory proposal');
