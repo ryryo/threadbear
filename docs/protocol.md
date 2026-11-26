@@ -52,6 +52,7 @@ It was all this one file once. Work made on that comes across by itself in `tb l
 | [keys.md](protocol/keys.md) | Runner keys, Virtual runners |
 | [boxes.md](protocol/boxes.md) | Box keys, Box mode |
 | [tools.md](protocol/tools.md) | Tools for agents |
+| [bots.md](protocol/bots.md) | Bot conversations, Bot memory review and visibility |
 <!-- /sections -->
 
 ## Ordering and reconnects

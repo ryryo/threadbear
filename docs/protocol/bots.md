@@ -1,0 +1,121 @@
+# Runner protocol: Bots
+
+Part of the runner protocol. [docs/protocol.md](../protocol.md) has the rules for all of it and which file each section is in.
+
+## Bot conversations
+
+Bot conversations keep an internal `botLink` on the persisted Thread record
+with `botId` and `conversationId`. The Bot workspace reserves the conversation
+and Thread IDs before saving the Thread. A retry confirms that same link if the
+Thread was already saved. The Thread owns its native CLI session ID and events.
+`threads.create` does not accept a Bot link from a client.
+Fresh sessions receive the Bot settings and current notes with their startup
+instructions. A live or resumed session receives changes before the next normal
+message. The Runner tracks the context it sent and retries it if sending fails
+or the turn fails to complete.
+Inputs queued on a Bot conversation carry `botInput` with an input `id` and
+`conversationId`. The same fields go into `user.message`, including when an
+input joins a turn already running. The Runner flushes that event before
+dispatching the input to the CLI. The turn ID still identifies the whole turn.
+`botInput.source` records the authenticated owner or thread for a direct RPC,
+the runner, phone or schedule for a tagged delivery, or `unknown` when the
+internal caller supplies no verified source. Text and caller-supplied RPC
+fields cannot name that source.
+
+On a Runner with the Bot experiment available, the local owner can call
+`bots.list`, `bots.get`, `bots.create`, `bots.update` and `bots.archive`.
+`bots.get` returns the Bot and its conversation links. Settings edits and archive
+require the revision the editor began with. An archived Bot's settings and
+history stay readable. `bots.conversations.create` takes `botId` and
+`operationId` and returns the persisted conversation link and its `thread`
+summary. A local `ThreadSummary` may carry `botLink` so the conversation header
+can open the Bot page. `bots.memory.read`,
+`bots.memory.search`, `bots.memory.add`, `bots.memory.edit`, `bots.memory.remove`, `bots.memory.history`
+and `bots.memory.restore` take `botId` and `threadId`; the thread must belong to
+that Bot. Edit and remove take `entryId`, restore takes the history `changeId`,
+and history returns up to 50 changes, newest first, with a `more` cursor.
+Bot RPCs require the owner's credential. A Thread key cannot use them at any
+permission level.
+
+`bots.status` reports whether the owner can open the local Bot workspace and,
+when unavailable, gives a reason. Bot conversations stay on the workspace's
+owning Runner. A local copy of real threads keeps them as a read-only transcript.
+`bots.settings.conversationModel` takes a Bot revision and `threadId`.
+When given a linked conversation, its login, model and effort
+become the Bot's defaults for new conversations. A null `threadId` restores
+the Runner defaults. Existing conversations retain their own settings.
+
+## Bot memory review and visibility
+
+The Runner identifies the author of a review input from the persisted
+`botInput.source`, matched to the conversation. Only a new authenticated owner
+message can start an automatic review. The review can include the Bot's reply
+for context. It ignores quoted text, fenced blocks and tool events. The review
+records the source conversation and event sequence range with its result. The
+owner must enable automatic review for each Bot, and reviews use that Bot's
+selected model and account. An unsupported binding leaves review unavailable.
+The cursor and corresponding outcome are one durable checkpoint. A failed
+read, model call or save can retry that range. A malformed reply advances the
+checkpoint with a diagnostic code and retains no raw answer. A result with
+proposed changes waits for the owner to decide. Its evidence includes the
+Thread, conversation, Bot settings revision, model and sequence range.
+`bots.settings.automaticReview` takes `botId`, `expectedRevision`, `operationId`
+and `enabled`.
+`bots.reviews.list` takes `botId` and a linked `threadId`; `bots.reviews.reject`
+also takes `reportId`, zero-based `index` and `operationId`. These methods are
+local owner operations, with the same authentication as the Bot settings.
+`bots.reviews.approve` takes the same IDs as reject and accepts optional
+replacement `text` for an add or edit. The Runner checks that the previous
+note still matches and is unpinned at the time of the write. It records the
+decision, source and operation ID in memory history and can recover the
+decision after a restart if the history write completed first.
+`bots.reviews.retry` takes `botId`, `threadId`, `reportId` and `operationId`
+to review the same event range again with the Bot's current binding. It adds
+a report linked to the previous one and leaves the automatic cursor alone.
+
+Memory access uses the actor established by the Runner and current scope
+membership. A Bot's own scope, a team, a group and a project are distinct
+scopes. A shared Bot's notes require an explicit same-team read or grant.
+Project access requires both the active conversation's project and a grant.
+Group access requires current membership and must be in the group's context.
+`bots.memory.scopes` lists available scope IDs and labels for the owner.
+`bots.memory.scope.read`, `.search`, `.add`, `.edit`, `.remove`, `.history`
+and `.restore` take `{ scope: { kind, id } }` along with the corresponding
+entry, query or change fields. The owning Runner resolves the scope IDs.
+The initial shared team is the Bot workspace. Project IDs resolve against
+Threadbear Projects. Each scope has its own notes and change journal.
+Scope reads report the current `revision`. Scope writes require that revision
+as `expectedRevision` and an `operationId`. Repeating an accepted operation
+returns its recorded result. A different payload with that ID or a stale
+revision is refused before touching any notes.
+`bots.memory.scope.tidy` uses a Bot's selected login and model for a changed
+scope. It takes the scope write fields and `botId`. It reports merged, moved
+and retired counts. Pinned notes are out of scope. The journal retains the
+affected files and can undo the batch if none of those files has changed.
+`bots.settings.automaticTidy` uses the same settings fields as automatic
+review. When enabled, accepting a new proposal queues a tidy for that Bot's
+changed scope. It shares the Runner's single model queue with reviews.
+
+Private conversations and their notes are owner-local. Thread RPC and agent
+tools enforce visibility at each read, including filtered lists and searches,
+and before replaying or sending another live event to a subscriber. The same
+restriction holds for archived Bot data. A private conversation must stay out
+of the synchronization projection and notifications. Thread keys cannot
+change those rules. Private protects these Runner interfaces. It does not
+provide filesystem isolation from another process using the same OS account.
+
+`bots.settings.privacy` takes `botId`, `expectedRevision`, `operationId` and an
+existing dedicated `folder`. It rejects overlapping work folders,
+including filesystem aliases. The Runner writes the new data format marker
+before saving Private state. New conversations and their child threads keep
+the Private identity on disk from creation, including after archive.
+Converting a Bot with existing conversations requires all affected threads
+to be stopped. It records a pending conversion and blocks further sync and
+execution before changing the folders. It reports success after the old
+mirror rows and their sidebar entries have been withdrawn. The same operation
+can resume a pending conversion after an interruption or a failed withdrawal.
+An agent's `send_message` from a Private Bot to a local ordinary thread
+requires a one-use approval card. The card carries the destination thread
+ID, the entire text and its SHA-256 hash. Approval is local and owner-only.
+If the destination changes or the sender loses its Private context while
+the card is open, the message is not delivered.

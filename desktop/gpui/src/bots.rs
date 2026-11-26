@@ -1084,168 +1084,172 @@ impl Threadbear {
         if self.bots.reports.is_empty() && !self.bots.busy {
             section = section.child("No memory reviews yet.");
         }
-        for report in &self.bots.reports {
-            let source = &report.source;
-            let mut row = v_flex()
-                .gap(px(7.))
-                .p(px(10.))
-                .rounded(px(8.))
-                .bg(style::primary_opacity(cx, 0.04))
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
-                    "{} · Events {}–{}",
-                    source.model, source.first, source.through
+        section
+            .children(
+                self.bots
+                    .reports
+                    .iter()
+                    .map(|report| self.render_bot_review_report(bot, report, disabled, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_bot_review_report(
+        &self,
+        bot: &Profile,
+        report: &ReviewReport,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let source = &report.source;
+        let mut row = v_flex()
+            .gap(px(7.))
+            .p(px(10.))
+            .rounded(px(8.))
+            .bg(style::primary_opacity(cx, 0.04))
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
+                "{} · Events {}–{}",
+                source.model, source.first, source.through
+            )));
+        if let Some(usage) = &report.usage {
+            let tokens = usage
+                .input_tokens
+                .zip(usage.output_tokens)
+                .map(|(input, output)| format!("{input} input / {output} output tokens."));
+            let cost = usage
+                .notional_usd
+                .map(|cost| format!(" Estimated API cost ${cost:.4}."));
+            if tokens.is_some() || cost.is_some() {
+                row = row.child(div().text_color(style::secondary_text(cx)).child(format!(
+                    "{}{}",
+                    tokens.unwrap_or_default(),
+                    cost.unwrap_or_default()
                 )));
-            if let Some(usage) = &report.usage {
-                let tokens = usage
-                    .input_tokens
-                    .zip(usage.output_tokens)
-                    .map(|(input, output)| format!("{input} input / {output} output tokens."));
-                let cost = usage
-                    .notional_usd
-                    .map(|cost| format!(" Estimated API cost ${cost:.4}."));
-                if tokens.is_some() || cost.is_some() {
-                    row = row.child(div().text_color(style::secondary_text(cx)).child(format!(
-                        "{}{}",
-                        tokens.unwrap_or_default(),
-                        cost.unwrap_or_default()
-                    )));
-                }
             }
-            if report.diagnostic.is_some() {
-                row = row.child("The model reply could not be read.");
-            }
-            if report.rejected > 0 {
-                row = row.child(format!(
-                    "{} suggestions could not be used.",
-                    report.rejected
-                ));
-            }
-            let retry =
-                json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id });
-            row = row.child(
-                bot_button(
-                    SharedString::from(format!("bot-review-retry-{}", report.id)),
-                    "Review these messages again",
-                    disabled || self.bots.review_unavailable.is_some(),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.bot_write(
-                        "bots.reviews.retry",
-                        retry.clone(),
-                        After::Reviews,
-                        window,
-                        cx,
-                    )
-                })),
-            );
-            for (index, change) in report.changes.iter().enumerate() {
-                let action = match change.op.as_str() {
-                    "add" => "Add",
-                    "remove" => "Remove",
-                    _ => "Edit",
-                };
-                let proposal = change
-                    .accepted_text
-                    .as_ref()
-                    .or(change.text.as_ref())
-                    .or(change.before.as_ref())
-                    .cloned()
-                    .unwrap_or_default();
-                let status = match change.decision.as_str() {
-                    "approved" => "Accepted",
-                    "rejected" => "Rejected",
-                    _ => "Pending",
-                };
-                let mut item = v_flex()
-                    .gap(px(5.))
-                    .child(div().child(format!("{status} · {action}")))
-                    .child(div().child(proposal.clone()));
-                if change.op == "edit" {
-                    if let Some(previous) = &change.before {
-                        item = item.child(
-                            div()
-                                .text_color(style::secondary_text(cx))
-                                .child(format!("Previous note: {previous}")),
-                        );
-                    }
-                }
-                if change.decision == "pending" {
-                    let params = json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id, "index": index });
-                    let reject = params.clone();
-                    let report_id = report.id.clone();
-                    let mut buttons = h_flex()
-                        .gap(px(6.))
-                        .child(
-                            bot_button(
-                                SharedString::from(format!(
-                                    "bot-review-approve-{}-{index}",
-                                    report.id
-                                )),
-                                "Accept",
-                                disabled,
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.bot_write(
-                                        "bots.reviews.approve",
-                                        params.clone(),
-                                        After::Reviews,
-                                        window,
-                                        cx,
-                                    )
-                                },
-                            )),
-                        )
-                        .child(
-                            bot_button(
-                                SharedString::from(format!(
-                                    "bot-review-reject-{}-{index}",
-                                    report.id
-                                )),
-                                "Reject",
-                                disabled,
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.bot_write(
-                                        "bots.reviews.reject",
-                                        reject.clone(),
-                                        After::Reviews,
-                                        window,
-                                        cx,
-                                    )
-                                },
-                            )),
-                        );
-                    if change.op != "remove" {
-                        buttons = buttons.child(
-                            bot_button(
-                                SharedString::from(format!(
-                                    "bot-review-edit-{}-{index}",
-                                    report.id
-                                )),
-                                "Edit and accept",
-                                disabled,
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    this.edit_bot(
-                                        Edit::Review(report_id.clone(), index),
-                                        proposal.clone(),
-                                        window,
-                                        cx,
-                                    )
-                                },
-                            )),
-                        );
-                    }
-                    item = item.child(buttons);
-                }
-                row = row.child(item);
-            }
-            section = section.child(row);
         }
-        section.into_any_element()
+        if report.diagnostic.is_some() {
+            row = row.child("The model reply could not be read.");
+        }
+        if report.rejected > 0 {
+            row = row.child(format!(
+                "{} suggestions could not be used.",
+                report.rejected
+            ));
+        }
+        let retry = json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id });
+        row = row.child(
+            bot_button(
+                SharedString::from(format!("bot-review-retry-{}", report.id)),
+                "Review these messages again",
+                disabled || self.bots.review_unavailable.is_some(),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.bot_write(
+                    "bots.reviews.retry",
+                    retry.clone(),
+                    After::Reviews,
+                    window,
+                    cx,
+                )
+            })),
+        );
+        for (index, change) in report.changes.iter().enumerate() {
+            let action = match change.op.as_str() {
+                "add" => "Add",
+                "remove" => "Remove",
+                _ => "Edit",
+            };
+            let proposal = change
+                .accepted_text
+                .as_ref()
+                .or(change.text.as_ref())
+                .or(change.before.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            let status = match change.decision.as_str() {
+                "approved" => "Accepted",
+                "rejected" => "Rejected",
+                _ => "Pending",
+            };
+            let mut item = v_flex()
+                .gap(px(5.))
+                .child(div().child(format!("{status} · {action}")))
+                .child(div().child(proposal.clone()));
+            if change.op == "edit" {
+                if let Some(previous) = &change.before {
+                    item = item.child(
+                        div()
+                            .text_color(style::secondary_text(cx))
+                            .child(format!("Previous note: {previous}")),
+                    );
+                }
+            }
+            if change.decision == "pending" {
+                let params = json!({ "botId": bot.id, "threadId": self.bots.source, "reportId": report.id, "index": index });
+                let reject = params.clone();
+                let report_id = report.id.clone();
+                let mut buttons = h_flex()
+                    .gap(px(6.))
+                    .child(
+                        bot_button(
+                            SharedString::from(format!("bot-review-approve-{}-{index}", report.id)),
+                            "Accept",
+                            disabled,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.bot_write(
+                                    "bots.reviews.approve",
+                                    params.clone(),
+                                    After::Reviews,
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
+                    )
+                    .child(
+                        bot_button(
+                            SharedString::from(format!("bot-review-reject-{}-{index}", report.id)),
+                            "Reject",
+                            disabled,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.bot_write(
+                                    "bots.reviews.reject",
+                                    reject.clone(),
+                                    After::Reviews,
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
+                    );
+                if change.op != "remove" {
+                    buttons = buttons.child(
+                        bot_button(
+                            SharedString::from(format!("bot-review-edit-{}-{index}", report.id)),
+                            "Edit and accept",
+                            disabled,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.edit_bot(
+                                    Edit::Review(report_id.clone(), index),
+                                    proposal.clone(),
+                                    window,
+                                    cx,
+                                )
+                            },
+                        )),
+                    );
+                }
+                item = item.child(buttons);
+            }
+            row = row.child(item);
+        }
+        row.into_any_element()
     }
 
     fn render_bot_note(
