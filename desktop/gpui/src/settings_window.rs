@@ -43,6 +43,9 @@ mod reviewers;
 mod runners;
 mod small_jobs;
 
+use threadbear_core::i18n::{active_locale, LanguageSetting, Locale};
+use threadbear_core::tr;
+
 /// The sections down the sidebar (`SettingsTab`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Tab {
@@ -66,12 +69,12 @@ impl Tab {
 
     pub(crate) fn title(self) -> &'static str {
         match self {
-            Tab::General => "General",
-            Tab::Models => "Models",
-            Tab::Pools => "Pools",
-            Tab::Runners => "Runners",
-            Tab::Devices => "Phone & browser",
-            Tab::Keyboard => "Keyboard",
+            Tab::General => tr!("General"),
+            Tab::Models => tr!("Models"),
+            Tab::Pools => tr!("Pools"),
+            Tab::Runners => tr!("Runners"),
+            Tab::Devices => tr!("Phone & browser"),
+            Tab::Keyboard => tr!("Keyboard"),
         }
     }
 
@@ -214,6 +217,7 @@ pub(crate) struct SettingsWindow {
     instructions_status: Option<String>,
     /// The save a moment after typing stops (`scheduleSave`).
     instructions_save: Option<Task<()>>,
+    rendered_locale: Locale,
     /// The words being read when something other than Settings changed the
     /// file, kept as they were when he started reading
     /// (`InstructionsChangedOutside`).
@@ -415,6 +419,7 @@ impl SettingsWindow {
                 .ok();
         }));
         let mut this = SettingsWindow {
+            rendered_locale: active_locale(),
             app,
             client,
             tab,
@@ -733,6 +738,7 @@ impl SettingsWindow {
     ) -> Vec<AnyElement> {
         // This Mac's own, so they're here while the runner's away too.
         let mut sections = vec![
+            self.language_row(cx),
             self.appearance_section(cx),
             self.panels_section(cx),
             self.quitting_section(cx),
@@ -1031,6 +1037,40 @@ impl SettingsWindow {
         ));
         sections.push(web_runtime);
         sections
+    }
+
+    fn language_row(&self, cx: &App) -> AnyElement {
+        let selected = self
+            .app
+            .upgrade()
+            .map(|app| app.read(cx).language_setting());
+        let control = segmented(
+            LanguageSetting::ALL.map(|choice| {
+                let app = self.app.clone();
+                let label = match choice {
+                    LanguageSetting::System => tr!(context "language setting", "System"),
+                    LanguageSetting::English => "English",
+                    LanguageSetting::Japanese => "日本語",
+                };
+                Segment {
+                    id: SharedString::from(format!("settings-language-{}", choice.name())),
+                    label,
+                    tip: match choice {
+                        LanguageSetting::System => tr!("Use the system language"),
+                        LanguageSetting::English => tr!("Use English"),
+                        LanguageSetting::Japanese => tr!("Use Japanese"),
+                    },
+                    on: selected == Some(choice),
+                    click: Box::new(move |_, cx| {
+                        if let Some(app) = app.upgrade() {
+                            app.update(cx, |app, cx| app.set_language(choice, cx));
+                        }
+                    }),
+                }
+            }),
+            cx,
+        );
+        row(tr!("Language"), control, cx)
     }
 
     /// The appearance is this app's own, so it's here while the runner's away
@@ -2174,6 +2214,11 @@ fn plain_note(text: &str, cx: &App) -> AnyElement {
 
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let locale = active_locale();
+        if self.rendered_locale != locale {
+            self.rendered_locale = locale;
+            window.set_window_title(self.tab.title());
+        }
         let (settings, error) = match self.app.upgrade() {
             Some(app) => {
                 let t = app.read(cx);
@@ -2273,6 +2318,9 @@ impl SettingsWindow {
             .and_then(|a| a.read(cx).runner_settings().map(RunnerSettings::decode));
         json!({
             "tab": self.tab.name(),
+            "title": self.tab.title(),
+            "language": self.app.upgrade().map(|app| app.read(cx).language_setting().name()),
+            "locale": active_locale().name(),
             "appearance": style::appearance().name(),
             "accent": style::accent_choice().name(),
             "compact": style::compact(),

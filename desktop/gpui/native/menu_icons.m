@@ -45,3 +45,13 @@ static void tb_menu_images(NSMenu *menu) {
 void tb_menu_icons(void) {
   tb_menu_images(NSApp.mainMenu);
 }
+
+// GPUI finds this system menu by its English title. Rename the registered
+// menu and its visible item together so AppKit keeps managing the window list.
+void tb_set_window_menu_title(const char *utf8) {
+  NSMenuItem *item = [NSApp.mainMenu itemWithTitle:@"Window"];
+  if (!item || !item.submenu || item.submenu != NSApp.windowsMenu) return;
+  NSString *title = [NSString stringWithUTF8String:utf8];
+  item.title = title;
+  item.submenu.title = title;
+}

@@ -90,6 +90,7 @@ mod icons;
 mod input_probe;
 mod installed;
 mod key_hints;
+mod language;
 mod librarian;
 mod live_pages;
 mod mac_switch;
@@ -397,6 +398,7 @@ fn main() {
         // links, to the open gate) and the menus they hide under.
         media_view::init(cx);
         let mut settings = Settings::load();
+        language::apply_saved(&settings.saved);
         // The Swift app's settings and drafts, brought across once, before
         // anything reads them (swift_import.rs).
         let brought = swift_import::run_once(&mut settings, cx);

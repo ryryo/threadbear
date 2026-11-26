@@ -664,6 +664,12 @@ fn step(
                 }
                 None => None,
             };
+            if let Some(name) = cmd["language"].as_str() {
+                let selection = threadbear_core::i18n::LanguageSetting::parse(name)
+                    .ok_or("language must be system, en or ja")?;
+                app.update(cx, |t, cx| t.set_language(selection, cx));
+                return Ok(json!("ok"));
+            }
             // Appearance's Font by its saved name ("system", "serif", "mono",
             // "allo"), for comparing shots of each without the menu.
             if let Some(name) = cmd["font"].as_str() {

@@ -70,13 +70,17 @@ the owning runner.
   your proxy, and stops if one does. Setup never deletes it, as from this
   Mac it can't prove your proxy is gone: delete it yourself once those
   addresses are gone for good, and setup stops asking.
+- **Desktop language:** `desktop-settings.json` in the data folder stores
+  `language` as `system`, `en` or `ja`. With no saved choice, the desktop
+  follows the operating system's first supported language.
 - **Apps:** `~/Applications/Threadbear GPUI.app` (the Mac app, which
   `./threadbear setup` builds and installs with
   `desktop/scripts/switch-from-swift.sh`) and
   `~/Applications/Threadbear Runner.app`, both built and signed on your Mac.
   A Mac set up before 18 Nov 2026 has the old Swift app instead,
   `~/Applications/Threadbear.app`, until you press its Start using the new
-  app (or run `desktop/scripts/install-app.sh`). The new app keeps its window and panel layout in `desktop-settings.json` and
+  app (or run `desktop/scripts/install-app.sh`). The new app keeps its
+  window and panel layout in `desktop-settings.json` and
   `gpui-prefs.json` in the data folder (with the local pages you chose
   Run them for, a digest of each), what a click on a link in a reply
   does (its menu's Default) and the kinds of file you said always open in their app in `desktop-links.json` there, the side pane's

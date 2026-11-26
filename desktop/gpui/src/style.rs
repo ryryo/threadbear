@@ -288,7 +288,7 @@ pub fn set_font_choice(choice: Font, cx: &mut App) {
 /// rows, the reading styles) is done again, as a new zoom does.
 static LOOK: AtomicU32 = AtomicU32::new(0);
 
-fn bump_look() {
+pub(crate) fn bump_look() {
     LOOK.fetch_add(1, Ordering::Relaxed);
 }
 

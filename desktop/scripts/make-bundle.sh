@@ -59,6 +59,7 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>threadbear-gpui</string>
     <key>CFBundleIdentifier</key><string>$bundle_id</string>
     <key>CFBundleName</key><string>Threadbear GPUI</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>ja</string></array>
     <key>CFBundleDisplayName</key><string>Threadbear GPUI</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1</string>

@@ -703,9 +703,9 @@ impl InboxOrder {
 
     pub fn title(self) -> &'static str {
         match self {
-            InboxOrder::NeedsYou => "Needs you first",
-            InboxOrder::Newest => "Newest first",
-            InboxOrder::Oldest => "Oldest first",
+            InboxOrder::NeedsYou => crate::tr!("Needs you first"),
+            InboxOrder::Newest => crate::tr!("Newest first"),
+            InboxOrder::Oldest => crate::tr!("Oldest first"),
         }
     }
 
@@ -1135,12 +1135,12 @@ fn sort_sections<T: Borrow<ThreadSummary>>(
     hibernating.sort_by_cached_key(|t| (wakes_at(summary(t)), newest_first(summary(t))));
     archived.sort_by_cached_key(|t| (Reverse(summary(t).archived_ms()), summary(t).id.clone()));
     [
-        ("starred", "Starred", starred),
-        ("coordinators", "Coordinators", coordinators),
-        ("inbox", "Inbox", inbox),
-        ("running", "Running", running),
-        ("hibernating", "Hibernating", hibernating),
-        ("archived", "Archived", archived),
+        ("starred", crate::tr!("Starred"), starred),
+        ("coordinators", crate::tr!("Coordinators"), coordinators),
+        ("inbox", crate::tr!("Inbox"), inbox),
+        ("running", crate::tr!("Running"), running),
+        ("hibernating", crate::tr!("Hibernating"), hibernating),
+        ("archived", crate::tr!("Archived"), archived),
     ]
     .into_iter()
     .filter(|(key, _, rows)| !rows.is_empty() || *key == "inbox")

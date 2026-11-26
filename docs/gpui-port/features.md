@@ -391,6 +391,7 @@ It comes from reading code, not from running anything, so "(unverified)" means n
 |---|---|---|---|---|---|---|
 | `settings.window` | Settings window | Tabbed, width draggable, up and down move through the sections | Own GPUI window with gpui-kit tabs and a resizable width. | kit | M | `SettingsView` |
 | `settings.general` | General | Appearance, ding with sound and volume, default folder, activity log, Updates from Mike | gpui-kit form, but GPUI has no sound API, so the ding needs an audio crate or code on macOS, Windows and Linux. | shim | M | `SettingsView`, `DingPlayer`, `CompletionSound` |
+| `settings.language` | Desktop language | Follow the OS or choose English or Japanese; changes apply while the app is open | GPUI resolves the language from its local settings and redraws translated views. | build | S | GPUI only |
 | `settings.models` | Models | Small-jobs pool, private folders | gpui-kit form and GPUI path prompts. | kit | S | `SettingsView` |
 | `settings.pools` | Pools | List, rename, order, icon, logins, folders | Drawn, with `foundation.reorder`. | build | L | `SettingsView`, `PoolsModel` |
 | `settings.runners` | Runners | Reorder, default | Drawn, with `foundation.reorder`. | build | S | `RunnersSettings` |

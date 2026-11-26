@@ -33,6 +33,7 @@ pub mod hello;
 pub mod highlights;
 pub mod home;
 pub mod html_tags;
+pub mod i18n;
 pub mod inbox;
 pub mod inline_chips;
 pub mod investigate;

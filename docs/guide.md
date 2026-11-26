@@ -1949,6 +1949,14 @@ opens, and ⌘Return opens beside: a thread in a panel of its own, or a panel
 next to the main one. Esc or a click outside puts it away, and ⌘K again does
 too. The Mac app hasn't got it.
 
+## Desktop language
+
+In Settings > General > Language, choose System, English or 日本語.
+System follows the first supported language in your operating system's
+preferences. The choice takes effect while the app is open and is saved
+on this computer. Japanese now covers the Settings tabs, menu headings,
+the Edit menu and the main inbox sections. Other screens still use English.
+
 ## Keyboard shortcuts
 <!-- slug: keyboard -->
 

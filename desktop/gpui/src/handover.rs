@@ -585,6 +585,9 @@ impl Threadbear {
         let mut fresh = crate::settings::Settings::load();
         fresh.saved.update_restore = None;
         self.settings = fresh;
+        if crate::language::apply_saved(&self.settings.saved) {
+            self.language_changed(cx);
+        }
         self.reload_drafts(cx);
         #[cfg(target_os = "macos")]
         if let Some(ns) = self.main_ns_window(cx) {

@@ -283,3 +283,19 @@ What a first list of the cuts missed and the trial found: the `-ThreadbearPocket
 launch argument, the positional parameter shifting the tools test, and the
 App Store review notes. Expect a few like that in any feature: after the
 listed cuts, `git grep -i <feature>` across the repo finds the rest.
+
+
+## Desktop translations
+
+The Rust UI keeps its English source text in `tr!`, `trf!` and `trn!`.
+Use a context when an English label can mean several things. Put named
+substitutions in one message so translators can change their order. Resolve
+messages as the view draws so it can pick up language changes.
+
+After changing a marked message, run `node scripts/i18n-extract-rust.ts`,
+edit `desktop/core/i18n/ja.json` and run `node scripts/i18n-check.ts`.
+`node scripts/i18n-seed-from-t3code.ts <pinned T3 Code directory>` fills
+empty entries with glossary terms and exact, unambiguous catalog matches.
+The script verifies the source catalog blobs against
+`third_party/t3code/manifest.json` and prints where each candidate came from.
+Check the candidates in the screens that use them.

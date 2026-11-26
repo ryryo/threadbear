@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use threadbear_core::shortcuts::{ShortcutBindings, ShortcutCommand};
+use threadbear_core::tr;
 use threadbear_core::zoom;
 use threadbear_dock::{
     DockContent, DockDrop, DockEdge, DockGroup, DockLayout, DockNode, DockOptions, DockSplit,
@@ -673,14 +674,14 @@ impl Threadbear {
             return project.title.clone();
         }
         match self.home_page().unwrap_or(SidebarMode::Inbox) {
-            SidebarMode::Projects => "Projects".into(),
-            SidebarMode::Librarian => "Librarian".into(),
-            SidebarMode::Recipes => "Recipes".into(),
-            SidebarMode::Scheduled => "Scheduled".into(),
+            SidebarMode::Projects => tr!("Projects").into(),
+            SidebarMode::Librarian => tr!("Librarian").into(),
+            SidebarMode::Recipes => tr!("Recipes").into(),
+            SidebarMode::Scheduled => tr!(context "sidebar view", "Scheduled").into(),
             SidebarMode::Inbox => match self.open_thread() {
-                Some(t) if t.title.is_empty() => "Untitled".into(),
+                Some(t) if t.title.is_empty() => tr!("Untitled").into(),
                 Some(t) => t.title.clone(),
-                None => "New thread".into(),
+                None => tr!("New thread").into(),
             },
         }
     }
@@ -1741,8 +1742,12 @@ impl Threadbear {
             unsafe {
                 extern "C" {
                     fn tb_menu_icons();
+                    fn tb_set_window_menu_title(title: *const std::os::raw::c_char);
                 }
                 tb_menu_icons();
+                if let Ok(title) = std::ffi::CString::new(window_menu_title()) {
+                    tb_set_window_menu_title(title.as_ptr());
+                }
             }
         }
     }
@@ -1807,17 +1812,17 @@ impl Threadbear {
                     .collect(),
             ),
             TopMenu::new(
-                "File",
+                tr!(context "menu bar", "File"),
                 vec![
                     item("New Thread", Command::NewThread),
                     Separator,
-                    item("Close", Command::Close),
+                    item(tr!(context "closes a window", "Close"), Command::Close),
                 ],
             ),
             // The text commands, as AppKit's standard Edit menu has them;
             // AppKit adds AutoFill, Start Dictation and Emoji & Symbols
             // under them on a Mac (window_menu.rs).
-            TopMenu::new("Edit", {
+            TopMenu::new(tr!(context "menu bar", "Edit"), {
                 use crate::window_menu::EditItem as E;
                 let edit = |e: E| MenuEntry::Edit(e);
                 vec![
@@ -1835,7 +1840,7 @@ impl Threadbear {
                 ]
             }),
             TopMenu::new(
-                "View",
+                tr!(context "menu bar", "View"),
                 vec![
                     item("Zoom In", Command::ZoomIn).enabled(zoom::can_zoom_in(zoom_now)),
                     item("Zoom Out", Command::ZoomOut).enabled(zoom::can_zoom_out(zoom_now)),
@@ -1883,7 +1888,7 @@ impl Threadbear {
                 .collect(),
             ),
             TopMenu::new(
-                "Go",
+                tr!(context "menu bar", "Go"),
                 vec![
                     item("Back", Command::Back).enabled(self.can_go_back()),
                     item("Forward", Command::Forward).enabled(self.can_go_forward()),
@@ -1895,7 +1900,7 @@ impl Threadbear {
                 ],
             ),
             TopMenu::new(
-                "Thread",
+                tr!(context "menu bar", "Thread"),
                 vec![
                     item(
                         if archived { "Unarchive" } else { "Archive" },
@@ -1926,7 +1931,7 @@ impl Threadbear {
             // AppKit adds Fill, Center, Move & Resize and the list of open
             // windows (the main one and any panel in a window of its own).
             TopMenu::new(
-                "Window",
+                window_menu_title(),
                 vec![
                     item("Minimize", Command::Minimize),
                     item("Zoom", Command::Zoom),
@@ -1935,7 +1940,7 @@ impl Threadbear {
                 ],
             ),
             TopMenu::new(
-                "Help",
+                tr!(context "menu bar", "Help"),
                 vec![
                     item("Set Up Threadbear", Command::SetUpThreadbear),
                     item("Take the Tour", Command::TakeTheTour),
@@ -2604,6 +2609,10 @@ fn menus_json(menus: &[TopMenu], shortcuts: &ShortcutBindings) -> Value {
     )
 }
 
+fn window_menu_title() -> &'static str {
+    tr!(context "menu bar", "Window")
+}
+
 fn gpui_menus(menus: &[TopMenu]) -> Vec<Menu> {
     fn entries(items: &[MenuEntry]) -> Vec<MenuItem> {
         items
@@ -2637,7 +2646,16 @@ fn gpui_menus(menus: &[TopMenu]) -> Vec<Menu> {
     }
     menus
         .iter()
-        .map(|m| Menu::new(m.title.clone()).items(entries(&m.items)))
+        .map(|m| {
+            // GPUI registers AppKit's Windows menu by its English title.
+            // The native helper applies the display title after registration.
+            let title = if cfg!(target_os = "macos") && m.title == window_menu_title() {
+                "Window".to_owned()
+            } else {
+                m.title.clone()
+            };
+            Menu::new(title).items(entries(&m.items))
+        })
         .collect()
 }
 

@@ -1654,6 +1654,44 @@ impl Threadbear {
         cx.notify();
     }
 
+    pub(crate) fn language_setting(&self) -> threadbear_core::i18n::LanguageSetting {
+        crate::language::selection(&self.settings.saved)
+    }
+
+    pub(crate) fn set_language(
+        &mut self,
+        selection: threadbear_core::i18n::LanguageSetting,
+        cx: &mut Context<Self>,
+    ) {
+        if crate::handover::waiting() {
+            return;
+        }
+        let previous = self
+            .settings
+            .saved
+            .language
+            .replace(selection.name().to_owned());
+        if let Err(error) = self.settings.save_checked() {
+            self.settings.saved.language = previous;
+            self.show_error(error, cx);
+            return;
+        }
+        if crate::language::apply(selection) {
+            self.language_changed(cx);
+        }
+        cx.refresh_windows();
+        cx.notify();
+    }
+
+    pub(crate) fn language_changed(&mut self, cx: &mut Context<Self>) {
+        crate::style::bump_look();
+        if let Some(pane) = &self.pane {
+            pane.update(cx, |pane, cx| pane.remeasure_rows(cx));
+        }
+        self.sync_menus(cx);
+        cx.refresh_windows();
+    }
+
     /// A Settings section's bear button: a new thread in the main window,
     /// in front, its box started with what it's about for the person to
     /// finish and send. Words already in the new-thread box stay, with

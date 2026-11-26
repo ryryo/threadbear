@@ -10,6 +10,7 @@
 // `applicationShouldTerminateAfterLastWindowClosed` has it: GPUI on a Mac
 // otherwise leaves the app running with no window and no way to get one back.
 use gpui_kit::*;
+use threadbear_core::tr;
 
 /// An item of the Edit menu. Each is the text box's own action (gpui-kit's
 /// input), so a menu item does what its key does wherever the keyboard is:
@@ -32,14 +33,14 @@ pub(crate) enum EditItem {
 impl EditItem {
     pub(crate) fn title(self) -> &'static str {
         match self {
-            EditItem::Undo => "Undo",
-            EditItem::Redo => "Redo",
-            EditItem::Cut => "Cut",
-            EditItem::Copy => "Copy",
-            EditItem::Paste => "Paste",
-            EditItem::PasteAndMatchStyle => "Paste and Match Style",
-            EditItem::Delete => "Delete",
-            EditItem::SelectAll => "Select All",
+            EditItem::Undo => tr!("Undo"),
+            EditItem::Redo => tr!("Redo"),
+            EditItem::Cut => tr!("Cut"),
+            EditItem::Copy => tr!("Copy"),
+            EditItem::Paste => tr!("Paste"),
+            EditItem::PasteAndMatchStyle => tr!("Paste and Match Style"),
+            EditItem::Delete => tr!("Delete"),
+            EditItem::SelectAll => tr!("Select All"),
         }
     }
 

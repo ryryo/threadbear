@@ -56,6 +56,8 @@ pub struct Saved {
     pub inbox_order: Option<String>,
     /// `appearance`: "system", "light" or "dark" (`AppAppearance`).
     pub appearance: Option<String>,
+    /// The app language: "system", "en" or "ja". Older files follow the system.
+    pub language: Option<String>,
     /// Appearance's accent, `style::Accent`'s name. None is the system's.
     pub accent: Option<String>,
     /// Appearance's Spacing: Some(true) is Compact. None is Roomy.
@@ -321,6 +323,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tb-settings-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(Settings::file_name())
+    }
+
+    #[test]
+    fn an_invalid_language_leaves_other_fields_intact() {
+        let (saved, dropped) = tolerant::<Saved>(
+            br#"{"language":123,"appearance":"dark","futureSetting":true}"#,
+            Settings::file_name(),
+        )
+        .unwrap();
+        assert_eq!(saved.language, None);
+        assert_eq!(saved.appearance.as_deref(), Some("dark"));
+        assert_eq!(saved.extra.get("futureSetting"), Some(&Value::Bool(true)));
+        assert_eq!(dropped, ["language"]);
     }
 
     #[test]
