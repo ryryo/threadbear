@@ -57,6 +57,15 @@ read, model call or save can retry that range. A malformed reply advances the
 checkpoint with a diagnostic code and retains no raw answer. A result with
 proposed changes waits for the owner to decide. Its evidence includes the
 Thread, conversation, Bot settings revision, model and sequence range.
+`bots.settings.automaticReview` takes `botId`, `expectedRevision` and `enabled`.
+`bots.reviews.list` takes `botId` and a linked `threadId`; `bots.reviews.reject`
+also takes `reportId`, zero-based `index` and `operationId`. These methods are
+local owner operations, with the same authentication as the Bot settings.
+`bots.reviews.approve` takes the same IDs as reject and accepts optional
+replacement `text` for an add or edit. The Runner checks that the previous
+note still matches and is unpinned at the time of the write. It records the
+decision, source and operation ID in memory history and can recover the
+decision after a restart if the history write completed first.
 
 Memory access uses the actor established by the Runner and current scope
 membership. A Bot's own scope, a team, a group and a project are distinct

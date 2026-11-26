@@ -2,11 +2,14 @@ import { z } from 'zod';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { BotConversations } from './conversations.ts';
 import type { BotRepository } from './repository.ts';
+import type { BotReviews } from './reviews.ts';
+import { MEMORY_LIMITS } from './ported/memory-entries.js';
 
 const botId = z.uuid();
 const identity = z.object({ botId });
 const settings = z.object({ name: z.string().min(1), role: z.string().optional(), instructions: z.string().optional() });
 const memoryTarget = identity.extend({ threadId: z.uuid() });
+const proposal = memoryTarget.extend({ reportId: z.uuid(), index: z.int().nonnegative(), operationId: z.uuid() });
 
 function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
   return (p) => {
@@ -16,7 +19,7 @@ function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<str
   };
 }
 
-export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }): Record<string, (p: Record<string, unknown>) => unknown> {
+export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
   const conversations = () => workspace().conversations;
   return {
@@ -38,5 +41,24 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.remove': method(memoryTarget.extend({ entryId: z.string().min(1) }), p => { conversations().removeNote(p.botId, p.threadId, p.entryId); return {}; }),
     'bots.memory.history': method(memoryTarget.extend({ before: z.uuid().optional() }), p => conversations().history(p.botId, p.threadId, p.before)),
     'bots.memory.restore': method(memoryTarget.extend({ changeId: z.uuid() }), p => { conversations().restoreNote(p.botId, p.threadId, p.changeId); return {}; }),
+    ...(reviews && {
+      'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean() }), ({ botId, expectedRevision, enabled }) => {
+        const service = reviews();
+        const reason = enabled ? service.unavailable(repo().get(botId)) : undefined;
+        if (reason) throw new RpcError(ErrorCode.notAllowed, reason);
+        return { bot: repo().setReviewEnabled(botId, expectedRevision, enabled) };
+      }),
+      'bots.reviews.list': method(memoryTarget, p => ({
+        reports: reviews().reports(p.botId, p.threadId), unavailable: reviews().unavailable(repo().get(p.botId)),
+      })),
+      'bots.reviews.reject': method(proposal, p => {
+        reviews().reject(p.botId, p.threadId, p.reportId, p.index, p.operationId);
+        return {};
+      }),
+      'bots.reviews.approve': method(proposal.extend({ text: z.string().trim().min(1).max(MEMORY_LIMITS.entry).optional() }), p => {
+        reviews().approve(p.botId, p.threadId, p.reportId, p.index, p.operationId, p.text);
+        return {};
+      }),
+    }),
   };
 }

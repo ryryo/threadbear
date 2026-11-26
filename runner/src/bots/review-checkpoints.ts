@@ -7,6 +7,7 @@ import { PROVIDERS } from '../protocol.ts';
 import type { ReviewChange } from './memory-review.ts';
 import { REVIEW_CHANGES_MAX } from './ported/memory-copy.js';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
+import type { ReviewReceipt } from './ported/personal-memory.js';
 
 const sequence = z.int().nonnegative();
 const evidence = z.object({
@@ -14,23 +15,25 @@ const evidence = z.object({
   configRevision: z.int().positive(), scopeRevision: z.string().min(1).max(128),
   first: sequence, through: sequence, provider: z.enum(PROVIDERS), model: z.string().min(1), accountId: z.string().min(1),
 }).refine(source => source.first <= source.through);
-const decision = { decision: z.enum(['pending', 'rejected']), operationId: z.uuid().optional() };
 const note = z.string().trim().min(1).max(MEMORY_LIMITS.entry);
+const decision = { decision: z.enum(['pending', 'rejected', 'approved']), operationId: z.uuid().optional(), acceptedText: note.optional() };
 const change = z.discriminatedUnion('op', [
   z.object({ op: z.literal('add'), text: note, until: z.iso.date().optional(), ...decision }),
   z.object({ op: z.literal('edit'), id: z.string().min(1), before: note, text: note, ...decision }),
   z.object({ op: z.literal('remove'), id: z.string().min(1), before: note, ...decision }),
 ]);
+const usage = z.object({ inputTokens: sequence.optional(), outputTokens: sequence.optional(), notionalUsd: z.number().nonnegative().optional() });
 const report = z.object({
   id: z.uuid(), source: evidence, rejected: z.int().nonnegative(), changes: z.array(change).max(REVIEW_CHANGES_MAX),
   diagnostic: z.literal('invalid-reply').optional(),
+  usage: usage.optional(),
 });
 const checkpoint = z.object({ conversationId: z.uuid(), cursor: sequence, reports: z.array(report) });
 
 export type ReviewEvidence = z.infer<typeof evidence>;
 type Report = z.infer<typeof report>;
 type Checkpoint = z.infer<typeof checkpoint>;
-type Result = { rejected: number; changes: ReviewChange[]; diagnostic?: 'invalid-reply' };
+type Result = { rejected: number; changes: ReviewChange[]; diagnostic?: 'invalid-reply'; usage?: z.infer<typeof usage> };
 
 /** Each conversation's cursor and reports are replaced together under the Runner's write lock. */
 export class ReviewCheckpoints {
@@ -84,6 +87,7 @@ export class ReviewCheckpoints {
     const accepted = report.parse({
       id: randomUUID(), source, rejected: result.rejected,
       ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }),
+      ...(result.usage === undefined ? {} : { usage: result.usage }),
       changes: result.changes.map(item => ({ ...item, decision: 'pending' })),
     });
     this.save({ ...next, reports: [accepted, ...next.reports] });
@@ -95,11 +99,31 @@ export class ReviewCheckpoints {
     const saved = this.read(conversationId);
     const current = saved.reports.find(row => row.id === reportId)?.changes[changeIndex];
     if (!current) throw new Error('Unknown memory proposal');
-    if (current.operationId === operationId) return;
+    if (current.decision === 'rejected' && current.operationId === operationId) return;
     if (current.decision !== 'pending') throw new Error('This memory proposal was already decided');
     if (saved.reports.some(row => row.changes.some(item => item.operationId === operationId))) throw new Error('The operation id already belongs to another proposal');
     current.decision = 'rejected';
     current.operationId = operationId;
     this.save(saved);
+  }
+
+  // A committed memory journal row is enough to finish the corresponding
+  // UI decision if the Runner lost power before its second atomic write.
+  reconcile(conversationId: string, receipts: readonly ReviewReceipt[]): void {
+    const saved = this.read(conversationId);
+    let changed = false;
+    for (const receipt of receipts) {
+      if (receipt.conversationId !== conversationId) continue;
+      const row = saved.reports.find(item => item.id === receipt.reportId);
+      const current = row?.changes[receipt.index];
+      if (!row || !current || row.source.threadId !== receipt.threadId) throw new Error('A review receipt does not match its proposal');
+      if (current.decision === 'approved' && current.operationId === receipt.operationId && current.acceptedText === receipt.acceptedText) continue;
+      if (current.decision !== 'pending') throw new Error('A review receipt conflicts with the recorded decision');
+      current.decision = 'approved';
+      current.operationId = receipt.operationId;
+      if (receipt.acceptedText !== undefined) current.acceptedText = note.parse(receipt.acceptedText);
+      changed = true;
+    }
+    if (changed) this.save(saved);
   }
 }

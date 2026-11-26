@@ -102,6 +102,45 @@ export class PersonalMemory {
     return note({ text, meta });
   }
 
+  // Apply the owner's chosen candidate through the same journal as manual
+  // changes. The journal is also the receipt if the review checkpoint could
+  // not be written after the note changed.
+  approveReview(change, receipt, time, redact) {
+    const history = this.history();
+    const recorded = history.find(row => row.review?.reportId === receipt.reportId && row.review.index === receipt.index)?.review;
+    if (recorded) {
+      if (recorded.operationId !== receipt.operationId || recorded.acceptedText !== receipt.acceptedText) {
+        throw new Error('This memory proposal was already applied');
+      }
+      return recorded;
+    }
+    if (history.some(row => row.review?.operationId === receipt.operationId)) throw new Error('The operation id already belongs to another proposal');
+    const file = this.load();
+    const operation = change.op === 'edit' ? 'replace' : change.op;
+    const text = change.op === 'remove' ? undefined : entryText(receipt.acceptedText ?? change.text);
+    if (text !== undefined && (redact(text) !== text || (receipt.acceptedText !== undefined && redact(receipt.acceptedText) !== receipt.acceptedText))) {
+      throw new Error('Memory cannot keep a secret');
+    }
+    const previous = change.op === 'add' ? undefined : this.find(file, change.id);
+    if (previous && (previous.text !== change.before || isPinned(previous) || isExpired(previous, time.slice(0, 10)))) {
+      throw new Error('The note changed before this proposal was applied');
+    }
+    if (text !== undefined && file.entries.some(entry => entry !== previous && squash(entry.text) === squash(text))) {
+      throw new Error('This note already exists');
+    }
+    const before = previous && file.lines[previous.line];
+    if (before && (looksSecret(before) || redact(before) !== before)) throw new Error('Memory history cannot keep a secret');
+    const after = text === undefined ? undefined : formatEntry(text, previous?.meta ?? {
+      id: newEntryId(file.entries), added: time.slice(0, 10), until: change.until,
+    });
+    if (before === after) throw new Error('This proposal leaves the note unchanged');
+    const lines = previous === undefined ? insertEntry(file.lines, after) : [...file.lines];
+    if (previous && after === undefined) lines.splice(previous.line, 1);
+    else if (previous) lines[previous.line] = after;
+    this.publish(operation, lines, time, { before, after, sourceThreadId: receipt.threadId, review: receipt });
+    return receipt;
+  }
+
   replace(id, raw, time) {
     this.history();
     const file = this.load();

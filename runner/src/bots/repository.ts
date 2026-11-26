@@ -15,6 +15,7 @@ const bot = z.looseObject({
   id, name: z.string().min(1), role: z.string(), instructions: z.string(), revision,
   archivedAt: z.iso.datetime().optional(),
   modelBinding: modelBinding.optional(),
+  reviewEnabled: z.boolean().optional(),
 });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
@@ -24,7 +25,7 @@ const state = z.looseObject({
   workspaceId: id, ownerRunnerId: z.string().min(1), ownerEpoch: revision, formatVersion: z.literal(1),
   bots: z.array(bot), conversations: z.array(conversation), pendingConversations: z.array(pendingConversation),
 });
-type Bot = z.infer<typeof bot>;
+export type Bot = z.infer<typeof bot>;
 export type Conversation = z.infer<typeof conversation>;
 type PendingConversation = z.infer<typeof pendingConversation>;
 type State = z.infer<typeof state>;
@@ -138,6 +139,12 @@ export class BotRepository {
     if (binding) entry.modelBinding = modelBinding.parse(binding);
     else delete entry.modelBinding;
     return this.saveBot(entry);
+  }
+
+  setReviewEnabled(id: string, expectedRevision: number, enabled: boolean): Bot {
+    const entry = this.editable(id, expectedRevision);
+    if ((entry.reviewEnabled ?? false) === enabled) return entry;
+    return this.saveBot({ ...entry, reviewEnabled: enabled });
   }
 
   conversations(botId: string): Conversation[] {

@@ -65,6 +65,7 @@ import { CodexAdapter } from './adapters/codex/adapter.ts';
 import { AcpAdapter } from './adapters/acp/adapter.ts';
 import { ACP_AGENTS, ACP_PROVIDERS, type AcpProvider } from './adapters/acp/agents.ts';
 import { acpAsker } from './models/acp-oneshot.ts';
+import { askCli, cliDir } from './models/claude-pool.ts';
 import { codexAsker } from './models/codex-oneshot.ts';
 import { PROVIDER_INFO } from './providers.ts';
 import { resolveCodexBinary } from './adapters/codex/appserver.ts';
@@ -763,6 +764,19 @@ async function main(): Promise<void> {
   if (box) {
     scrubber.known.add(box.secrets.boxKey);
     scrubber.known.add(box.secrets.threadKey);
+  }
+  if (!box && !draining) {
+    const askCodex = codexAsker({ codexBinary: () => updates.codexBinary(), registry });
+    const cwd = cliDir(cfg.home);
+    const timeoutMs = 60_000;
+    bots.startReviews({
+      clock: realClock, redact: scrubber.strict, privateFolder: folder => models.isPrivateFolder(folder),
+      askers: {
+        claude: ({ prompt, ...req }) => askCli({ ...req, user: prompt, cwd, timeoutMs, claudePath: cfg.claudePath, registry }),
+        codex: ({ prompt, ...req }) => askCodex({ ...req, user: prompt, cwd, timeoutMs }),
+      },
+      onError: threadId => log.warn('Bot memory review could not finish', { threadId }),
+    });
   }
   // A box whose key the backend turns down has been superseded by a newer
   // box for its thread: it stops its CLI and exits, so the provider's
@@ -1893,6 +1907,7 @@ async function main(): Promise<void> {
   const stop = async (signal: string) => {
     if (stopping) return;
     stopping = true;
+    bots.stopReviews();
     // Leaving after an uncaught error: this process may be half way through
     // something, so the stop gets a deadline (error-exits.ts).
     if (leavingAfterError) armStopDeadline();

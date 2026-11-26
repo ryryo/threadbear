@@ -7,7 +7,11 @@ export type MemoryChange = {
   after?: string;
   restored?: string;
   sourceThreadId?: string;
+  review?: ReviewReceipt;
 };
+
+export type ReviewSource = { reportId: string; index: number; conversationId: string; threadId: string; first: number; through: number };
+export type ReviewReceipt = ReviewSource & { operationId: string; acceptedText?: string };
 
 export class PersonalMemory {
   constructor(root: string);
@@ -18,4 +22,5 @@ export class PersonalMemory {
   replace(id: string, text: string, time: string): MemoryNote;
   remove(id: string, time: string): void;
   restore(id: string, time: string): void;
+  approveReview(change: import('../memory-review.ts').ReviewChange, receipt: ReviewReceipt, time: string, redact: (text: string) => string): ReviewReceipt;
 }
