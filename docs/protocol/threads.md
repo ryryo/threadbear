@@ -15,6 +15,10 @@ Inputs queued on a Bot conversation carry `botInput` with an input `id` and
 `conversationId`. The same fields go into `user.message`, including when an
 input joins a turn already running. The Runner flushes that event before
 dispatching the input to the CLI. The turn ID still identifies the whole turn.
+`botInput.source` records the authenticated owner or thread for a direct RPC,
+the runner, phone or schedule for a tagged delivery, or `unknown` when the
+internal caller supplies no verified source. Text and caller-supplied RPC
+fields cannot name that source.
 
 On a Runner with the Bot experiment available, the local owner can call
 `bots.list`, `bots.get`, `bots.create`, `bots.update` and `bots.archive`.

@@ -48,7 +48,7 @@ import type {
 } from './protocol.ts';
 import { agentsStillWorking, ErrorCode, LIMITS, PROTOCOL_VERSION, RpcError, sentByAgent } from './protocol.ts';
 import { cliName, providerName, providersForHello } from './providers.ts';
-import type { ArchivedBy, ArchiveVerdict, UnarchiveVerdict, LibrarianStatus, LooseEnd, Project, Schedule } from './protocol.ts';
+import type { ArchivedBy, ArchiveVerdict, BotInputSource, UnarchiveVerdict, LibrarianStatus, LooseEnd, Project, Schedule } from './protocol.ts';
 import { Projects } from './projects.ts';
 import type { Settings } from './settings.ts';
 import type {
@@ -2186,7 +2186,7 @@ export class Runner {
     }
     const turnId = opts.messageId ?? crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
-    if (rec.botLink) msg.botInput = { id: crypto.randomUUID(), conversationId: rec.botLink.conversationId };
+    if (rec.botLink) msg.botInput = { id: crypto.randomUUID(), conversationId: rec.botLink.conversationId, source: opts.botSource ?? { kind: opts.origin ?? 'unknown' } };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.wakeReason && opts.origin === 'runner') msg.wakeReason = opts.wakeReason;
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
@@ -5684,7 +5684,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; superseded?: false } | { superseded: true; started: true };
 

@@ -238,7 +238,8 @@ export type ContextUsage = {
   categories: { id?: string; name: string; tokens: number; kind: string }[];
 };
 
-export type BotInputRef = { id: string; conversationId: string };
+export type BotInputSource = { kind: 'owner' | 'runner' | 'schedule' | 'phone' | 'unknown' } | { kind: 'thread'; threadId: string };
+export type BotInputRef = { id: string; conversationId: string; source: BotInputSource };
 
 export type ThreadSummary = {
   id: string;

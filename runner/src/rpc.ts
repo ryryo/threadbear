@@ -884,9 +884,14 @@ export class RpcServer {
         return r.listButtons(reqString(p, 'threadId'));
       case 'buttons.press':
         return r.pressButton(reqString(p, 'threadId'), reqString(p, 'buttonId'));
-      case 'threads.send':
+      case 'threads.send': {
         // `ceiling`: set by the RPC gate for a thread's own key (runner/ceiling.ts).
-        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], { ...optAnswers(p), ...optSendOrigin(p), ...(isPermissionMode(p.ceiling) ? { ceiling: p.ceiling } : {}) });
+        const origin = optSendOrigin(p);
+        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], {
+          ...optAnswers(p), ...origin, ...(isPermissionMode(p.ceiling) ? { ceiling: p.ceiling } : {}),
+          botSource: conn.caller ? { kind: 'thread', threadId: conn.caller } : { kind: origin.origin ?? 'owner' },
+        });
+      }
       case 'threads.edit':
         return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), optString(p, 'text') ?? '', optImages(p) ?? [], { stopBackground: p.stopBackground === true });
       case 'threads.interrupt':

@@ -136,10 +136,11 @@ test('a fresh Bot conversation hears the shared note and a resumed CLI hears onl
 });
 
 test('the owner can create and read Bot conversations over RPC and a Full thread key cannot', async t => {
-  const h = makeHarness(tmpDir());
+  let service: BotConversations;
+  const h = makeHarness(tmpDir(), {}, { botContext: rec => service.context(rec) });
   const root = join(h.home, 'bots');
   const repo = new BotRepository(root, 'runner-1');
-  const service = new BotConversations(h.runner, repo, root);
+  service = new BotConversations(h.runner, repo, root);
   const token = 'bot-test-owner-authentication';
   const server = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: h.runner, log: nullLogger, gate: new CallerGate({ runner: h.runner }), methods: botMethods(() => ({ repo, conversations: service })) });
   const { port } = await server.listen();
@@ -156,6 +157,14 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   const { note } = await owner.call<{ note: { id: string } }>('bots.memory.add', { ...input, text: 'Keep headings short' });
   assert.equal((await owner.call<{ notes: unknown[] }>('bots.memory.read', input)).notes.length, 1);
   await assert.rejects(full.call('bots.memory.read', input), /owner/);
+  await owner.call('threads.send', { threadId: conversation.threadId, text: 'Review a heading' });
+  await tick();
+  h.adapter.last.init();
+  await full.call('threads.send', { threadId: conversation.threadId, text: 'Use this paragraph too', botSource: { kind: 'owner' } });
+  await tick();
+  const log = h.store.log(conversation.threadId);
+  const messages = log.read(1, log.lastSeq).filter(row => row.type === 'user.message');
+  assert.deepEqual(messages.map(row => row.botInput?.source), [{ kind: 'owner' }, { kind: 'thread', threadId: caller }]);
   await owner.call('bots.memory.edit', { ...input, entryId: note.id, text: 'Keep headings concise' });
   const { rows } = await owner.call<{ rows: { id: string; op: string }[] }>('bots.memory.history', input);
   assert.equal(rows[0].op, 'replace');
