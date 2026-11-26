@@ -178,6 +178,8 @@ test('check.sh --part runs just the Linux steps or just the Mac ones, which toge
     put('app/Tools/ok.mjs', '');
     put('mock-runner/ok.mjs', '');
     put('mock-runner/node_modules/.keep', '');
+    put('scripts/i18n-check.ts', '');
+    put('scripts/i18n.test.ts', '');
     put('desktop/.keep', '');
     put('ios/ThreadbearKit/.keep', '');
     put('bin/swift', '#!/bin/bash\n', 0o755);
@@ -201,7 +203,7 @@ test('check.sh --part runs just the Linux steps or just the Mac ones, which toge
     assert.equal(whole.status, 0, whole.out);
     assert.equal(lin.status, 0, lin.out);
     assert.equal(mac.status, 0, mac.out);
-    for (const name of ['runner typecheck', 'runner unit tests', 'lint', 'desktop core tests']) {
+    for (const name of ['runner typecheck', 'runner unit tests', 'lint', 'desktop core tests', 'localization', 'localization tests']) {
       assert.ok(lin.steps.includes(name), `${name}: ${lin.out}`);
       assert.ok(!mac.steps.includes(name), `${name}: ${mac.out}`);
     }
