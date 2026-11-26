@@ -80,6 +80,7 @@ export type CallerGateDeps = {
 };
 
 const ALL = ['inbox', 'snoozed', 'archived'] as const;
+const PRIVATE_OWNER_RESPONSES = new Set(['approvals.respond', 'plans.approve', 'secrets.answer', 'requests.answer', 'threads.tickAsk', 'buttons.press']);
 
 function str(p: Params, k: string): string | undefined {
   return typeof p[k] === 'string' ? (p[k] as string) : undefined;
@@ -147,6 +148,9 @@ export class CallerGate {
     if (method.startsWith('bots.')) throw new RpcError(ErrorCode.notAllowed, 'Only the owner can use the Bot controls.');
     const target = str(p, 'threadId');
     if (target !== undefined && !this.canReadThread(threadId, target)) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${target}`);
+    if (target && this.privateBotOf(target) && PRIVATE_OWNER_RESPONSES.has(method)) {
+      throw new RpcError(ErrorCode.notAllowed, 'Only the local owner can answer cards for a private Bot.');
+    }
     const privateBotId = this.privateBotOf(threadId);
     if (method === 'threads.send' && privateBotId && (target === undefined || this.privateBotOf(target) !== privateBotId)) {
       throw new RpcError(ErrorCode.notAllowed, 'Sending from a private Bot to another thread needs the owner.');

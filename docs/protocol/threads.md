@@ -105,6 +105,11 @@ its conversations have been reserved. It rejects overlapping work folders,
 including filesystem aliases. The Runner writes the new data format marker
 before saving Private state. New conversations and their child threads keep
 the Private identity on disk from creation, including after archive.
+An agent's `send_message` from a Private Bot to a local ordinary thread
+requires a one-use approval card. The card carries the destination thread
+ID, the entire text and its SHA-256 hash. Approval is local and owner-only.
+If the destination changes or the sender loses its Private context while
+the card is open, the message is not delivered.
 
 ## Pictures in a message
 

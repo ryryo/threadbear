@@ -12,6 +12,7 @@
 import type { StartRequest } from './cross-runner.ts';
 import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -35,6 +36,7 @@ import type { CommandHost } from './sync.ts';
 import type { DrainProjectOp, MembershipChange, Projects } from './projects.ts';
 import { processInfo } from './proc.ts';
 import { IS_WINDOWS } from './platform.ts';
+import { cardInput } from './tools.ts';
 
 // `auth: 'challenge'`: this runner answers the RPC's auth challenge
 // (docs/protocol/connection.md, "Auth"). A drain file without it is from an older
@@ -904,8 +906,26 @@ export class ThreadRouter implements ThreadControl {
   async send(threadId: string, text: string, images: Parameters<Runner['send']>[2] = [], opts: Parameters<Runner['send']>[3] = {}): Promise<{ turnId: string }> {
     const { away: e, privateBotId } = await this.target(threadId);
     const actor = this.privateActor();
-    if (actor && actor !== privateBotId) throw new RpcError(ErrorCode.notAllowed, 'Sending from a private Bot to another thread needs the owner.');
+    if (actor && actor !== privateBotId) await this.approvePrivateSend(actor, threadId, text, images, opts.agentSignal);
     return e ? e.call('threads.send', { threadId, text, images, ...(opts.answers ? { answers: opts.answers } : {}), ...(opts.ceiling ? { ceiling: opts.ceiling } : {}) }) : this.runner.send(threadId, text, images, this.actor ? { ...opts, botSource: { kind: 'thread', threadId: this.actor } } : opts);
+  }
+
+  private async approvePrivateSend(botId: string, threadId: string, text: string, images: unknown[], signal?: AbortSignal): Promise<void> {
+    const caller = this.actor;
+    const target = this.runner.threads.get(threadId)?.rec;
+    const reason = 'Sending from a private Bot to another thread needs the owner.';
+    if (!caller || !target || images.length > 0) throw new RpcError(ErrorCode.notAllowed, reason);
+    const destination = target.title;
+    const bodyHash = createHash('sha256').update(text).digest('hex');
+    const card = cardInput({ threadId, destination, text, bodyHash }, 'all');
+    if (card.tooLong) throw new RpcError(ErrorCode.badParams, 'The whole message must fit in the approval card.');
+    const permission = await this.runner.requestAgentApproval(caller, {
+      name: 'mcp__threadbear__send_message', title: 'Send this message outside the private Bot', input: card.input, signal, noReview: true,
+    });
+    if (permission.decision !== 'allow' || permission.reviewer || signal?.aborted) throw new RpcError(ErrorCode.notAllowed, reason);
+    if (this.privateActor() !== botId || this.runner.threads.get(threadId)?.rec !== target || target.privateBotId || target.title !== destination) {
+      throw new RpcError(ErrorCode.notAllowed, 'The destination or private Bot changed while waiting for approval.');
+    }
   }
 
   async createReview(threadId: string, input: Parameters<Runner['createReview']>[1]): Promise<ReturnType<Runner['createReview']>> {

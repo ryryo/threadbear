@@ -2488,7 +2488,7 @@ export function buildThreadbearTools(
           if (r?.queued) return `Queued for ${id.slice(0, 8)} "${hit.other.t.title}" on ${hit.other.runner}, which hasn't picked it up yet (it may be busy restarting or asleep). It gets it when it next checks in.`;
           return `Sent to ${id.slice(0, 8)} "${hit.other.t.title}" on ${hit.other.runner}.`;
         }
-        const sent = (await control.send(id, head + text, [], { ceiling })) as { turnId: string; held?: boolean };
+        const sent = (await control.send(id, head + text, [], { ceiling, ...(extra?.signal ? { agentSignal: extra.signal } : {}) })) as { turnId: string; held?: boolean };
         // A report to the thread that started this one, kept until its
         // other threads finish (docs/protocol/threads.md, "Nested threads").
         if (sent.held) return `Held for ${id.slice(0, 8)} "${(await control.get(id)).title}": it gets this with the other reports once the threads it started have finished, so there's no need to send it again.`;

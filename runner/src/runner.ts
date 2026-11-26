@@ -5701,7 +5701,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; agentSignal?: AbortSignal };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; superseded?: false } | { superseded: true; started: true };
 
