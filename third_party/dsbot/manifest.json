@@ -71,7 +71,13 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/src/bots/ported/memory-journal.js",
-      "changes": "Ported pending publication and replay with the journal tail helpers. The Runner supplies ownership, its atomic writer and path validation. Other memory operations remain in the baseline."
+      "changes": "Ported pending publication and replay with the journal tail helpers. The Runner supplies ownership, its atomic writer and path validation.",
+      "additionalPorts": [
+        {
+          "portPath": "runner/src/bots/ported/personal-memory.js",
+          "changes": "Ported manual add, replace, remove and line-checked restore for the Bot's main memory file. Topic and shared-scope operations remain in the baseline."
+        }
+      ]
     },
     {
       "upstreamPath": "ds-bot/test/memory.test.js",

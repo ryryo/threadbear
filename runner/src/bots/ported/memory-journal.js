@@ -106,7 +106,7 @@ function journalRow(path, torn, row) {
 
 // A pending record is validated completely before it can change files.
 // Do not allow recovered paths to redirect through a symlink.
-function checkPath(root, path) {
+export function checkPath(root, path) {
   let at = root;
   for (const part of ['', ...relative(root, path).split(sep)]) {
     at = join(at, part);
