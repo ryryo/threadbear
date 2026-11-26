@@ -41,7 +41,9 @@
       "sha256": "64063b5a6f70bd547d7115673cbcdcedf017d61fa5cb9050525cd295df92caa9",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-entries.js",
       "phase": 1,
-      "portMode": "A"
+      "portMode": "A",
+      "portPath": "runner/src/bots/ported/memory-entries.js",
+      "changes": "Implementation preserved byte-for-byte after the attribution header."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory-pending.js",
@@ -73,7 +75,9 @@
       "sha256": "df4b23d5737d00d28379b419aadca7495b43db30bf8a224b78f2926c4aecc75e",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/memory.test.js",
       "phase": 1,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/memory-entries.test.js",
+      "changes": "Copied the four standalone memory format and sensitive-string tests. Updated imports and kept their assertions unchanged."
     },
     {
       "upstreamPath": "ds-bot/test/memory-pending.test.js",
