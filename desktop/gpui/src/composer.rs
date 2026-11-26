@@ -788,9 +788,11 @@ impl Composer {
     }
 
     fn page_notes_changed(&self, cx: &mut Context<Self>) {
+        // Attaching is an explicit edit. Save it before an immediate
+        // restart instead of waiting for the typing debounce.
         let app = self.app.clone();
         cx.defer(move |cx| {
-            let _ = app.update(cx, |app, cx| app.drafts_changed(cx));
+            let _ = app.update(cx, |app, cx| app.save_drafts(cx));
         });
         cx.notify();
     }
