@@ -56,7 +56,9 @@ pub(crate) struct Shared {
     /// counts for the gate.
     view: AtomicUsize,
     convex: bool,
+    browsing: bool,
     can_go_back: AtomicBool,
+    can_go_forward: AtomicBool,
     loading: AtomicBool,
     /// Main-frame loads started, so a dump can tell a page kept between
     /// visits from one loaded again.
@@ -137,6 +139,20 @@ fn convex_context() -> Option<RequestContext> {
     })
 }
 
+fn browser_context() -> Option<RequestContext> {
+    thread_local! {
+        static BROWSER_CONTEXT: RefCell<Option<RequestContext>> = const { RefCell::new(None) };
+    }
+    BROWSER_CONTEXT.with(|context| {
+        let mut context = context.borrow_mut();
+        if context.is_none() {
+            *context =
+                request_context_create_context(Some(&RequestContextSettings::default()), None);
+        }
+        context.clone()
+    })
+}
+
 pub struct PanelPage {
     browser: Browser,
     view: *mut c_void,
@@ -179,7 +195,9 @@ impl PanelPage {
             gate: Mutex::new(LeaveGate::default()),
             view: AtomicUsize::new(0),
             convex: matches!(kind, Kind::Convex { .. }),
+            browsing: matches!(kind, Kind::Browser),
             can_go_back: AtomicBool::new(false),
+            can_go_forward: AtomicBool::new(false),
             loading: AtomicBool::new(true),
             loads: AtomicU32::new(0),
             title: Mutex::new(String::new()),
@@ -259,16 +277,17 @@ impl PanelPage {
         // place before its page's first script runs; so does a local page
         // whose scripts run, so its guards are in before them.
         let first = match &kind {
-            Kind::Patch => url.to_owned(),
+            Kind::Patch | Kind::Browser => url.to_owned(),
             Kind::Preview(preview) if !preview.scripts => preview.page_url(),
             Kind::Convex { .. } | Kind::Preview(_) => "about:blank".to_owned(),
         };
         let mut context = match &kind {
             Kind::Patch => request_context_get_global_context(),
+            Kind::Browser => browser_context(),
             Kind::Convex { .. } => convex_context(),
             Kind::Preview(_) => super::sealed::context(),
         };
-        if context.is_none() && matches!(kind, Kind::Preview(_)) {
+        if context.is_none() && matches!(kind, Kind::Browser | Kind::Preview(_)) {
             return Err("the sealed pages' context isn't there".into());
         }
         if matches!(&kind, Kind::Preview(p) if p.scripts) && !super::sealed::all_rules() {
@@ -403,6 +422,18 @@ impl PanelPage {
     pub fn reload(&self) {
         let url = self.url.borrow().clone();
         self.load(&url);
+    }
+
+    pub fn reload_current(&self) {
+        self.browser.reload();
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.shared.can_go_forward.load(Ordering::Acquire)
+    }
+
+    pub fn go_forward(&self) {
+        self.browser.go_forward();
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -719,6 +750,9 @@ wrap_request_handler! {
                 return 0;
             }
             let url = request.map(|r| CefString::from(&r.url()).to_string()).unwrap_or_default();
+            if self.shared.browsing {
+                return i32::from(site(&url).is_none() && url != "about:blank");
+            }
             match browse(&url, &self.shared.home(), &self.shared.own(), self.shared.convex, user_gesture == 1, is_redirect == 1) {
                 Browse::Stay => 0,
                 Browse::Leave => {
@@ -757,7 +791,12 @@ wrap_life_span_handler! {
             _no_javascript_access: Option<&mut c_int>,
         ) -> c_int {
             let url = target_url.map(|u| u.to_string()).unwrap_or_default();
-            match popup(&url, &self.shared.home(), self.shared.convex, user_gesture == 1) {
+            let home = if self.shared.browsing {
+                site(&url).unwrap_or_default()
+            } else {
+                self.shared.home()
+            };
+            match popup(&url, &home, self.shared.convex, user_gesture == 1) {
                 Popup::Leave => self.shared.leave(url),
                 Popup::LoadHere => {
                     if let Some(frame) = browser.and_then(|b| b.main_frame()) {
@@ -789,9 +828,10 @@ wrap_load_handler! {
     }
 
     impl LoadHandler {
-        fn on_loading_state_change(&self, _browser: Option<&mut Browser>, is_loading: c_int, can_go_back: c_int, _can_go_forward: c_int) {
+        fn on_loading_state_change(&self, _browser: Option<&mut Browser>, is_loading: c_int, can_go_back: c_int, can_go_forward: c_int) {
             self.shared.loading.store(is_loading == 1, Ordering::Release);
             self.shared.can_go_back.store(can_go_back == 1, Ordering::Release);
+            self.shared.can_go_forward.store(can_go_forward == 1, Ordering::Release);
             self.shared.send(Event::Changed);
         }
 

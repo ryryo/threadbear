@@ -814,9 +814,22 @@ impl AgentBrowser {
 #[derive(Default)]
 pub(crate) struct BrowserPaneState {
     address: Option<Entity<InputState>>,
+    urls: HashMap<String, String>,
+    agent_tabs: HashSet<String>,
     /// The list of pages' scroll, for its scroll bar.
     scroll: ScrollHandle,
     _subs: Vec<Subscription>,
+}
+
+impl BrowserPaneState {
+    fn browser_is_agents(&self, thread: &str, cx: &App) -> bool {
+        model(cx).is_some_and(|model| {
+            let bear = model.read(cx);
+            bear.available()
+                && (self.agent_tabs.contains(thread)
+                    || (!self.urls.contains_key(thread) && !bear.tabs_for(thread).is_empty()))
+        })
+    }
 }
 
 impl SidePane {
@@ -852,17 +865,243 @@ impl SidePane {
         let Some(url) = bear::address(&input.read(cx).value()) else {
             return;
         };
-        let (Some(thread), Some(model)) = (self.thread(cx), model(cx)) else {
+        let Some(thread) = self.thread(cx) else {
             return;
         };
-        model.update(cx, |b, cx| b.open(&url, &thread.id, cx));
+        if self.browser.browser_is_agents(&thread.id, cx) {
+            if let Some(model) = model(cx) {
+                model.update(cx, |b, cx| b.open(&url, &thread.id, cx));
+            }
+        } else {
+            self.browser_set_url(&thread.id, &url, cx);
+        }
         input.update(cx, |s, cx| s.set_value("", window, cx));
         window.blur(cx);
     }
 
-    /// The Browser pane (`AgentBrowserPanel`): the address bar, then the
-    /// thread's pages, Mike's turn first.
+    pub(crate) fn browser_set_url(&mut self, thread: &str, url: &str, cx: &mut Context<Self>) {
+        if threadbear_web::site(url).is_none() {
+            return;
+        }
+        self.cancel_browser_note();
+        self.browser.agent_tabs.remove(thread);
+        self.browser.urls.insert(thread.to_owned(), url.to_owned());
+        crate::web_panels::navigate_browser(thread, url, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn browser_show_agents(&mut self, thread: &str) {
+        self.browser.agent_tabs.insert(thread.to_owned());
+    }
+
     pub(crate) fn render_browser_panel(
+        &mut self,
+        thread: &ThreadSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let agents = self.browser.browser_is_agents(&thread.id, cx);
+        let with_bear = model(cx).is_some_and(|b| b.read(cx).available());
+        let mut tabs = h_flex().gap(px(5.)).p(px(5.)).flex_none();
+        if with_bear {
+            for (agent, label, tip) in [
+                (false, "Web", "Browse in Threadbear"),
+                (true, "Agent tabs", "Show the thread's BrowserBear tabs"),
+            ] {
+                let thread = thread.id.clone();
+                let switch = cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if agent {
+                        this.browser.agent_tabs.insert(thread.clone());
+                    } else {
+                        this.browser.agent_tabs.remove(&thread);
+                        this.browser.urls.entry(thread.clone()).or_default();
+                    }
+                    cx.notify();
+                });
+                tabs = tabs.child(
+                    PushButton::new(label, label, tip)
+                        .small()
+                        .disabled(agents == agent)
+                        .render(cx, switch),
+                );
+            }
+        }
+        let body = if agents {
+            self.render_agent_tabs(thread, window, cx)
+        } else {
+            self.render_browsing(thread, window, cx)
+        };
+        v_flex()
+            .size_full()
+            .when(with_bear, |s| s.child(tabs))
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
+    fn render_browsing(
+        &mut self,
+        thread: &ThreadSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = palette(cx);
+        let page = crate::web_panels::browser_page(&thread.id, cx);
+        let stored = self
+            .browser
+            .urls
+            .get(&thread.id)
+            .cloned()
+            .unwrap_or_default();
+        let url = page
+            .as_ref()
+            .map(|p| p.address())
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| stored.clone());
+        let input = self.browser_address(window, cx);
+        input.update(cx, |s, cx| {
+            s.set_placeholder(
+                if url.is_empty() {
+                    "Enter a URL or search".to_owned()
+                } else {
+                    url.clone()
+                },
+                window,
+                cx,
+            )
+        });
+        let bar = h_flex().gap(px(5.)).p(px(6.)).flex_none().child(
+            div().flex_1().min_w_0().bg(p.hover).rounded(px(6.)).child(
+                Input::new(&input)
+                    .appearance(false)
+                    .small()
+                    .text_size(px(style::size::LABEL)),
+            ),
+        );
+        let chrome = url.clone();
+        let buttons = h_flex()
+            .flex_wrap()
+            .gap(px(4.))
+            .px(px(6.))
+            .pb(px(6.))
+            .flex_none()
+            .when_some(page.clone(), |row, page| {
+                let back = page.clone();
+                let forward = page.clone();
+                row.child(
+                    PushButton::new("browser-back", "Back", "Go back")
+                        .small()
+                        .disabled(!back.can_go_back())
+                        .render(cx, move |_, _, _| back.go_back()),
+                )
+                .child(
+                    PushButton::new("browser-forward", "Forward", "Go forward")
+                        .small()
+                        .disabled(!forward.can_go_forward())
+                        .render(cx, move |_, _, _| forward.go_forward()),
+                )
+                .child(
+                    PushButton::new("browser-reload", "Reload", "Reload this page")
+                        .small()
+                        .render(cx, move |_, _, _| page.reload_current()),
+                )
+            })
+            .when(!url.is_empty(), |row| {
+                row.child(
+                    PushButton::new(
+                        "browser-external",
+                        "Open in browser",
+                        "Open this URL in your external browser",
+                    )
+                    .small()
+                    .render(cx, move |_, _, cx| {
+                        crate::open_gate::open_web(&url, cx);
+                    }),
+                )
+            })
+            .when(
+                !chrome.is_empty()
+                    && crate::open_gate::can_open_chrome()
+                    && crate::reply_links::browser_name().as_deref() != Some("Google Chrome"),
+                |row| {
+                    row.child(
+                        PushButton::new(
+                            "browser-chrome",
+                            "Chrome",
+                            "Open this URL in Google Chrome",
+                        )
+                        .small()
+                        .render(cx, move |_, _, cx| {
+                            crate::open_gate::open_chrome(&chrome, cx)
+                        }),
+                    )
+                },
+            );
+        let main = self
+            .app
+            .upgrade()
+            .is_some_and(|app| app.read(cx).main_window == window.window_handle());
+        let marked = self.render_browser_note(&thread.id, cx);
+        let note_buttons =
+            if page.as_ref().is_some_and(|p| !p.loading()) && self.browser_pick.is_none() {
+                let element = cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.start_browser_note(true, window, cx)
+                });
+                let region = cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.start_browser_note(false, window, cx)
+                });
+                Some(
+                    h_flex()
+                        .gap(px(5.))
+                        .px(px(6.))
+                        .pb(px(6.))
+                        .flex_none()
+                        .child(
+                            PushButton::new(
+                                "browser-comment-element",
+                                "Pick element",
+                                "Mark an element for this thread",
+                            )
+                            .small()
+                            .render(cx, element),
+                        )
+                        .child(
+                            PushButton::new(
+                                "browser-comment-area",
+                                "Select area",
+                                "Mark a region for this thread",
+                            )
+                            .small()
+                            .render(cx, region),
+                        ),
+                )
+            } else {
+                None
+            };
+        let body = if let Some(marked) = marked {
+            marked
+        } else if stored.is_empty() {
+            crate::files::pane_note(
+                "Enter an address to open a page beside the conversation.",
+                p,
+            )
+            .into_any_element()
+        } else {
+            crate::web_panels::browser_view(&thread.id, &stored, main, window, cx)
+        };
+        v_flex()
+            .size_full()
+            .child(bar)
+            .child(buttons)
+            .children(note_buttons)
+            .when_some(self.browser_note_error, |d, error| {
+                d.child(div().px(px(6.)).text_color(p.failed).child(error))
+            })
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
+    /// The existing BrowserBear view for the agents' tabs.
+    fn render_agent_tabs(
         &mut self,
         thread: &ThreadSummary,
         window: &mut Window,
@@ -1091,6 +1330,14 @@ impl SidePane {
         thread: &ThreadSummary,
         cx: &App,
     ) {
+        if !self.browser.browser_is_agents(&thread.id, cx) {
+            pane.insert(
+                "browserUrl".into(),
+                json!(self.browser.urls.get(&thread.id)),
+            );
+            pane.insert("pick".into(), self.browser_note_dump(&thread.id));
+            return;
+        }
         let Some(model) = model(cx) else { return };
         let b = model.read(cx);
         let tabs = b.tabs_for(&thread.id);
@@ -1140,11 +1387,10 @@ impl crate::app::Threadbear {
     /// The rail's Browser button: the count of the thread's pages, and the
     /// accent dot while one's handed to Mike. None without BrowserBear.
     pub(crate) fn browser_rail(&self, thread: &str, cx: &App) -> Option<(usize, bool)> {
-        let model = model(cx)?;
+        let Some(model) = model(cx) else {
+            return Some((0, false));
+        };
         let b = model.read(cx);
-        if !b.available() {
-            return None;
-        }
         let tabs = b.tabs_for(thread);
         Some((tabs.len(), tabs.iter().any(AgentTab::yours)))
     }
@@ -1169,9 +1415,12 @@ impl crate::app::Threadbear {
             return;
         }
         self.browser_handoff_seen = key.clone();
-        if key.is_some() && !self.dock.read(cx).is_showing(BROWSER) {
+        if key.is_some() {
             let (side, id) = (self.side.clone(), thread.id);
-            side.update(cx, |side, cx| side.choose_section(&id, BROWSER, cx));
+            side.update(cx, |side, cx| {
+                side.browser_show_agents(&id);
+                side.choose_section(&id, BROWSER, cx);
+            });
             self.show_pane(BROWSER, cx);
         }
     }

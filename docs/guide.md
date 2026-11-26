@@ -401,14 +401,20 @@ too. Patches says so beside each patch it affects, and a new worktree's
 thread says when its setup didn't run. A schedule's check doesn't run in a
 repo's folder either.
 
-The Browser panel, the globe on a thread's right-hand rail, lists the pages a
-thread's agents have open through [BrowserBear](https://github.com/mikecann/browserbear):
-in the agents' own browser ([Helium](https://helium.computer), in real windows
-that open behind yours without taking the focus) or in one of your Chrome
-profiles. Each page has a still of how it looks, what the agent is doing in it,
-and Show window, which brings its real window to the front. The panel doesn't
-draw the live page or take clicks for it: you use the page in its own window.
-An address typed at the top opens a new page in the agents' browser.
+On the macOS GPUI app, Browser is the globe in a thread's right-hand rail.
+Type a URL or search there, or choose Open in Panel on a link. The page opens
+beside the conversation. Command-click or choose Open in Browser to open the
+external browser directly. Ordinary clicks and links shown by a pin follow
+Default in the link menu.
+
+Choose Pick element to mark one element, or Select area to draw a rectangle.
+Add a comment, review the selection, and choose Add to draft. The comment and
+any image stay with that thread's unsent draft until you send it.
+
+With [BrowserBear](https://github.com/mikecann/browserbear), Agent tabs in
+Browser lists the pages the thread's agents have open. Each has a still and
+Show window, which brings the original window to the front. An address typed
+in Agent tabs opens a new page in the agents' browser.
 
 When the agent needs you to do something in a page (sign in, approve, pay),
 handoff brings that page's window to the front. For a page in the agents'

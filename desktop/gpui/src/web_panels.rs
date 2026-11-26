@@ -89,6 +89,7 @@ pub(crate) struct WebPanels {
     pages: Vec<Kept>,
     /// Why a page couldn't be made, by its key.
     failed: HashMap<String, String>,
+    browser_urls: HashMap<String, String>,
     /// Pages asked for this frame, made just after it.
     making: HashSet<String>,
     convex: HashMap<String, ConvexState>,
@@ -113,6 +114,7 @@ pub(crate) fn init(cx: &mut App) {
     let entity = cx.new(|_| WebPanels {
         pages: Vec::new(),
         failed: HashMap::new(),
+        browser_urls: HashMap::new(),
         making: HashSet::new(),
         convex: HashMap::new(),
         selections,
@@ -504,9 +506,15 @@ impl WebPanels {
                 }
                 crate::open_gate::open_web(&url, cx);
             }
-            PanelEvent::Changed => {}
+            PanelEvent::Changed => {
+                if key.starts_with("browser:") {
+                    let current = self.page(key).filter(|p| !p.loading()).map(|p| p.address());
+                    if let Some(url) = current.filter(|url| threadbear_web::site(url).is_some()) {
+                        self.browser_urls.insert(key.to_owned(), url);
+                    }
+                }
+            }
         }
-        let _ = key;
         cx.notify();
     }
 
@@ -1014,16 +1022,53 @@ fn page_view(
     public_page(panels, &key, &url, main, window, cx)
 }
 
-/// An ordinary web link opened over a pane section. Its page has its own
-/// slot even if a patch panel shows the same address at the same time.
-pub(crate) fn link_preview(url: &str, main: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn browser_page(thread: &str, cx: &App) -> Option<Rc<PanelPage>> {
+    let panels = panels(cx)?;
+    panels.read(cx).page(&browser_key(thread)).cloned()
+}
+
+pub(crate) fn navigate_browser(thread: &str, url: &str, cx: &mut App) {
+    let Some(panels) = panels(cx) else { return };
+    let key = browser_key(thread);
+    let page = panels.update(cx, |panels, _| {
+        panels.failed.remove(&key);
+        panels.browser_urls.insert(key.clone(), url.to_owned());
+        panels.page(&key).cloned()
+    });
+    if let Some(page) = page {
+        page.load(url);
+    }
+}
+
+fn browser_key(thread: &str) -> String {
+    format!("browser:{thread}")
+}
+
+pub(crate) fn browser_view(
+    thread: &str,
+    url: &str,
+    main: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let Some(panels) = panels(cx) else {
         return note("The web runtime is unavailable.", cx);
     };
-    if threadbear_web::site(url).is_none() {
-        return note("This link isn't a web page.", cx);
+    let key = browser_key(thread);
+    let url = panels
+        .read(cx)
+        .browser_urls
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| url.to_owned());
+    let open = Some(Opener {
+        url: url.clone(),
+        tip: "Open in browser".into(),
+    });
+    match running(&key, "this page", main, open.clone(), window, cx) {
+        Ok(parent) => slot(&panels, &key, &url, || PanelKind::Browser, parent, open, cx),
+        Err(instead) => instead,
     }
-    public_page(&panels, &format!("link:{url}"), url, main, window, cx)
 }
 
 fn public_page(

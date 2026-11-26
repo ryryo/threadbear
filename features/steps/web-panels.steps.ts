@@ -42,14 +42,60 @@ When(/^the agent pins( and shows)? the page server as "([^"]+)"$/, async functio
   await this.app.do({ cmd: 'mock', method: 'pin', params: { threadId: await threadId(this), url: sites().home, title, show: Boolean(shows) } });
 });
 
-Then('the link preview shows the page {string}', async function (this: ThreadbearWorld, title: string) {
-  await this.until(`the link preview showing "${title}"`, (d) => {
-    const preview = pane(d) as { previewKind?: string; previewText?: string } | undefined;
-    const page = pages(d).find((p) => p.url === sites().home);
-    return preview?.previewKind === 'page' && preview.previewText === sites().home
+Then('the Browser panel shows the page {string}', async function (this: ThreadbearWorld, title: string) {
+  await this.until(`the Browser panel showing "${title}"`, (d) => {
+    const browser = pane(d) as { section?: string; browserUrl?: string } | undefined;
+    const page = pages(d).find((p) => p.key.startsWith('browser:') && p.address === sites().home);
+    return browser?.section === 'threadbear.browser' && browser.browserUrl === sites().home
       && page?.title === title && page.loading === false && page.hidden === false
       && page.placedThisFrame === true;
   }, LOADED_MS);
+});
+
+Then('the page server was opened outside the app', async function (this: ThreadbearWorld) {
+  const seen: string[] = [];
+  for (let retry = 0; retry < 50; retry += 1) {
+    seen.push(...JSON.parse(okValue(await this.app.do({ cmd: 'opened' }))) as string[]);
+    if (seen.includes(sites().home)) return;
+    await sleep(100);
+  }
+  assert.fail(`External URL wasn't opened: ${JSON.stringify(seen)}`);
+});
+
+Then('my draft has no page comment', async function (this: ThreadbearWorld) {
+  const { composer } = await this.app.dump();
+  assert.ok(!composer.text.includes('Page comment on'));
+  assert.equal(composer.images ?? 0, 0);
+});
+
+When('I press the browser control {string}', async function (this: ThreadbearWorld, title: string) {
+  await this.app.do({ cmd: 'click', title });
+});
+
+type BrowserPick = { ready?: boolean; bounds?: [number, number, number, number]; target?: string | null };
+const pick = (dump: Dump) => (pane(dump) as { pick?: BrowserPick } | undefined)?.pick;
+async function selectionBounds(world: ThreadbearWorld) {
+  await world.until('browser snapshot', (dump) => pick(dump)?.ready === true && (pick(dump)?.bounds?.[2] ?? 0) > 100, LOADED_MS);
+  const bounds = pick(await world.app.dump())?.bounds;
+  assert.ok(bounds);
+  return bounds;
+}
+When('I select the first link on the browser snapshot', async function (this: ThreadbearWorld) {
+  const [x, y] = await selectionBounds(this);
+  await this.app.do({ cmd: 'click-at', x: x + 45, y: y + 49 });
+  await this.until('first marked element', (dump) => pick(dump)?.target === 'Element: <a>', LOADED_MS);
+});
+When('I draw a box on the browser snapshot', async function (this: ThreadbearWorld) {
+  const [x, y] = await selectionBounds(this);
+  await this.app.do({ cmd: 'point', x: x + 30, y: y + 30, toX: x + 90, toY: y + 90, holdMs: 100 });
+  await this.until('marked region', (dump) => pick(dump)?.target === 'Selected region', LOADED_MS);
+});
+Then('my draft contains a page comment about {string} with a picture', async function (this: ThreadbearWorld, target: string) {
+  await this.until('page comment in the draft', (dump) =>
+    dump.composer.text.includes('Page comment on Panel home')
+      && dump.composer.text.includes(target)
+      && dump.composer.images === 1,
+  LOADED_MS);
 });
 
 Given('the thread has the Convex panel', async function (this: ThreadbearWorld) {

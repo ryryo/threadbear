@@ -64,6 +64,7 @@ pub struct Composer {
     /// same calls, so no double lease).
     pub(crate) pane: WeakEntity<ThreadPane>,
     pub(crate) input: Entity<TextareaState>,
+    pub(crate) page_notes: Vec<crate::browser_notes::PageNote>,
     /// The chips in the box, by token id, in no particular order: the box's
     /// tokens say the order (`chips`).
     pub(crate) pictures: HashMap<SharedString, PictureChip>,
@@ -170,6 +171,7 @@ pub(crate) struct SavedBox {
 pub struct RestoreDraft {
     pub(crate) text: String,
     pub(crate) images: Vec<ImageRef>,
+    pub(crate) page_notes: Vec<crate::browser_notes::PageNote>,
     pub(crate) card: Option<SavedPicks>,
     /// With a card's picks: the message as it went, in the box's form, for
     /// the drafts file, which keeps only words and pictures (a quit with
@@ -182,6 +184,7 @@ impl RestoreDraft {
         RestoreDraft {
             text,
             images,
+            page_notes: Vec::new(),
             card: None,
             as_sent: None,
         }
@@ -216,9 +219,12 @@ impl RestoreDraft {
         let as_sent = (first.card.is_some() || then.card.is_some())
             .then(|| Self::join_parts(first.for_saving(), then.for_saving()));
         let (text, images) = Self::join_parts((first.text, first.images), (then.text, then.images));
+        let mut page_notes = first.page_notes;
+        page_notes.extend(then.page_notes);
         RestoreDraft {
             text,
             images,
+            page_notes,
             card: first.card.or(then.card),
             as_sent,
         }
@@ -290,6 +296,7 @@ impl Composer {
             app,
             pane: WeakEntity::new_invalid(),
             input,
+            page_notes: Vec::new(),
             pictures: HashMap::new(),
             mentions: HashMap::new(),
             next_picture: 0,
@@ -622,7 +629,7 @@ impl Composer {
     /// What to keep through a quit: what's waiting to be given back (not
     /// drawn yet), messages still held for a restarting runner, then the box.
     pub(crate) fn draft_for_saving(&self, cx: &App) -> (String, Vec<ImageRef>) {
-        let (text, images) = self.draft(cx);
+        let (text, images) = self.box_draft(cx);
         let mut all = RestoreDraft::plain(text, images);
         if let Some(id) = &self.thread_id {
             for held in crate::thread::held_drafts(id, cx).into_iter().rev() {
@@ -713,11 +720,101 @@ impl Composer {
 
     pub(crate) fn holds_anything(&self, cx: &App) -> bool {
         let text = self.input.read(cx).value().to_string();
-        threadbear_core::inline_chips::holds_anything(&text, &self.box_chips(cx))
+        !self.page_notes.is_empty()
+            || threadbear_core::inline_chips::holds_anything(&text, &self.box_chips(cx))
     }
 
     /// A card's or thread's chip is its link in the draft (composer_inline.rs).
+    pub(crate) fn notes_for_saving(&self) -> Vec<crate::browser_notes::PageNote> {
+        self.restore
+            .as_ref()
+            .into_iter()
+            .flat_map(|restore| &restore.page_notes)
+            .chain(&self.page_notes)
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn add_page_note(
+        &mut self,
+        note: crate::browser_notes::PageNote,
+        cx: &mut Context<Self>,
+    ) {
+        self.page_notes.push(note);
+        self.page_notes_changed(cx);
+    }
+
+    fn render_page_notes(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if self.editing.is_some() {
+            return Vec::new();
+        }
+        self.page_notes
+            .iter()
+            .enumerate()
+            .map(|(index, note)| {
+                let remove = cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if index < this.page_notes.len() {
+                        this.page_notes.remove(index);
+                        this.page_notes_changed(cx);
+                    }
+                });
+                let p = crate::highlights::palette(cx);
+                h_flex()
+                    .gap(px(5.))
+                    .items_center()
+                    .p(px(4.))
+                    .bg(p.hover)
+                    .rounded(px(5.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(p.secondary)
+                            .child(note.words().replace('\n', " · ")),
+                    )
+                    .child(
+                        crate::push_button::PushButton::new(
+                            SharedString::from(format!("remove-page-comment-{index}")),
+                            "Remove",
+                            "Remove page comment",
+                        )
+                        .small()
+                        .render(cx, remove),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    fn page_notes_changed(&self, cx: &mut Context<Self>) {
+        let app = self.app.clone();
+        cx.defer(move |cx| {
+            let _ = app.update(cx, |app, cx| app.drafts_changed(cx));
+        });
+        cx.notify();
+    }
+
     fn draft(&self, cx: &App) -> (String, Vec<ImageRef>) {
+        let (mut text, mut images) = self.box_draft(cx);
+        if self.editing.is_some() {
+            return (text, images);
+        }
+        for note in &self.page_notes {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str(&note.words());
+            if let Some(image) = note.image() {
+                text.push(' ');
+                text.push(PICTURE_MARK);
+                images.push(image);
+            }
+        }
+        (text, images)
+    }
+
+    fn box_draft(&self, cx: &App) -> (String, Vec<ImageRef>) {
         let text = self.input.read(cx).value().to_string();
         let end = text.len();
         threadbear_core::inline_chips::draft_in(&text, &self.box_chips(cx), 0..end)
@@ -863,10 +960,10 @@ impl Composer {
             .join("\n\n");
         let (text, images_to_send, answers) = match self.card_message(&words, cx) {
             Some((message, mut note_images, answers)) => {
-                note_images.extend(images.clone());
+                note_images.extend(images);
                 (message, note_images, answers)
             }
-            None => (words, images.clone(), Value::Null),
+            None => (words, images, Value::Null),
         };
         if text.trim().is_empty() && images_to_send.is_empty() {
             return;
@@ -881,6 +978,9 @@ impl Composer {
             return;
         }
         let picks = self.saved_picks();
+        let (draft_text, images) = self.box_draft(cx);
+        let page_notes = std::mem::take(&mut self.page_notes);
+        self.page_notes_changed(cx);
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.forget_chips();
         self.clear_picks(cx);
@@ -888,6 +988,7 @@ impl Composer {
         let restore = RestoreDraft {
             text: draft_text,
             images,
+            page_notes,
             card: picks,
             as_sent: None,
         };
@@ -1256,9 +1357,11 @@ impl Composer {
         let RestoreDraft {
             text: draft,
             images,
+            page_notes,
             card,
             ..
         } = restore;
+        self.page_notes.splice(..0, page_notes);
         if let Some(saved) = card {
             if self.card.seq == Some(saved.seq) {
                 self.card.picks = saved.picks;
@@ -1270,7 +1373,7 @@ impl Composer {
         }
         // Anything typed since stays, after what's given back
         // (`restoreDraft`), rather than the words given back being lost.
-        let (now_text, now_images) = self.draft(cx);
+        let (now_text, now_images) = self.box_draft(cx);
         let RestoreDraft {
             text: draft,
             images,
@@ -2658,6 +2761,7 @@ impl Render for Composer {
             .children(editing_banner)
             .children(answer_chips)
             .children(draft_chips)
+            .children(self.render_page_notes(cx))
             .when_some(strip, |s, strip| s.child(strip))
             // The # picker hangs off the text, not the box's top: with a
             // card or chips over the text it sat a card's height away from

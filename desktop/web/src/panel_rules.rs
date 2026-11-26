@@ -18,6 +18,8 @@ pub enum Event {
 pub enum Kind {
     /// A patch's url panel: its own site stays, other sites leave.
     Patch,
+    /// The user's Browser pane, in its own browsing context.
+    Browser,
     /// The Convex embedded dashboard: only its own site stays, and the page
     /// answers its credentials request (docs/protocol/patches.md, "The Convex panel")
     /// with this script, run in it before its own.

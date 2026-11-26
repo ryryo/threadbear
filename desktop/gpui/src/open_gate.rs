@@ -219,6 +219,53 @@ pub(crate) fn open_in_chrome_profile(url: &str, directory: &str, cx: &mut App) {
     system_open(&web, cx);
 }
 
+/// Offer Chrome even when the user's default browser is another app.
+#[cfg(target_os = "macos")]
+pub(crate) fn can_open_chrome() -> bool {
+    !crate::scripted::scripted() && Path::new("/Applications/Google Chrome.app").is_dir()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn can_open_chrome() -> bool {
+    false
+}
+
+pub(crate) fn open_chrome(url: &str, cx: &mut App) {
+    let LinkKind::Web(web) = policy::link_kind(url) else {
+        open_web(url, cx);
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        if scripted_opens(&format!("chrome {web}")) {
+            return;
+        }
+        cx.spawn(async move |cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let app = signed_as("/Applications/Google Chrome.app", GOOGLE_CHROME).map_err(
+                        |_| "Couldn't verify the installed copy of Google Chrome.".to_owned(),
+                    )?;
+                    std::process::Command::new("/usr/bin/open")
+                        .arg("-a")
+                        .arg(app)
+                        .arg(web)
+                        .spawn()
+                        .map(|_| ())
+                        .map_err(|e| format!("Chrome didn't open: {e}"))
+                })
+                .await;
+            if let Err(why) = result {
+                cx.update(|cx| refuse(why, cx));
+            }
+        })
+        .detach();
+    }
+    #[cfg(not(target_os = "macos"))]
+    system_open(&web, cx);
+}
+
 /// The running Chrome's bundle, if there is one.
 #[cfg(target_os = "macos")]
 fn running_chrome() -> Option<String> {

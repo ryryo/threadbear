@@ -52,7 +52,6 @@ const HEADER_HEIGHT: f32 = 38.;
 pub(crate) enum Target {
     File(String),
     Folder(String),
-    Page(String),
     /// A GitHub pull request's tab, by its own URL (pr_view.rs).
     Pr(String),
 }
@@ -120,7 +119,7 @@ fn remembered_open(p: &PanePreview) -> Option<crate::pane_store::Open> {
         Target::File(path) => (path.clone(), false),
         Target::Folder(path) => (path.clone(), true),
         // A PR is read from GitHub again each launch, so isn't kept.
-        Target::Page(_) | Target::Pr(_) => return None,
+        Target::Pr(_) => return None,
     };
     let back = p.back.iter().filter_map(remembered_open).collect();
     Some(crate::pane_store::Open {
@@ -427,6 +426,8 @@ pub(crate) struct SidePane {
     pub(crate) explain: crate::explain_pane::ExplainState,
     /// The Browser pane's address bar (agent_browser.rs).
     pub(crate) browser: crate::agent_browser::BrowserPaneState,
+    pub(crate) browser_pick: Option<crate::browser_notes::Pick>,
+    pub(crate) browser_note_error: Option<&'static str>,
     /// The PRs open as tabs (pr_view.rs).
     pub(crate) prs: crate::pr_view::PrPanes,
     _subs: Vec<Subscription>,
@@ -472,6 +473,8 @@ impl SidePane {
             drawn: HashMap::new(),
             explain: Default::default(),
             browser: Default::default(),
+            browser_pick: None,
+            browser_note_error: None,
             prs: Default::default(),
             _subs: vec![],
         };
@@ -807,6 +810,9 @@ impl SidePane {
 
     /// Shows a section (`choosePanel`), closing a preview over another one.
     pub(crate) fn choose_section(&mut self, thread_id: &str, id: &str, cx: &mut Context<Self>) {
+        if id != BROWSER {
+            self.cancel_browser_note();
+        }
         if self.previews.get(thread_id).is_some_and(|p| p.from != id) {
             self.leave_edit(thread_id, cx);
             self.previews.remove(thread_id);
@@ -950,20 +956,24 @@ impl SidePane {
     pub(crate) fn preview_web_link(
         &mut self,
         url: &str,
-        title: Option<String>,
+        _title: Option<String>,
         thread: &ThreadSummary,
         cx: &mut Context<Self>,
     ) {
         if crate::pr_view::pr_url(url).is_some() {
             self.open_pr(url, thread, cx);
         } else if core::is_web_page(url) {
-            let from = self.section_for(thread);
-            let title = title.unwrap_or_else(|| core::text::address(url));
-            self.show_preview(
-                PanePreview::new(Target::Page(url.to_owned()), title, from),
-                &thread.id,
-                cx,
-            );
+            let id = thread.id.clone();
+            self.browser_set_url(&id, url, cx);
+            self.choose_section(&id, BROWSER, cx);
+            let app = self.app.clone();
+            cx.defer(move |cx| {
+                let _ = app.update(cx, |app, cx| {
+                    if app.pane_thread().is_some_and(|thread| thread.id == id) {
+                        app.show_pane(BROWSER, cx);
+                    }
+                });
+            });
         }
     }
 
@@ -1203,9 +1213,7 @@ impl SidePane {
             }
             MenuAction::OpenFile { path } => self.open_externally(&path, cx),
             MenuAction::OpenUrl { url } => {
-                if core::is_web_page(&url) {
-                    crate::files::open_web(&url, cx);
-                }
+                crate::open_gate::open_web(&url, cx);
             }
             MenuAction::Reveal { path } => crate::files::reveal(
                 &path,
@@ -3202,9 +3210,7 @@ impl SidePane {
         for panel in thread.panels() {
             items.push(json!({ "id": panel.id, "title": panel.title, "kind": panel.kind, "url": panel.url, "note": panel.note, "active": section == panel.id }));
         }
-        if crate::agent_browser::model(cx).is_some_and(|b| b.read(cx).available()) {
-            items.push(json!({ "id": BROWSER, "title": "Browser", "kind": "browser", "active": section == BROWSER }));
-        }
+        items.push(json!({ "id": BROWSER, "title": "Browser", "kind": "browser", "active": section == BROWSER }));
         items.push(
             json!({ "id": FILES, "title": "Files", "kind": "files", "active": section == FILES }),
         );

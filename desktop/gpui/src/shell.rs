@@ -786,6 +786,12 @@ impl Threadbear {
             return;
         }
         if self.is_panel_showing(panel, cx) {
+            if panel == BROWSER {
+                self.side.update(cx, |side, cx| {
+                    side.cancel_browser_note();
+                    cx.notify();
+                });
+            }
             self.dock.update(cx, |m, cx| m.close(panel, cx));
         } else {
             self.show_pane(panel, cx);

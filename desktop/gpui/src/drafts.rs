@@ -231,10 +231,19 @@ impl Threadbear {
         if crate::handover::waiting() {
             return;
         }
-        if let Some(draft) = self.drafts.saved.get(key).cloned() {
-            composer.update(cx, |c, cx| {
-                c.restore_draft(RestoreDraft::plain(draft.text, draft.images), cx)
-            });
+        let mut restore = self.drafts.saved.get(key).cloned().map_or_else(
+            || RestoreDraft::plain(String::new(), Vec::new()),
+            |draft| RestoreDraft::plain(draft.text, draft.images),
+        );
+        restore.page_notes = self
+            .drafts
+            .saved
+            .get(&format!("page-notes:{key}"))
+            .and_then(|d| serde_json::from_str(&d.text).ok())
+            .unwrap_or_default();
+        if !restore.text.is_empty() || !restore.images.is_empty() || !restore.page_notes.is_empty()
+        {
+            composer.update(cx, |c, cx| c.restore_draft(restore, cx));
         }
     }
 
@@ -297,6 +306,13 @@ impl Threadbear {
             let (text, images) = composer.draft_for_saving(cx);
             if key != NEW_THREAD {
                 merge_thread(&mut all, &key, composer.box_drafts(cx));
+            }
+            let key_notes = format!("page-notes:{key}");
+            let notes = composer.notes_for_saving();
+            if let Some(notes) = picks_draft(&notes, notes.is_empty()) {
+                all.insert(key_notes, notes);
+            } else {
+                all.remove(&key_notes);
             }
             let draft = Draft { text, images };
             if draft.is_empty() {

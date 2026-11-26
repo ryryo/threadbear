@@ -21,7 +21,7 @@ Feature: Web pages in a thread's panels
     When I open the thread "Morning brief"
     And a reply linking "the page" to the page server streams in
     And I choose "Open in Panel" from the menu of the link "the page"
-    Then the link preview shows the page "Panel home"
+    Then the Browser panel shows the page "Panel home"
     And nothing was opened in another app
 
   @panel.web @web-runtime @swift-pending
@@ -30,17 +30,63 @@ Feature: Web pages in a thread's panels
     When I open the thread "Morning brief"
     And the agent pins the page server as "the page"
     And I choose "Open in Panel" from the menu of the highlight "the page"
-    Then the link preview shows the page "Panel home"
+    Then the Browser panel shows the page "Panel home"
     And nothing was opened in another app
 
   @panel.web @web-runtime @swift-pending
   Scenario: An agent can show a pinned page beside the thread
     Given the web runtime is installed
     When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I pick "Open in Panel" under Default in the menu of the link "the page"
     And I'm looking at the app
     And the agent pins and shows the page server as "the page"
-    Then the link preview shows the page "Panel home"
+    Then the Browser panel shows the page "Panel home"
     And nothing was opened in another app
+
+  @panel.web @swift-pending @browser.external
+  Scenario: An agent showing a pin respects the external default
+    When I open the thread "Morning brief"
+    And I'm looking at the app
+    And the agent pins and shows the page server as "the page"
+    Then the page server was opened outside the app
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Marking a link keeps it unclicked and adds a picture to the draft
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When I press the browser control "Mark an element for this thread"
+    And I select the first link on the browser snapshot
+    And I press the browser control "Attach to this thread's draft"
+    Then my draft contains a page comment about "Element: <a>" with a picture
+    And the Browser panel shows the page "Panel home"
+    And nothing was opened in another app
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: A selected region adds to the draft only when confirmed
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When I press the browser control "Mark a region for this thread"
+    And I draw a box on the browser snapshot
+    And I press the browser control "Attach to this thread's draft"
+    Then my draft contains a page comment about "Selected region" with a picture
+    When I open the thread "Add dark mode to the dashboard"
+    Then my draft has no page comment
+    When the app is quit and opened again
+    And I open the thread "Morning brief"
+    Then my draft contains a page comment about "Selected region" with a picture
+
+  @panel.web @swift-pending
+  Scenario: The globe is available without BrowserBear
+    When I open the thread "Morning brief"
+    And I click the right rail's Browser button
+    Then the dock has the "browser" panel
 
   @panel.web @web-runtime @swift-pending
   Scenario: A url panel shows its page, and keeps it between visits

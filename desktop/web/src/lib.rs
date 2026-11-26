@@ -208,6 +208,11 @@ mod elsewhere {
         }
         pub fn load(&self, _url: &str) {}
         pub fn reload(&self) {}
+        pub fn reload_current(&self) {}
+        pub fn can_go_forward(&self) -> bool {
+            false
+        }
+        pub fn go_forward(&self) {}
         pub fn can_go_back(&self) -> bool {
             false
         }

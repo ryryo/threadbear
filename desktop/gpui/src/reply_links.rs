@@ -467,9 +467,10 @@ impl ThreadPane {
             {
                 self.open_pr_link(&web, cx)
             }
-            Some(LinkTarget::Web(web)) => {
-                self.open_web_link(&web, WebLinkAction::for_click(command, web_click()), cx)
+            Some(LinkTarget::Web(web)) if command => {
+                open_gate::open_web(&web, cx);
             }
+            Some(LinkTarget::Web(web)) => self.open_web_link(&web, web_click(), cx),
             None => open_gate::open_link(url, self.origin(), &self.summary.cwd, cx),
         }
     }
@@ -552,12 +553,7 @@ impl ThreadPane {
             let thread = self.summary.clone();
             if let Some(app) = self.composer.read(cx).app.upgrade() {
                 let side = app.read(cx).side.clone();
-                let section = side.update(cx, |side, cx| {
-                    let section = side.section_for(&thread);
-                    side.preview_web_link(url, None, &thread, cx);
-                    section
-                });
-                show_pane(&app, &section, cx);
+                side.update(cx, |side, cx| side.preview_web_link(url, None, &thread, cx));
             }
             return;
         }
@@ -877,6 +873,9 @@ fn choose(target: &MenuTarget, choice: &LinkChoice, cx: &mut App) {
             if let Some(profile) = target.profiles.get(*index) {
                 open_gate::open_in_chrome_profile(url, &profile.directory, cx);
             }
+        }
+        (LinkChoice::OpenWeb(WebLinkAction::Browser), LinkTarget::Web(url)) => {
+            open_gate::open_web(url, cx);
         }
         (LinkChoice::OpenWeb(action), LinkTarget::Web(url)) => {
             let (url, action) = (url.clone(), *action);

@@ -279,9 +279,6 @@ pub(crate) fn shows_media(side: &SidePane, thread_id: &str) -> bool {
     let Some(preview) = side.previews.get(thread_id) else {
         return false;
     };
-    if matches!(preview.target, Target::Page(_)) {
-        return true;
-    }
     let Some(path) = preview.file_path() else {
         return false;
     };
@@ -471,7 +468,6 @@ impl SidePane {
                 }
                 _ => self.load_file(thread, path.clone(), preview.opened, cx),
             },
-            Target::Page(_) => {}
             Target::Folder(_) => self.load_folder_for_preview(thread, cx),
             Target::Pr(url) => self.begin_pr(url, cx),
         }
@@ -1132,17 +1128,6 @@ impl SidePane {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mut row = h_flex().flex_none().gap(px(0.));
-        if let Target::Page(url) = &preview.target {
-            let url = url.clone();
-            row = row.child(self.header_button(
-                "hl-open-page",
-                "arrow.up.right",
-                "Open in browser".to_owned(),
-                p,
-                cx,
-                move |_, cx| open_web(&url, cx),
-            ));
-        }
         if let Target::Folder(path) = &preview.target {
             row = row.child(self.folder_mode_button(p, cx));
             // Another Mac's folder has no copy here to hand over.
@@ -1378,13 +1363,6 @@ impl SidePane {
                 window,
                 cx,
             ),
-            Target::Page(url) => {
-                let main = self
-                    .app
-                    .upgrade()
-                    .is_some_and(|app| app.read(cx).main_window == window.window_handle());
-                crate::web_panels::link_preview(url, main, window, cx)
-            }
             Target::Folder(path) => self.render_folder(thread, path, preview, window, cx),
             Target::Pr(url) => self.render_pr(thread, url, window, cx),
         }
@@ -1867,7 +1845,6 @@ impl SidePane {
                 if preview.editing { " (editing)" } else { "" }
             ),
             Target::Folder(path) => format!("folder {path}"),
-            Target::Page(url) => format!("page {url}"),
             Target::Pr(url) => format!("pr {url}"),
         }
     }
@@ -1880,10 +1857,6 @@ impl SidePane {
         cx: &App,
     ) {
         match &preview.target {
-            Target::Page(url) => {
-                pane.insert("previewKind".into(), json!("page"));
-                pane.insert("previewText".into(), json!(url));
-            }
             Target::Pr(url) => {
                 pane.insert("previewKind".into(), json!("pr"));
                 pane.insert("previewText".into(), json!(url));

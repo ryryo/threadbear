@@ -17,6 +17,7 @@ pub(crate) struct PushButton {
     label: SharedString,
     tip: SharedString,
     busy: bool,
+    disabled: bool,
     small: bool,
 }
 
@@ -32,6 +33,7 @@ impl PushButton {
             label: label.into(),
             tip: tip.into(),
             busy: false,
+            disabled: false,
             small: false,
         }
     }
@@ -39,6 +41,11 @@ impl PushButton {
     /// Spinning, and not taking clicks, while what it started is under way.
     pub(crate) fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
+        self
+    }
+
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -87,7 +94,8 @@ impl PushButton {
                 s.opacity(0.6)
                     .child(Spinner::new().color(label).with_size(px(11.)))
             })
-            .when(!busy, |s| s.on_click(on_click))
+            .when(self.disabled && !busy, |s| s.opacity(0.5))
+            .when(!busy && !self.disabled, |s| s.on_click(on_click))
             .child(self.label);
         crate::highlights::tipped(button, self.tip).into_any_element()
     }

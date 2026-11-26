@@ -1060,6 +1060,14 @@ offer "Open in Chrome: <profile>". Choosing one runs
 only ever for a web address (`app/Sources/Threadbear/Transcript/ChromeProfiles.swift`,
 `desktop/gpui/src/open_gate.rs`). Nothing else of Chrome's is read.
 
+The Browser panel's Web view uses the installed Chromium runtime, with a
+separate in-memory browsing context. Picking a page comment takes a still of
+the visible page. Adding it to a draft sends the chosen crop through the
+existing media import and stores the comment and image reference in
+`desktop-drafts.json`. The chat receives it when you send the draft. The
+attachment does not include form values, cookies, URL query or fragment,
+or the page's HTML.
+
 The Browser panel also uses that private socket to list the pages agents
 associate with threads, ask for a small still of each and bring a page's real
 window to the front (`app/Sources/Threadbear/Views/AgentBrowserPanel.swift`,

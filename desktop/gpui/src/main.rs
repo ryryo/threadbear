@@ -37,6 +37,7 @@ mod automation;
 mod automation_compat;
 #[cfg(any(test, feature = "automation"))]
 mod automation_screenshot;
+mod browser_notes;
 mod chips;
 mod code_colours;
 mod colour_space;

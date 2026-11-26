@@ -886,28 +886,40 @@ impl Threadbear {
                     return;
                 }
             }
-            self.show_requested(
-                &RequestedPanel::Section(requests::HIGHLIGHTS.to_owned()),
-                &RequestedPlace::Usual,
-                &thread,
-                cx,
-            );
-            // Only the pane: an agent showing a file never starts its app.
-            // One unpinned since still opens Highlights.
+            if item.as_ref().is_none_or(|item| item.url.is_none()) {
+                self.show_requested(
+                    &RequestedPanel::Section(requests::HIGHLIGHTS.to_owned()),
+                    &RequestedPlace::Usual,
+                    &thread,
+                    cx,
+                );
+            }
             if let Some(item) = item {
-                let (shown, side) = (thread.clone(), self.side.clone());
-                // Once this update is over: the pane reads the app to know its
-                // thread, which GPUI refuses while the app is the one being
-                // updated. Opening a thread whose agent had shown a pin
-                // crashed the app (Mike, 12 Nov).
+                let (shown, side, app) = (thread.clone(), self.side.clone(), cx.weak_entity());
+                // Read the selected thread after the app update has completed.
                 cx.defer(move |cx| {
-                    side.update(cx, |side, cx| {
-                        if let Some(path) = item.path {
-                            side.preview_path(&path, Some(item.title), &shown, cx);
-                        } else if let Some(url) = item.url {
-                            side.preview_web_link(&url, Some(item.title), &shown, cx);
+                    if !app.upgrade().is_some_and(|app| {
+                        app.read(cx)
+                            .pane_thread()
+                            .is_some_and(|thread| thread.id == shown.id)
+                    }) {
+                        return;
+                    }
+                    if let Some(path) = item.path {
+                        side.update(cx, |side, cx| {
+                            side.preview_path(&path, Some(item.title), &shown, cx)
+                        });
+                    } else if let Some(url) = item.url {
+                        if crate::reply_links::web_click()
+                            == threadbear_core::reply_links::WebLinkAction::Panel
+                        {
+                            side.update(cx, |side, cx| {
+                                side.preview_web_link(&url, Some(item.title), &shown, cx)
+                            });
+                        } else {
+                            crate::open_gate::open_web(&url, cx);
                         }
-                    });
+                    }
                 });
             }
             self.tell_panel_shown(&request, &thread);
@@ -1988,6 +2000,10 @@ impl Threadbear {
     /// The main panel's thread stops being shown there: it's kept loaded
     /// (pane_cache.rs), still subscribed, for switching back to it.
     pub(crate) fn leave_pane(&mut self, cx: &mut Context<Self>) {
+        self.side.update(cx, |side, cx| {
+            side.cancel_browser_note();
+            cx.notify();
+        });
         self.pane_events = None;
         if let Some(old) = self.pane.take() {
             self.kept.keep(old, cx);
