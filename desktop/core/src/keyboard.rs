@@ -45,11 +45,19 @@ impl Group {
 /// What to ask your agent, the same for every group.
 pub const ASK: &str = "change them for you, or tell you what's free. They're in shortcuts.json in Threadbear's data folder, which holds only what you've changed.";
 /// Under a command's name while its key is being pressed.
-pub const HINT: &str = "Esc cancels, and Delete removes it";
+pub fn hint() -> &'static str {
+    crate::tr!("Esc cancels, and Delete removes it")
+}
 /// The line by Reset All.
-pub const FOOTER: &str = "Saved in a file your agents can read and change too.";
-pub const RESET_ALL_TIP: &str = "Every key back to how Threadbear comes";
-pub const SEARCH_PROMPT: &str = "Search shortcuts";
+pub fn footer() -> &'static str {
+    crate::tr!("Saved in a file your agents can read and change too.")
+}
+pub fn reset_all_tip() -> &'static str {
+    crate::tr!("Every key back to how Threadbear comes")
+}
+pub fn search_prompt() -> &'static str {
+    crate::tr!("Search shortcuts")
+}
 
 /// Which heading a command sits under (`ShortcutCommand.group`).
 pub fn group(command: ShortcutCommand) -> Group {

@@ -29,6 +29,7 @@ use threadbear_core::logins::{choice_for, ModelChoice, RunnerLogins};
 use threadbear_core::runner_settings::{
     panel_change, reviewer_dropped, reviewers_change, LabReviewer, RunnerSettings,
 };
+use threadbear_core::tr;
 
 /// Which of Code review's two lists a row is on.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,8 +254,8 @@ impl SettingsWindow {
             let rows = self.reviewer_rows(ReviewList::Every, list, cx);
             out.push(list_block(
                 "settings-reviewers-every",
-                "Every change",
-                "One reviewer. If it's out of room, the next one down.".into(),
+                tr!("Every change"),
+                tr!("One reviewer. If it's out of room, the next one down.").into(),
                 rows,
                 cx,
             ));
@@ -264,7 +265,7 @@ impl SettingsWindow {
             let about = format!("All of these review at once: {}+ lines, or code touching sign-in, payments or secrets.", settings.lab_panel_lines);
             out.push(list_block(
                 "settings-reviewers-panel",
-                "Big or risky changes",
+                tr!("Big or risky changes"),
                 about,
                 rows,
                 cx,
@@ -307,7 +308,7 @@ impl SettingsWindow {
             };
             let add = self.menu_owned(
                 format!("{}-add", which.id()),
-                "Add Reviewer".into(),
+                tr!("Add Reviewer").into(),
                 None,
                 tip.into(),
                 choices,
@@ -322,7 +323,7 @@ impl SettingsWindow {
             rows.push(row_with(
                 div()
                     .text_color(style::tertiary_label(cx))
-                    .child("No reviewers, and no other login to add")
+                    .child(tr!("No reviewers, and no other login to add"))
                     .into_any_element(),
                 div().into_any_element(),
                 cx,
@@ -369,7 +370,7 @@ impl SettingsWindow {
                         .items_center()
                         .justify_center()
                         .cursor_grab(),
-                    "Drag to change the order",
+                    tr!("Drag to change the order"),
                     gpui_kit::Role::GenericContainer,
                 )
                 .child(
@@ -418,7 +419,7 @@ impl SettingsWindow {
                         .whitespace_nowrap(),
                     format!("There's no {provider_name} login on this runner, so it's passed over"),
                 )
-                .child("No login"),
+                .child(tr!("No login")),
             );
         }
 
@@ -448,7 +449,7 @@ impl SettingsWindow {
             };
             let default_effort = keeps(None);
             let mut choices: Vec<(String, bool, Value)> = vec![(
-                "Default".into(),
+                tr!("Default").into(),
                 r.model.is_none(),
                 with(which, list, i, |x| {
                     x.model = None;
@@ -474,7 +475,7 @@ impl SettingsWindow {
                     }),
                 ));
             }
-            let label = shown.map_or_else(|| "Default".into(), |t| picker_title(t, r));
+            let label = shown.map_or_else(|| tr!("Default").into(), |t| picker_title(t, r));
             pickers = pickers.child(self.menu_owned(
                 format!("{key}-model-{i}"),
                 label,

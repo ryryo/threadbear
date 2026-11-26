@@ -18,6 +18,18 @@ Feature: Desktop language
     And the "File" menu lists "Close"
 
   @settings.language @swift-pending
+  Scenario: Settings keeps its selected language when changing tabs
+    When I choose Japanese as the desktop language
+    And I open Settings on "models"
+    Then the Settings title is "モデル" in "ja"
+    When I open Settings on "pools"
+    Then the Settings title is "プール" in "ja"
+    When I open Settings on "devices"
+    Then the Settings title is "スマホとブラウザ" in "ja"
+    When I open Settings on "keyboard"
+    Then the Settings title is "キーボード" in "ja"
+
+  @settings.language @swift-pending
   Scenario: A Japanese menu and approval keep their original actions
     When I choose Japanese as the desktop language
     Then the "ファイル" menu lists "新しいスレッド | 閉じる"

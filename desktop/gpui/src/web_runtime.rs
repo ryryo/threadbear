@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use threadbear_core::tr;
 use threadbear_core::web_runtime::{self as core, InstallError, Layout, State};
 
 /// Chromium in this process.
@@ -403,9 +404,9 @@ pub(crate) fn try_again_button(id: &str, cx: &App) -> Option<AnyElement> {
         return None;
     }
     let (label, tip) = if here {
-        ("Try again", "Start the web runtime again")
+        (tr!("Try again"), tr!("Start the web runtime again"))
     } else {
-        ("Restart Threadbear", "The web runtime can only start once per run of the app, so it tries again in a new one. The window and what you've typed stay.")
+        (tr!("Restart Threadbear"), tr!("The web runtime can only start once per run of the app, so it tries again in a new one. The window and what you've typed stay."))
     };
     let id = SharedString::from(id.to_owned());
     Some(
@@ -478,8 +479,8 @@ pub(crate) fn prompt(id: &str, wants: &str, cx: &App) -> Option<AnyElement> {
             .child(
                 PushButton::new(
                     SharedString::from(format!("{id}-cancel")),
-                    "Cancel",
-                    "Stop downloading the web runtime",
+                    tr!("Cancel"),
+                    tr!("Stop downloading the web runtime"),
                 )
                 .busy(r.cancelling)
                 .render(cx, move |_, _, cx| cancel.update(cx, |r, cx| r.cancel(cx))),
@@ -488,7 +489,7 @@ pub(crate) fn prompt(id: &str, wants: &str, cx: &App) -> Option<AnyElement> {
         }
         State::Unpacking => row
             .child(Spinner::new().color(secondary).with_size(px(11.)))
-            .child(words("Unpacking the web runtime".to_owned()))
+            .child(words(tr!("Unpacking the web runtime").to_owned()))
             .into_any_element(),
         State::Failed(why) => {
             let (again, later) = (runtime.clone(), runtime.clone());
@@ -505,16 +506,16 @@ pub(crate) fn prompt(id: &str, wants: &str, cx: &App) -> Option<AnyElement> {
                     row.child(
                         PushButton::new(
                             SharedString::from(format!("{id}-retry")),
-                            "Try again",
-                            "Download the web runtime again",
+                            tr!("Try again"),
+                            tr!("Download the web runtime again"),
                         )
                         .render(cx, move |_, _, cx| again.update(cx, |r, cx| r.install(cx))),
                     )
                     .child(
                         PushButton::new(
                             SharedString::from(format!("{id}-not-now")),
-                            "Not now",
-                            "Show the source, and don't ask again until Threadbear restarts",
+                            tr!("Not now"),
+                            tr!("Show the source, and don't ask again until Threadbear restarts"),
                         )
                         .render(cx, move |_, _, cx| later.update(cx, |r, cx| r.not_now(cx))),
                     ),
@@ -527,8 +528,8 @@ pub(crate) fn prompt(id: &str, wants: &str, cx: &App) -> Option<AnyElement> {
                 .gap(px(8.))
                 .child(div().text_size(px(style::size::DETAIL)).line_height(px(17.)).text_color(label).child(format!("Show {wants}? It needs the web runtime, a {} MB download, once.", megabytes())))
                 .child(
-                    row.child(PushButton::new(SharedString::from(format!("{id}-install")), "Install web runtime", "Download Chromium for Threadbear to draw diagrams, pages and web panels").render(cx, move |_, _, cx| install.update(cx, |r, cx| r.install(cx))))
-                        .child(PushButton::new(SharedString::from(format!("{id}-not-now")), "Not now", "Show the source, and don't ask again until Threadbear restarts").render(cx, move |_, _, cx| later.update(cx, |r, cx| r.not_now(cx)))),
+                    row.child(PushButton::new(SharedString::from(format!("{id}-install")), tr!("Install web runtime"), "Download Chromium for Threadbear to draw diagrams, pages and web panels").render(cx, move |_, _, cx| install.update(cx, |r, cx| r.install(cx))))
+                        .child(PushButton::new(SharedString::from(format!("{id}-not-now")), tr!("Not now"), tr!("Show the source, and don't ask again until Threadbear restarts")).render(cx, move |_, _, cx| later.update(cx, |r, cx| r.not_now(cx)))),
                 )
                 .into_any_element()
         }
@@ -558,7 +559,7 @@ pub(crate) fn settings_control(cx: &App) -> AnyElement {
             row = row.child(
                 PushButton::new(
                     "settings-web-runtime-install",
-                    "Install",
+                    tr!("Install"),
                     format!("Download the web runtime ({} MB)", megabytes()),
                 )
                 .render(cx, move |_, _, cx| {
@@ -571,8 +572,8 @@ pub(crate) fn settings_control(cx: &App) -> AnyElement {
             row = row.child(
                 PushButton::new(
                     "settings-web-runtime-cancel",
-                    "Cancel",
-                    "Stop downloading the web runtime",
+                    tr!("Cancel"),
+                    tr!("Stop downloading the web runtime"),
                 )
                 .busy(r.cancelling)
                 .render(cx, move |_, _, cx| cancel.update(cx, |r, cx| r.cancel(cx))),

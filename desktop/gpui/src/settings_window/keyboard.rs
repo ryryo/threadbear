@@ -17,6 +17,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -193,7 +194,7 @@ impl SettingsWindow {
         if let Some(search) = &self.keyboard.search {
             return search.clone();
         }
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder(rules::SEARCH_PROMPT));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(rules::search_prompt()));
         let sub = cx.subscribe_in(&search, window, |_, _, ev: &InputEvent, _, cx| {
             if matches!(ev, InputEvent::Change) {
                 cx.notify();
@@ -272,8 +273,8 @@ impl SettingsWindow {
             .id("settings-keyboard-search")
             .test_support()
             .a11y_role(Role::GenericContainer)
-            .aria_label(rules::SEARCH_PROMPT)
-            .tip(rules::SEARCH_PROMPT)
+            .aria_label(rules::search_prompt())
+            .tip(rules::search_prompt())
             .h(px(29.))
             .pl(px(16.))
             .pr(px(9.))
@@ -312,21 +313,24 @@ impl SettingsWindow {
             .map(|a| a.read(cx).shortcuts_file().display().to_string())
             .unwrap_or_default();
         let changed = rules::any_changed(&bindings);
-        let reset_all =
-            if changed {
-                let me = cx.entity().downgrade();
-                PushButton::new("settings-keys-reset-all", "Reset All", rules::RESET_ALL_TIP)
-                    .render(cx, move |_, _, cx| {
-                        me.update(cx, |this, cx| this.reset_all_keys(cx)).ok();
-                    })
-            } else {
-                disabled_button(
-                    "settings-keys-reset-all",
-                    "Reset All",
-                    rules::RESET_ALL_TIP,
-                    cx,
-                )
-            };
+        let reset_all = if changed {
+            let me = cx.entity().downgrade();
+            PushButton::new(
+                "settings-keys-reset-all",
+                tr!("Reset All"),
+                rules::reset_all_tip(),
+            )
+            .render(cx, move |_, _, cx| {
+                me.update(cx, |this, cx| this.reset_all_keys(cx)).ok();
+            })
+        } else {
+            disabled_button(
+                "settings-keys-reset-all",
+                tr!("Reset All"),
+                rules::reset_all_tip(),
+                cx,
+            )
+        };
         let orange = crate::activity_panels::system_orange(cx);
         let footer =
             v_flex()
@@ -359,7 +363,7 @@ impl SettingsWindow {
                                 gpui_kit::Role::GenericContainer,
                             )
                             .text_color(secondary)
-                            .child(rules::FOOTER),
+                            .child(rules::footer()),
                         )
                         .child(div().flex_1())
                         .child(reset_all),
@@ -435,7 +439,7 @@ impl SettingsWindow {
                     .text_size(px(11.))
                     .line_height(px(style::natural_line(11.)))
                     .text_color(secondary)
-                    .child(rules::HINT),
+                    .child(rules::hint()),
             );
         }
         let mut line = h_flex().w_full().gap(px(10.)).items_center().child(title);
@@ -450,7 +454,10 @@ impl SettingsWindow {
                     )))
                     .test_support()
                     .role(Role::Button)
-                    .aria_label(format!("Reset {}", command.title()))
+                    .aria_label(threadbear_core::trf!(
+                        "Reset {command}",
+                        command = command.title()
+                    ))
                     .tip(tip)
                     .flex_none()
                     .cursor_pointer()
@@ -460,7 +467,7 @@ impl SettingsWindow {
                     .on_click(move |_, _, cx| {
                         me.update(cx, |this, cx| this.reset_key(command, cx)).ok();
                     })
-                    .child("Reset"),
+                    .child(tr!("Reset")),
             );
         }
         line = line.child(self.key_cap(command, bindings, cx));
@@ -558,8 +565,8 @@ impl SettingsWindow {
         let me = cx.entity().downgrade();
         let cancel = PushButton::new(
             "settings-key-question-cancel",
-            "Cancel",
-            "Leave the key as it was",
+            tr!("Cancel"),
+            tr!("Leave the key as it was"),
         )
         .render(cx, move |_, _, cx| {
             me.update(cx, |this, cx| this.stop_listening(cx)).ok();
@@ -589,7 +596,7 @@ impl SettingsWindow {
             );
             line = line.child(super::devices::prominent_button(
                 "settings-key-question-take",
-                "Use It for This Instead",
+                tr!("Use It for This Instead"),
                 tip,
                 cx,
                 move |_, cx| {
@@ -798,14 +805,19 @@ pub(crate) fn automation(
                 Some(other) => return Err(format!("answer is use or cancel, not {other}")),
             }
             match cmd["reset"].as_str() {
-                Some("all") if !click(rules::RESET_ALL_TIP, false, window, cx) => {
+                Some("all") if !click(rules::reset_all_tip(), false, window, cx) => {
                     return Err("nothing to Reset All".into())
                 }
                 Some("all") | None => {}
                 Some(name) => {
                     let c = ShortcutCommand::from_name(name)
                         .ok_or_else(|| format!("no command {name}"))?;
-                    if !click(&format!("Reset {}", c.title()), false, window, cx) {
+                    if !click(
+                        &threadbear_core::trf!("Reset {command}", command = c.title()),
+                        false,
+                        window,
+                        cx,
+                    ) {
                         return Err(format!("{} has no Reset", c.title()));
                     }
                 }

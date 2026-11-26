@@ -19,6 +19,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -365,9 +366,10 @@ impl Threadbear {
                         t.store_reply_summary(thread);
                         t.open(id, window, cx);
                     }
-                    Ok(_) => {
-                        t.show_error("The runner didn't say what thread it made.".to_owned(), cx)
-                    }
+                    Ok(_) => t.show_error(
+                        tr!("The runner didn't say what thread it made.").to_owned(),
+                        cx,
+                    ),
                     Err(e) => t.show_error(e.message, cx),
                 }
                 cx.notify();
@@ -440,7 +442,7 @@ impl Threadbear {
                         match v["threadId"].as_str() {
                             Some(id) if !id.is_empty() => t.open(id.to_owned(), window, cx),
                             _ => t.show_error(
-                                "The runner didn't say what thread it made.".to_owned(),
+                                tr!("The runner didn't say what thread it made.").to_owned(),
                                 cx,
                             ),
                         }
@@ -526,13 +528,13 @@ impl Threadbear {
             .unwrap_or_default();
         if !swift.is_empty() {
             sections.push(section(
-                "Not in the new app yet",
+                tr!("Not in the new app yet"),
                 self.render_swift_changes(&swift, cx),
                 cx,
             ));
         }
-        sections.push(section("App", app, cx));
-        sections.push(section("Runner", self.render_runner_updates(cx), cx));
+        sections.push(section(tr!("App"), app, cx));
+        sections.push(section(tr!("Runner"), self.render_runner_updates(cx), cx));
         let upstream = self
             .updates_panel
             .runner
@@ -547,7 +549,7 @@ impl Threadbear {
             {
                 content.extend(self.render_release(&release, cx));
             }
-            sections.push(section("From Mike", content, cx));
+            sections.push(section(tr!("From Mike"), content, cx));
         }
         // The CLIs' versions and whether they update by themselves. In Usage
         // until 28 Oct; they're updates, not room.
@@ -637,7 +639,7 @@ impl Threadbear {
             // Return takes it, as the popover is there for this.
             Some(short) => Some(push_button(
                 "updates-popover-restart",
-                "Restart to Update",
+                tr!("Restart to Update"),
                 format!("Quit and reopen on {short}. Running threads carry on in the runner."),
                 false,
                 false,
@@ -650,8 +652,8 @@ impl Threadbear {
             // Not while a newer main builds: the line is about that.
             None if side.failed && !side.building => Some(push_button(
                 "updates-popover-log",
-                "Show the Log",
-                "Open the update build's log, to see why it failed",
+                tr!("Show the Log"),
+                tr!("Open the update build's log, to see why it failed"),
                 false,
                 false,
                 cx,
@@ -726,7 +728,7 @@ impl Threadbear {
             out.push(text_button(
                 SharedString::from(format!("updates-hold-{id}")),
                 self.thread_title(&id),
-                "Open the thread with the words still typed",
+                tr!("Open the thread with the words still typed"),
                 12.,
                 true,
                 false,
@@ -735,14 +737,14 @@ impl Threadbear {
             ));
         }
         if side.staged.is_some() {
-            out.push(h_flex().child(push_button("updates-restart", "Restart to Update", "Quit and reopen on the new version. Running threads carry on in the runner.", false, false, cx, |t, _, cx| t.restart_to_update(cx))).into_any_element());
+            out.push(h_flex().child(push_button("updates-restart", tr!("Restart to Update"), tr!("Quit and reopen on the new version. Running threads carry on in the runner."), false, false, cx, |t, _, cx| t.restart_to_update(cx))).into_any_element());
         } else if side.failed {
             out.push(
                 h_flex()
                     .child(push_button(
                         "updates-log",
-                        "Show the Log",
-                        "Open the update build's log, to see why it failed",
+                        tr!("Show the Log"),
+                        tr!("Open the update build's log, to see why it failed"),
                         false,
                         false,
                         cx,
@@ -781,7 +783,7 @@ impl Threadbear {
                     .child(text_button(
                         SharedString::from(format!("updates-waiting-{id}")),
                         title,
-                        "Open this thread",
+                        tr!("Open this thread"),
                         12.,
                         true,
                         false,
@@ -850,7 +852,7 @@ impl Threadbear {
                 out.push(text_button(
                     SharedString::from(format!("updates-old-{id}")),
                     self.thread_title(id),
-                    "Open this thread",
+                    tr!("Open this thread"),
                     12.,
                     true,
                     false,
@@ -883,7 +885,7 @@ impl Threadbear {
                         .children(log.map(|file| {
                             push_button(
                                 "updates-reinstall-log",
-                                "Show the Log",
+                                tr!("Show the Log"),
                                 "Open the update's output, to see why it didn't work",
                                 false,
                                 false,
@@ -1134,7 +1136,7 @@ impl Threadbear {
                 row = row.child(button_row(
                     vec![
                         push_button(SharedString::from(format!("updates-swift-port-{commit}")), "Port this", "Start a thread that rebuilds this change in the new app. It asks before changing anything.", true, busy, cx, move |t, window, cx| t.port_swift_change(port.clone(), window, cx)),
-                        push_button(SharedString::from(format!("updates-swift-dismiss-{commit}")), "Dismiss", "Leave this change out of the new app and off this list", true, false, cx, move |t, _, cx| t.dismiss_swift_change(dismiss.clone(), cx)),
+                        push_button(SharedString::from(format!("updates-swift-dismiss-{commit}")), tr!("Dismiss"), "Leave this change out of the new app and off this list", true, false, cx, move |t, _, cx| t.dismiss_swift_change(dismiss.clone(), cx)),
                     ],
                     false,
                     cx,

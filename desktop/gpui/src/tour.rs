@@ -29,6 +29,7 @@ use threadbear_core::inbox::ThreadSummary;
 use threadbear_core::tour::{
     self as rules, Edge, Finished, Intro, Rect, Step, Target, Task as TourTask,
 };
+use threadbear_core::tr;
 
 const BEAR_WAVE: &[u8] = include_bytes!("../icons/bear-wave.svg");
 /// The card's width at 100%, as the Swift card's `zoomed(320)`.
@@ -885,7 +886,7 @@ impl Threadbear {
                             .with_size(px(14.))
                             .text_color(secondary),
                     )
-                    .tip("More about this, in the docs")
+                    .tip(tr!("More about this, in the docs"))
                     .on_click(move |_, _, cx| {
                         crate::open_gate::open_web(&url, cx);
                     }),
@@ -918,8 +919,10 @@ impl Threadbear {
                     .role(Role::Button)
                     .cursor_pointer()
                     .text_color(secondary)
-                    .child("Skip")
-                    .tip("End the tour (Esc). Help > Take the Tour brings it back")
+                    .child(tr!("Skip"))
+                    .tip(tr!(
+                        "End the tour (Esc). Help > Take the Tour brings it back"
+                    ))
                     .on_click(cx.listener(|this, _, _, cx| this.tour_finish(cx))),
             );
         }

@@ -21,6 +21,7 @@ use crate::{call, icons, now_ms, shell, style};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use serde_json::{json, Value};
@@ -436,7 +437,7 @@ impl Threadbear {
             .child(icon_button(
                 "runners-refresh",
                 "arrow.clockwise",
-                "Check the runners again now",
+                tr!("Check the runners again now"),
                 self.runners_panel.refreshing,
                 cx,
                 |t, _, cx| t.load_runners_list(true, cx),
@@ -540,7 +541,7 @@ impl Threadbear {
                         .items_center()
                         .justify_center()
                         .cursor_grab(),
-                    "Drag to change the order",
+                    tr!("Drag to change the order"),
                     gpui_kit::Role::GenericContainer,
                 )
                 .child(
@@ -716,7 +717,7 @@ impl Threadbear {
             style::sidebar_hover(cx),
         );
         let title = if t.title.is_empty() {
-            "Untitled".to_owned()
+            tr!("Untitled").to_owned()
         } else {
             t.title.clone()
         };
@@ -847,8 +848,8 @@ impl Threadbear {
                         vec![
                             push_button(
                                 id("paste"),
-                                "Paste code",
-                                "Send the code you copied from the page to that runner",
+                                tr!("Paste code"),
+                                tr!("Send the code you copied from the page to that runner"),
                                 true,
                                 false,
                                 cx,
@@ -856,8 +857,8 @@ impl Threadbear {
                             ),
                             text_button(
                                 id("page"),
-                                "Open the page again",
-                                "Open the claude.ai page to approve the token again",
+                                tr!("Open the page again"),
+                                tr!("Open the claude.ai page to approve the token again"),
                                 11.,
                                 true,
                                 false,
@@ -866,8 +867,8 @@ impl Threadbear {
                             ),
                             text_button(
                                 id("cancel"),
-                                "Cancel",
-                                "Stop making this token",
+                                tr!("Cancel"),
+                                tr!("Stop making this token"),
                                 11.,
                                 false,
                                 false,
@@ -1071,7 +1072,7 @@ impl Threadbear {
                 format!(
                     "  > {}",
                     if t.title.is_empty() {
-                        "Untitled"
+                        tr!("Untitled")
                     } else {
                         t.title.as_str()
                     }

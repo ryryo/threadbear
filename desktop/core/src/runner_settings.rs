@@ -28,12 +28,12 @@ impl BringIn {
 
     pub fn title(self) -> String {
         match self {
-            BringIn::Every(1) => "Every day".into(),
-            BringIn::Every(7) => "Every week".into(),
-            BringIn::Every(14) => "Every 2 weeks".into(),
-            BringIn::Every(n) => format!("Every {n} days"),
-            BringIn::Important => "Only important ones".into(),
-            BringIn::Off => "Never".into(),
+            BringIn::Every(1) => crate::tr!("Every day").into(),
+            BringIn::Every(7) => crate::tr!("Every week").into(),
+            BringIn::Every(14) => crate::tr!("Every 2 weeks").into(),
+            BringIn::Every(n) => crate::trf!("Every {n} days", n = n),
+            BringIn::Important => crate::tr!("Only important ones").into(),
+            BringIn::Off => crate::tr!("Never").into(),
         }
     }
 

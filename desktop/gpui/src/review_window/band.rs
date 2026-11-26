@@ -99,7 +99,7 @@ impl ReviewWindow {
                 .text_size(px(style::size::WORK))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(color),
-            "See them all and choose (Esc)",
+            threadbear_core::tr!("See them all and choose (Esc)"),
         )
         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.show_all(cx)))
         .child(

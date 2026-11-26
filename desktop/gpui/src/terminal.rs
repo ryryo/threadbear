@@ -42,6 +42,7 @@ use std::time::{Duration, Instant};
 use threadbear_core::terminal::{
     self as rules, KeyAction, Line, ShellBlock, Step, Target, TerminalKey,
 };
+use threadbear_core::tr;
 use threadbear_dock::{DockDrop, DockEdge, DockNode, DockSplit};
 
 // ---------------------------------------------------------------- hooking in
@@ -597,7 +598,7 @@ impl Render for Terminals {
                                     .with_size(px(14.))
                                     .text_color(style::secondary_text(cx)),
                             )
-                            .child("Start a shell"),
+                            .child(tr!("Start a shell")),
                     );
                 crate::highlights::tipped(start, tip).into_any_element()
             }
@@ -1304,7 +1305,7 @@ impl Session {
         // From a task: the question's loop can't run inside an update.
         cx.spawn(async move |this, cx| {
             let (title, detail) = rules::paste_question(&text);
-            if crate::alert::confirm(&title, detail, "Paste", "Cancel") {
+            if crate::alert::confirm(&title, detail, tr!("Paste"), tr!("Cancel")) {
                 let _ = this.update(cx, |s, cx| s.paste_now(&text, true, cx));
             }
         })
@@ -1754,7 +1755,7 @@ impl Render for Session {
                     .text_size(px(style::size::DETAIL))
                     .line_height(px(style::natural_line(style::size::DETAIL)))
                     .text_color(style::secondary_text(cx))
-                    .child("Return runs it"),
+                    .child(tr!("Return runs it")),
             );
         }
         if self.exited {
@@ -1797,7 +1798,7 @@ impl Render for Session {
 fn new_shell_button(key: TerminalKey, folder: &str, cx: &App) -> AnyElement {
     crate::push_button::PushButton::new(
         "terminal-new-shell",
-        "New Shell",
+        tr!("New Shell"),
         format!("Start a new shell in {folder}"),
     )
     .render(cx, move |_, window, cx| {

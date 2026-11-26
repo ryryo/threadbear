@@ -14,6 +14,7 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // Shadows gpui's px, so sizes here follow the app's zoom (style.rs).
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -227,7 +228,7 @@ impl MenuItem {
         }
     }
     pub(crate) fn picture_copy() -> Self {
-        Self::action("Copy Image", "doc.on.doc", MenuAction::CopyPicture)
+        Self::action(tr!("Copy Image"), "doc.on.doc", MenuAction::CopyPicture)
     }
 }
 
@@ -1335,7 +1336,7 @@ impl SidePane {
     /// A file row's menu (`FileMenu`).
     pub(crate) fn file_menu(path: &str, title: &str, thread: &ThreadSummary) -> Vec<MenuItem> {
         let mut items = vec![MenuItem::action(
-            "Preview here",
+            tr!("Preview here"),
             "sidebar.right",
             MenuAction::PreviewFile {
                 path: path.to_owned(),
@@ -1345,7 +1346,7 @@ impl SidePane {
         // Another Mac's file has no copy here to open or reveal (yet).
         if !thread.is_remote() {
             items.push(MenuItem::action(
-                "Open",
+                tr!("Open"),
                 "arrow.up.forward.app",
                 MenuAction::OpenFile {
                     path: path.to_owned(),
@@ -1360,7 +1361,7 @@ impl SidePane {
             ));
         }
         items.push(MenuItem::action(
-            "Copy path",
+            tr!("Copy path"),
             "doc.on.doc",
             MenuAction::Copy {
                 text: path.to_owned(),
@@ -1380,7 +1381,7 @@ impl SidePane {
         if let Some(path) = url.strip_prefix("file://") {
             let path = crate::files::percent_decode(path);
             items.push(MenuItem::action(
-                "Preview here",
+                tr!("Preview here"),
                 "sidebar.right",
                 MenuAction::PreviewFile {
                     path: path.clone(),
@@ -1388,7 +1389,7 @@ impl SidePane {
                 },
             ));
             items.push(MenuItem::action(
-                "Open",
+                tr!("Open"),
                 "arrow.up.forward.app",
                 MenuAction::OpenFile { path },
             ));
@@ -1421,7 +1422,7 @@ impl SidePane {
             }
             if core::is_web_page(url) {
                 items.push(MenuItem::action(
-                    "Open in Panel",
+                    tr!("Open in Panel"),
                     "sidebar.right",
                     MenuAction::PreviewPage {
                         url: url.to_owned(),
@@ -1430,7 +1431,7 @@ impl SidePane {
             }
         }
         items.push(MenuItem::action(
-            "Copy link",
+            tr!("Copy link"),
             "link",
             MenuAction::Copy {
                 text: url.to_owned(),
@@ -1466,7 +1467,7 @@ impl SidePane {
             Self::link_menu(url)
         } else if let Some(sha) = &item.sha {
             vec![MenuItem::action(
-                "Copy sha",
+                tr!("Copy sha"),
                 "number",
                 MenuAction::Copy { text: sha.clone() },
             )]
@@ -1475,7 +1476,7 @@ impl SidePane {
         };
         items.push(MenuItem::separator());
         items.push(MenuItem::action(
-            "Remove",
+            tr!("Remove"),
             "pin.slash",
             MenuAction::Remove {
                 id: item.id.clone(),
@@ -1514,11 +1515,15 @@ impl SidePane {
     pub(crate) fn schedule_menu(id: &str) -> Vec<MenuItem> {
         vec![
             MenuItem::action(
-                "Edit",
+                tr!("Edit"),
                 "pencil",
                 MenuAction::EditSchedule { id: id.to_owned() },
             ),
-            MenuItem::action("Show all schedules", "clock", MenuAction::ShowSchedules),
+            MenuItem::action(
+                tr!("Show all schedules"),
+                "clock",
+                MenuAction::ShowSchedules,
+            ),
         ]
     }
 
@@ -2279,7 +2284,7 @@ impl SidePane {
     ) -> AnyElement {
         let p = palette(cx);
         if self.highlights_unsupported {
-            return crate::files::pane_note("This runner doesn't keep highlights yet.", p)
+            return crate::files::pane_note(tr!("This runner doesn't keep highlights yet."), p)
                 .into_any_element();
         }
         // The first fetch is quick; a spinner would only flash.
@@ -2321,7 +2326,7 @@ impl SidePane {
             && subagents.is_empty()
             && started.is_empty()
         {
-            return crate::files::pane_note("Nothing here yet. Files, links and commits from this thread show up here as it works.", p).into_any_element();
+            return crate::files::pane_note(tr!("Nothing here yet. Files, links and commits from this thread show up here as it works."), p).into_any_element();
         }
         let flags = self.flags.get(&thread.id).copied().unwrap_or_default();
         let mut list = v_flex().pb(px(16.));
@@ -2369,7 +2374,7 @@ impl SidePane {
             list = list.child(self.heading(
                 Heading {
                     key: fold::NEEDS_YOU.to_owned(),
-                    title: "Needs you".into(),
+                    title: tr!("Needs you").into(),
                     icon: Some(icon("hand.raised", 11., p.secondary).into_any_element()),
                     count: Some(open),
                     folded,
@@ -2395,7 +2400,7 @@ impl SidePane {
             list = list.child(self.heading(
                 Heading {
                     key: fold::SCHEDULED.to_owned(),
-                    title: "Scheduled".into(),
+                    title: tr!("Scheduled").into(),
                     icon: Some(icon("clock", 11., p.secondary).into_any_element()),
                     count: Some(scheduled.len()),
                     folded,
@@ -2415,7 +2420,7 @@ impl SidePane {
                     .icon(if row.paused { "pause.circle" } else { "clock" })
                     .trailing(row.when)
                     .detail(Some(row.detail))
-                    .tip("Edit the schedule")
+                    .tip(tr!("Edit the schedule"))
                     .on_click(move |this, window, cx| this.edit_schedule(&edit_id, window, cx))
                     .on_menu(move |this, pos, window, cx| {
                         this.open_menu(Self::schedule_menu(&menu_id), pos, window, cx)
@@ -2515,7 +2520,7 @@ impl SidePane {
                         .icon(core::started_icon(row.state))
                         .tinted(color)
                         .detail(Some(core::started_detail(row, &clock)))
-                        .tip("Open this thread")
+                        .tip(tr!("Open this thread"))
                         .on_click(move |this, window, cx| {
                             let id = open_id.clone();
                             if let Some(app) = this.app.upgrade() {
@@ -2526,7 +2531,7 @@ impl SidePane {
                         .on_menu(move |this, pos, window, cx| {
                             let items = vec![
                                 MenuItem::action(
-                                    "Open",
+                                    tr!("Open"),
                                     "arrow.up.forward",
                                     MenuAction::OpenThread {
                                         id: menu_id.clone(),
@@ -2695,7 +2700,7 @@ impl SidePane {
                     || "A thread that's gone".to_owned(),
                     |t| {
                         if t.title.is_empty() {
-                            "Untitled".to_owned()
+                            tr!("Untitled").to_owned()
                         } else {
                             t.title.clone()
                         }
@@ -2719,7 +2724,7 @@ impl SidePane {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let ticked = ask.ticked == Some(true);
-        let tip = if ticked { "Not done" } else { "Done" };
+        let tip = if ticked { "Not done" } else { tr!("Done") };
         let where_text = ask.where_text();
         let tick_color = if ticked { p.accent } else { p.icon };
         let label_color = if ticked { p.secondary } else { p.fg };
@@ -2847,7 +2852,7 @@ impl SidePane {
                             &crate::files::home_dir(),
                         )))
                         .indent()
-                        .tip("Open in its app")
+                        .tip(tr!("Open in its app"))
                         .drag((!thread.is_remote()).then(|| path.clone()))
                         .on_click(move |this, _window, cx| {
                             // Code to read in an editor, not to review. Another Mac's
@@ -3408,7 +3413,7 @@ impl SidePane {
             let rows = asks.iter().map(|a| json!({ "title": crate::files::plain_markdown(&a.action), "detail": a.where_text(), "symbol": if a.ticked == Some(true) { "checkmark.square.fill" } else { "square" }, "ticked": a.ticked == Some(true) })).collect();
             add(
                 fold::NEEDS_YOU,
-                "Needs you",
+                tr!("Needs you"),
                 asks.iter().filter(|a| a.ticked != Some(true)).count(),
                 rows,
                 &mut out,
@@ -3431,7 +3436,7 @@ impl SidePane {
             let rows = scheduled.iter().map(|r| json!({ "title": r.title, "trailing": r.when, "detail": r.detail, "symbol": if r.paused { "pause.circle" } else { "clock" } })).collect();
             add(
                 fold::SCHEDULED,
-                "Scheduled",
+                tr!("Scheduled"),
                 scheduled.len(),
                 rows,
                 &mut out,

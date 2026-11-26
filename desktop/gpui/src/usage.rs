@@ -22,6 +22,7 @@ use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::collections::HashSet;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -512,8 +513,8 @@ fn tokens_chart(
         .bg(p.track)
         .test_support()
         .role(Role::RadioGroup)
-        .aria_label("Show today by the hour, or the last 7 days by the day".to_owned())
-        .tip("Show today by the hour, or the last 7 days by the day")
+        .aria_label(tr!("Show today by the hour, or the last 7 days by the day").to_owned())
+        .tip(tr!("Show today by the hour, or the last 7 days by the day"))
         .children(
             [(Range::Today, "Today"), (Range::Week, "7 days")].map(|(r, title)| {
                 let on = r == range;
@@ -1443,7 +1444,7 @@ fn login_row(
             .on_click(
                 cx.listener(move |this, _: &ClickEvent, _, cx| this.sign_in_login(&account, cx)),
             )
-            .child("Sign in…")
+            .child(tr!("Sign in…"))
     });
     // Year-long token…: a Claude sign-in lasts 28 days, a token from
     // `claude setup-token` a year (Mike, 17 Nov: opt in per login). Offered

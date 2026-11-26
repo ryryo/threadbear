@@ -20,6 +20,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 use threadbear_core::inbox::ThreadSummary;
+use threadbear_core::tr;
 // Shadows gpui's px, so sizes here follow the app's zoom (style.rs).
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -325,7 +326,7 @@ impl Threadbear {
         cx: &mut Context<Self>,
     ) {
         let key = format!("moveThread/{thread_id}");
-        if !self.begin_note(&key, "Cancelling the move…", cx) {
+        if !self.begin_note(&key, tr!("Cancelling the move…"), cx) {
             return;
         }
         let client = self.client.clone();
@@ -633,7 +634,7 @@ impl MoveSheet {
 
     fn display_title(&self) -> String {
         if self.title.is_empty() {
-            "Untitled".to_owned()
+            tr!("Untitled").to_owned()
         } else {
             self.title.clone()
         }
@@ -641,9 +642,9 @@ impl MoveSheet {
 
     fn subtitle(&self) -> &'static str {
         if self.busy {
-            "It goes once this turn ends. Messages sent meanwhile go with it."
+            tr!("It goes once this turn ends. Messages sent meanwhile go with it.")
         } else {
-            "Its whole conversation and its git work go with it, and it carries on there."
+            tr!("Its whole conversation and its git work go with it, and it carries on there.")
         }
     }
 
@@ -717,7 +718,7 @@ impl RenderOnce for MoveLoginTrigger {
             .border_color(style::hairline(cx))
             .bg(style::button_fill(cx))
             .cursor_pointer()
-            .tip("The login it carries on with there")
+            .tip(tr!("The login it carries on with there"))
             .child(
                 div()
                     .flex_1()
@@ -776,10 +777,10 @@ impl Render for MoveSheet {
                         h_flex()
                             .gap(px(10.))
                             .items_center()
-                            .child(label("Folder"))
+                            .child(label(tr!("Folder")))
                             .child(div().id("move-folder").flex_1().min_w_0().tip(folder_tip).child(Input::new(&self.folder).small().font_family(cx.theme().mono_font_family.clone()))),
                     )
-                    .child(h_flex().gap(px(10.)).items_center().child(label("Login")).child(div().flex_1().min_w_0().child(login_picker))),
+                    .child(h_flex().gap(px(10.)).items_center().child(label(tr!("Login"))).child(div().flex_1().min_w_0().child(login_picker))),
             )
             .children(problems.into_iter().map(|line| h_flex().gap(px(6.)).items_start().text_size(px(size::LABEL)).text_color(style::failed(cx)).child(Icon::from(gpui_kit::assets::IconName::OctagonX).with_size(px(13.))).child(div().flex_1().child(line))))
             .when_some(clone, |s, clone| {
@@ -799,19 +800,19 @@ impl Render for MoveSheet {
                             .child(div().text_size(px(size::LABEL)).text_color(style::secondary_text(cx)).child(if connected { format!("Asking {name}…") } else { "Waiting for this Mac's runner…".to_owned() }))
                     })
                     .child(div().flex_1())
-                    .child(div().id("move-cancel").test_support().a11y_role(Role::GenericContainer).aria_label("Close without moving it".to_owned()).child(Button::new("move-cancel-button").label("Cancel").small().outline().tooltip("Close without moving it").on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))))
+                    .child(div().id("move-cancel").test_support().a11y_role(Role::GenericContainer).aria_label(tr!("Close without moving it").to_owned()).child(Button::new("move-cancel-button").label(tr!("Cancel")).small().outline().tooltip(tr!("Close without moving it")).on_click(cx.listener(|this, _, window, cx| this.close(window, cx)))))
                     .child(
                         div()
                             .id("move-go")
                             .test_support()
-                            .a11y_role(Role::GenericContainer).aria_label(if can_move { format!("Move it to {name} once this turn ends") } else { "Fix what's in the way first".to_owned() })
+                            .a11y_role(Role::GenericContainer).aria_label(if can_move { format!("Move it to {name} once this turn ends") } else { tr!("Fix what's in the way first").to_owned() })
                             .child(
                                 Button::new("move-go-button")
-                                    .label("Move")
+                                    .label(tr!("Move"))
                                     .small()
                                     .primary()
                                     .disabled(!can_move)
-                                    .tooltip(if can_move { format!("Move it to {name} once this turn ends") } else { "Fix what's in the way first".to_owned() })
+                                    .tooltip(if can_move { format!("Move it to {name} once this turn ends") } else { tr!("Fix what's in the way first").to_owned() })
                                     .on_click(cx.listener(|this, _, window, cx| this.press_move(window, cx))),
                             ),
                     ),

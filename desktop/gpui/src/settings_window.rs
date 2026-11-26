@@ -109,14 +109,15 @@ impl Tab {
 /// The sidebar's width, and the window's, at 100% (`SettingsLayout`).
 const SIDEBAR_WIDTH: f32 = 215.;
 /// The Same as the system tile's tip, and its label for scripts.
-const APPEARANCE_TIP: &str = if cfg!(target_os = "macos") {
-    "Light or dark as the Mac is"
-} else if cfg!(target_os = "windows") {
-    "Light or dark as Windows is"
-} else {
-    "Light or dark as the system is"
-};
-const FONT_TIP: &str = "The font for everything but code";
+fn appearance_tip() -> &'static str {
+    if cfg!(target_os = "macos") {
+        tr!("Light or dark as the Mac is")
+    } else if cfg!(target_os = "windows") {
+        tr!("Light or dark as Windows is")
+    } else {
+        tr!("Light or dark as the system is")
+    }
+}
 
 impl Threadbear {
     /// ⌘, or the gear: the window, brought forward if it's open, on `tab` if
@@ -321,11 +322,13 @@ fn section_info(id: &str, title: &str, about: &str, cx: &App) -> AnyElement {
                 .child(
                     h_flex().child(
                         Button::new(button_id.clone())
-                            .label("Start a thread about this")
+                            .label(tr!("Start a thread about this"))
                             .icon(icons::symbol("bear.plus"))
                             .small()
                             .secondary()
-                            .tooltip("Opens a new thread to ask your agent about these settings")
+                            .tooltip(tr!(
+                                "Opens a new thread to ask your agent about these settings"
+                            ))
                             .on_click(move |_, _, cx| start_thread_about(&title, cx)),
                     ),
                 )
@@ -343,7 +346,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.set_global(SettingsApp(app.clone()));
-        let instructions = cx.new(|cx| TextareaState::new(window, cx).placeholder("For example: I build with React, TypeScript and Convex. Write plainly and briefly."));
+        let instructions = cx.new(|cx| TextareaState::new(window, cx).placeholder(tr!("For example: I build with React, TypeScript and Convex. Write plainly and briefly.")));
         let mut subs =
             vec![
                 cx.subscribe_in(&instructions, window, |this, _, ev: &InputEvent, _, cx| {
@@ -538,9 +541,9 @@ impl SettingsWindow {
                     Ok(v) => {
                         let now = StandingInstructions::decode(&v["instructions"]);
                         this.instructions_status = Some(if wanted.trim().is_empty() {
-                            "Cleared".into()
+                            tr!("Cleared").into()
                         } else {
-                            "Saved".into()
+                            tr!("Saved").into()
                         });
                         this.instructions_base = Some(now.text.clone());
                         if let Some(app) = this.app.upgrade() {
@@ -607,7 +610,7 @@ impl SettingsWindow {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(tr!("Choose").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(mut paths))) = paths.await {
@@ -632,7 +635,7 @@ impl SettingsWindow {
             files: false,
             directories: true,
             multiple: true,
-            prompt: Some("Add".into()),
+            prompt: Some(tr!("Add").into()),
         });
         let home = std::env::var("HOME").unwrap_or_default();
         cx.spawn_in(window, async move |this, cx| {
@@ -748,11 +751,11 @@ impl SettingsWindow {
         // moves nothing the Swift app's General has.
         let web_runtime = section(
             "settings-web-runtime",
-            "Web runtime",
+            tr!("Web runtime"),
             crate::web_runtime::SETTINGS_ABOUT,
             "check whether it's installed and working, or why a diagram or panel isn't showing.",
             vec![row(
-                "Web runtime",
+                tr!("Web runtime"),
                 crate::web_runtime::settings_control(cx),
                 cx,
             )],
@@ -783,17 +786,17 @@ impl SettingsWindow {
             )
             .child(self.button(
                 "settings-choose-folder",
-                "Choose…",
-                "Pick the folder new threads start in",
+                tr!("Choose…"),
+                tr!("Pick the folder new threads start in"),
                 cx,
                 |this, window, cx| this.choose_default_folder(window, cx),
             ));
         sections.push(section(
             "settings-new-threads",
-            "New threads",
-            "Where a new thread starts when you don't pick a folder.",
+            tr!("New threads"),
+            tr!("Where a new thread starts when you don't pick a folder."),
             "change it, or anything else about how threads run. Most settings aren't shown here, and your agent edits them in runner.json.",
-            vec![row("Default folder", folder_control, cx)],
+            vec![row(tr!("Default folder"), folder_control, cx)],
             cx,
         ));
         if let Some(instructions) = self.instructions_section(window, cx) {
@@ -804,19 +807,19 @@ impl SettingsWindow {
             let switch = self.switch(
                 "settings-lab-review",
                 on,
-                "Have another lab check each code change a thread makes",
+                tr!("Have another lab check each code change a thread makes"),
                 cx,
                 |this, on, cx| this.update(json!({ "labReview": on }), cx),
             );
             let rows = vec![row(
-                "Review code changes before a thread is done",
+                tr!("Review code changes before a thread is done"),
                 switch,
                 cx,
             )];
             let review = section(
                 "settings-code-review",
-                "Code review",
-                "When a thread changes code and is done, another lab tries to break the change in a review thread of its own. Your thread waits for what it finds, fixes what holds up, and tells you in its reply.\n\nA change gets one reviewer: the first in Every change that isn't the thread's own provider and has a login with room, so when one runs out the next takes over. Drag them to change the order. A big or risky change gets everyone in Big or risky changes at once, or one reviewer from Every change if fewer than two of them can review. With no other lab to hand, a fresh session of the thread's own provider reviews.",
+                tr!("Code review"),
+                tr!("When a thread changes code and is done, another lab tries to break the change in a review thread of its own. Your thread waits for what it finds, fixes what holds up, and tells you in its reply.\n\nA change gets one reviewer: the first in Every change that isn't the thread's own provider and has a login with room, so when one runs out the next takes over. Drag them to change the order. A big or risky change gets everyone in Big or risky changes at once, or one reviewer from Every change if fewer than two of them can review. With no other lab to hand, a fresh session of the thread's own provider reviews."),
                 "explain what a review found, change who reviews, or turn reviews on or off for you.",
                 rows,
                 cx,
@@ -850,7 +853,7 @@ impl SettingsWindow {
         let switch = self.switch(
             "settings-activity-log",
             activity,
-            "Note what you click and open in this app",
+            tr!("Note what you click and open in this app"),
             cx,
             |this, on, cx| {
                 this.app
@@ -860,26 +863,26 @@ impl SettingsWindow {
         );
         sections.push(section(
             "settings-activity",
-            "Activity log",
-            "When you ask a thread to change Threadbear, its agent can check this log first to see how you really use the app. It notes the buttons, rows and menu items you use (by their tooltips and titles), your shortcuts, the threads and pages you open, and when you send or answer something, never what you type. It stays on this Mac for 30 days and Threadbear never sends it anywhere.",
+            tr!("Activity log"),
+            tr!("When you ask a thread to change Threadbear, its agent can check this log first to see how you really use the app. It notes the buttons, rows and menu items you use (by their tooltips and titles), your shortcuts, the threads and pages you open, and when you send or answer something, never what you type. It stays on this Mac for 30 days and Threadbear never sends it anywhere."),
             "read it with tb activity and tell you what's in it.",
-            vec![row("Keep an activity log", switch, cx)],
+            vec![row(tr!("Keep an activity log"), switch, cx)],
             cx,
         ));
         if let Some(on) = settings.keep_awake {
             let switch = self.switch(
                 "settings-keep-awake",
                 on,
-                "Stop your Mac sleeping on its own while a thread is working",
+                tr!("Stop your Mac sleeping on its own while a thread is working"),
                 cx,
                 |this, on, cx| this.update(json!({ "keepAwake": on }), cx),
             );
             sections.push(section(
                 "settings-sleep",
-                "Sleep",
-                "While any thread is working, and for three minutes after, your Mac won't go to sleep on its own, so a long turn, or one you started from your phone, isn't cut off halfway. The screen still sleeps.",
+                tr!("Sleep"),
+                tr!("While any thread is working, and for three minutes after, your Mac won't go to sleep on its own, so a long turn, or one you started from your phone, isn't cut off halfway. The screen still sleeps."),
                 "check whether it's holding your Mac awake right now.",
-                vec![row("Keep the Mac awake while threads work", switch, cx)],
+                vec![row(tr!("Keep the Mac awake while threads work"), switch, cx)],
                 cx,
             ));
         }
@@ -890,7 +893,11 @@ impl SettingsWindow {
         let mut usage_rows = Vec::new();
         if let Some(on) = settings.spare_week {
             let switch = self.switch("settings-spare-week", on, "Start a thread with ideas a day before a login's week resets with lots of it unused", cx, |this, on, cx| this.update(json!({ "spareWeek": on }), cx));
-            usage_rows.push(row("Tell me when a week's about to go unused", switch, cx));
+            usage_rows.push(row(
+                tr!("Tell me when a week's about to go unused"),
+                switch,
+                cx,
+            ));
         }
         if let Some(app) = self.app.upgrade() {
             let titles = threadbear_core::usage::model_week_titles(&app.read(cx).logins.accounts);
@@ -919,8 +926,8 @@ impl SettingsWindow {
         if !usage_rows.is_empty() {
             sections.push(section(
                 "settings-usage",
-                "Usage",
-                "A day before a login's week resets, if at the rate it's going 30% or more of it would be left, a thread on that login suggests work to spend it on and asks before starting any. The Usage panel's Find work for it does the same whenever you like.",
+                tr!("Usage"),
+                tr!("A day before a login's week resets, if at the rate it's going 30% or more of it would be left, a thread on that login suggests work to spend it on and asks before starting any. The Usage panel's Find work for it does the same whenever you like."),
                 "suggest work for a login with room left, or turn this off for you.",
                 usage_rows,
                 cx,
@@ -930,16 +937,16 @@ impl SettingsWindow {
             let switch = self.switch(
                 "settings-full-sync",
                 on,
-                "Send tool output and diffs to your Convex deployment",
+                tr!("Send tool output and diffs to your Convex deployment"),
                 cx,
                 |this, on, cx| this.update(json!({ "fullSync": on }), cx),
             );
             sections.push(section(
                 "settings-full-sync",
-                "Full sync",
+                tr!("Full sync"),
                 FULL_SYNC_ABOUT,
                 FULL_SYNC_ASK,
-                vec![row("Send tool output to Convex", switch, cx)],
+                vec![row(tr!("Send tool output to Convex"), switch, cx)],
                 cx,
             ));
         }
@@ -954,17 +961,17 @@ impl SettingsWindow {
                 "settings-bring-in",
                 current.title(),
                 None,
-                "How often a thread starts to bring in Mike's new releases",
+                tr!("How often a thread starts to bring in Mike's new releases"),
                 choices,
                 cx,
             );
             let menu = h_flex().child(menu);
             sections.push(section(
                 "settings-updates",
-                "Updates from Mike",
-                "When Mike has a release your copy doesn't have, Threadbear starts a thread that merges it in and runs the checks, then asks you before it lands. Never more than one at a time. A release Mike marks important doesn't wait.",
+                tr!("Updates from Mike"),
+                tr!("When Mike has a release your copy doesn't have, Threadbear starts a thread that merges it in and runs the checks, then asks you before it lands. Never more than one at a time. A release Mike marks important doesn't wait."),
                 "bring in Mike's latest release now, or change how often this happens.",
-                vec![row("Bring them in", menu, cx)],
+                vec![row(tr!("Bring them in"), menu, cx)],
                 cx,
             ));
         }
@@ -1004,8 +1011,8 @@ impl SettingsWindow {
                 .collect();
             sections.push(section(
                 "settings-experiments",
-                "Experiments",
-                "New features still being tried out. Each starts off; turn one on to try it, and off again whenever you like. Once one has proved itself it becomes a standard part of Threadbear and its switch goes. The ⓘ beside each says what it does.",
+                tr!("Experiments"),
+                tr!("New features still being tried out. Each starts off; turn one on to try it, and off again whenever you like. Once one has proved itself it becomes a standard part of Threadbear and its switch goes. The ⓘ beside each says what it does."),
                 "explain an experiment, or turn one on or off for you.",
                 rows,
                 cx,
@@ -1018,16 +1025,16 @@ impl SettingsWindow {
             .unwrap_or_default();
         sections.push(section(
             "settings-runner",
-            "Runner",
-            "The background program that runs your threads. It updates itself.",
+            tr!("Runner"),
+            tr!("The background program that runs your threads. It updates itself."),
             "check on it if something seems wrong. Your agent can read its status and logs.",
             vec![row(
-                "Version",
+                tr!("Version"),
                 div()
                     .text_size(px(13.))
                     .text_color(style::secondary_text(cx))
                     .child(if version.is_empty() {
-                        "Not connected".to_owned()
+                        tr!("Not connected").to_owned()
                     } else {
                         version
                     }),
@@ -1085,9 +1092,9 @@ impl SettingsWindow {
             .children(style::Appearance::ALL.into_iter().map(|choice| {
                 let app = app.clone();
                 let tip = match choice {
-                    style::Appearance::System => APPEARANCE_TIP,
-                    style::Appearance::Light => "Always light, whatever the system is set to",
-                    style::Appearance::Dark => "Always dark, whatever the system is set to",
+                    style::Appearance::System => appearance_tip(),
+                    style::Appearance::Light => tr!("Always light, whatever the system is set to"),
+                    style::Appearance::Dark => tr!("Always dark, whatever the system is set to"),
                 };
                 look_tile(choice, choice == current, tip, cx, move |_, window, cx| {
                     if let Some(app) = app.upgrade() {
@@ -1111,10 +1118,15 @@ impl SettingsWindow {
         let compact = style::compact();
         let spacing = segmented(
             [
-                ("Roomy", "More room between rows and turns", !compact, false),
                 (
-                    "Compact",
-                    "Rows and turns closer together, so more fit",
+                    tr!("Roomy"),
+                    tr!("More room between rows and turns"),
+                    !compact,
+                    false,
+                ),
+                (
+                    tr!("Compact"),
+                    tr!("Rows and turns closer together, so more fit"),
                     compact,
                     true,
                 ),
@@ -1141,15 +1153,20 @@ impl SettingsWindow {
         let text_size = segmented(
             [
                 (
-                    "Smaller",
-                    "Text and everything else a step smaller (90%)",
+                    tr!("Smaller"),
+                    tr!("Text and everything else a step smaller (90%)"),
                     zoom < 100,
                     90,
                 ),
-                ("Normal", "Text at its usual size (100%)", zoom == 100, 100),
                 (
-                    "Larger",
-                    "Text and everything else a step larger (110%)",
+                    tr!("Normal"),
+                    tr!("Text at its usual size (100%)"),
+                    zoom == 100,
+                    100,
+                ),
+                (
+                    tr!("Larger"),
+                    tr!("Text and everything else a step larger (110%)"),
                     zoom > 100,
                     110,
                 ),
@@ -1179,7 +1196,7 @@ impl SettingsWindow {
             .small()
             .secondary()
             .dropdown_caret(true)
-            .tooltip(FONT_TIP)
+            .tooltip(tr!("The font for everything but code"))
             .dropdown_menu(move |menu: PopupMenu, _, _| {
                 let mut menu = menu;
                 for choice in style::Font::ALL {
@@ -1200,18 +1217,18 @@ impl SettingsWindow {
             .id("settings-font-holder")
             .test_support()
             .a11y_role(Role::GenericContainer)
-            .aria_label(FONT_TIP)
+            .aria_label(tr!("The font for everything but code"))
             .flex_none()
             .child(font_menu);
         section(
             "settings-appearance-section",
-            "Appearance",
+            tr!("Appearance"),
             if cfg!(target_os = "macos") {
-                "How Threadbear looks, for Threadbear only. Same as the Mac follows System Settings > Appearance, and the first accent is the Mac's own. Text size is the same as View > Zoom (⌘= and ⌘-). The bear colours are Wayne Sutton's, from his fork."
+                tr!("How Threadbear looks, for Threadbear only. Same as the Mac follows System Settings > Appearance, and the first accent is the Mac's own. Text size is the same as View > Zoom (⌘= and ⌘-). The bear colours are Wayne Sutton's, from his fork.")
             } else if cfg!(target_os = "windows") {
-                "How Threadbear looks, for Threadbear only. Same as Windows follows Settings > Personalization > Colors. Text size is the same as View > Zoom (Ctrl+= and Ctrl+-). The bear colours are Wayne Sutton's, from his fork."
+                tr!("How Threadbear looks, for Threadbear only. Same as Windows follows Settings > Personalization > Colors. Text size is the same as View > Zoom (Ctrl+= and Ctrl+-). The bear colours are Wayne Sutton's, from his fork.")
             } else {
-                "How Threadbear looks, for Threadbear only. Text size is the same as View > Zoom (Ctrl+= and Ctrl+-). The bear colours are Wayne Sutton's, from his fork."
+                tr!("How Threadbear looks, for Threadbear only. Text size is the same as View > Zoom (Ctrl+= and Ctrl+-). The bear colours are Wayne Sutton's, from his fork.")
             },
             "change any of it for you.",
             vec![
@@ -1221,10 +1238,10 @@ impl SettingsWindow {
                     .pb(px(10.))
                     .child(looks)
                     .into_any_element(),
-                row("Accent", accents, cx),
-                row("Spacing", spacing, cx),
-                row("Text size", text_size, cx),
-                row("Font", font, cx),
+                row(tr!("Accent"), accents, cx),
+                row(tr!("Spacing"), spacing, cx),
+                row(tr!("Text size"), text_size, cx),
+                row(tr!("Font"), font, cx),
             ],
             cx,
         )
@@ -1240,7 +1257,7 @@ impl SettingsWindow {
         let switch = self.switch(
             "settings-panel-background-drag",
             on,
-            "Press and hold anywhere on a panel to move it, not just on its title or tab",
+            tr!("Press and hold anywhere on a panel to move it, not just on its title or tab"),
             cx,
             |this, on, cx| {
                 this.app
@@ -1250,10 +1267,10 @@ impl SettingsWindow {
         );
         section(
             "settings-panels",
-            "Panels",
-            "To move a panel, drag its title or tab. With this on, pressing and holding anywhere on a panel picks it up too. A panel with its title hidden can always be moved that way, as it has nothing else to drag it by.",
+            tr!("Panels"),
+            tr!("To move a panel, drag its title or tab. With this on, pressing and holding anywhere on a panel picks it up too. A panel with its title hidden can always be moved that way, as it has nothing else to drag it by."),
             "change it for you.",
-            vec![row("Move panels by their background", switch, cx)],
+            vec![row(tr!("Move panels by their background"), switch, cx)],
             cx,
         )
     }
@@ -1268,7 +1285,7 @@ impl SettingsWindow {
         let switch = self.switch(
             "settings-ask-before-quitting",
             on,
-            "Ask to confirm when you quit Threadbear",
+            tr!("Ask to confirm when you quit Threadbear"),
             cx,
             |this, on, cx| {
                 this.app
@@ -1281,10 +1298,10 @@ impl SettingsWindow {
         );
         section(
             "settings-quitting",
-            "Quitting",
-            "Quit Threadbear (⌘Q or the Threadbear menu) asks first, so a stray ⌘Q doesn't close the app. Ticking Don't ask again turns this off; turn it back on here. Your threads keep running on the runner while the app is closed.",
+            tr!("Quitting"),
+            tr!("Quit Threadbear (⌘Q or the Threadbear menu) asks first, so a stray ⌘Q doesn't close the app. Ticking Don't ask again turns this off; turn it back on here. Your threads keep running on the runner while the app is closed."),
             "change it for you.",
-            vec![row("Ask before quitting", switch, cx)],
+            vec![row(tr!("Ask before quitting"), switch, cx)],
             cx,
         )
     }
@@ -1298,7 +1315,7 @@ impl SettingsWindow {
         let switch = self.switch(
             "settings-ding",
             on,
-            "A soft ding when a thread is done and ready for you",
+            tr!("A soft ding when a thread is done and ready for you"),
             cx,
             |this, on, cx| {
                 this.app
@@ -1318,7 +1335,7 @@ impl SettingsWindow {
             .small()
             .secondary()
             .dropdown_caret(true)
-            .tooltip("Which ding plays")
+            .tooltip(tr!("Which ding plays"))
             .dropdown_menu(move |menu: PopupMenu, _, _| {
                 let mut menu = menu;
                 for choice in Ding::ALL {
@@ -1347,15 +1364,15 @@ impl SettingsWindow {
                     .id("settings-ding-volume")
                     .test_support()
                     .a11y_role(Role::GenericContainer)
-                    .aria_label("How loud the ding is")
+                    .aria_label(tr!("How loud the ding is"))
                     .w(px(180.))
-                    .tip("How loud the ding is")
+                    .tip(tr!("How loud the ding is"))
                     .child(Slider::new(&self.volume).horizontal()),
             )
             .child(self.button(
                 "settings-ding-play",
-                "Play",
-                "Hear the ding",
+                tr!("Play"),
+                tr!("Hear the ding"),
                 cx,
                 |this, _, cx| {
                     if let Some(app) = this.app.upgrade() {
@@ -1366,13 +1383,13 @@ impl SettingsWindow {
             ));
         section(
             "settings-notifications",
-            "Notifications",
-            "A soft ding when a thread finishes working: its reply is done, it's waiting for your answer, or it hit an error. It plays wherever you are, even in another app, and stays quiet for a thread you stopped yourself. Notifications themselves are in System Settings > Notifications.",
+            tr!("Notifications"),
+            tr!("A soft ding when a thread finishes working: its reply is done, it's waiting for your answer, or it hit an error. It plays wherever you are, even in another app, and stays quiet for a thread you stopped yourself. Notifications themselves are in System Settings > Notifications."),
             "change when the ding plays.",
             vec![
-                row("Play a sound when a thread finishes", switch, cx),
-                row("Sound", div().id("settings-ding-sound-holder").test_support().a11y_role(Role::GenericContainer).aria_label("Which ding plays").child(picker), cx),
-                row("Volume", volume, cx),
+                row(tr!("Play a sound when a thread finishes"), switch, cx),
+                row(tr!("Sound"), div().id("settings-ding-sound-holder").test_support().a11y_role(Role::GenericContainer).aria_label(tr!("Which ding plays")).child(picker), cx),
+                row(tr!("Volume"), volume, cx),
             ],
             cx,
         )
@@ -1395,7 +1412,7 @@ impl SettingsWindow {
             let newer = current.text != reviewed;
             let empty = reviewed.is_empty();
             let shown = if empty {
-                "The file is gone, or can't be read.".to_owned()
+                tr!("The file is gone, or can't be read.").to_owned()
             } else {
                 reviewed.clone()
             };
@@ -1407,8 +1424,8 @@ impl SettingsWindow {
             if newer {
                 buttons = buttons.child(self.button(
                     "settings-instructions-newer",
-                    "Show Newer Version",
-                    "The file has changed again. Show what it holds now",
+                    tr!("Show Newer Version"),
+                    tr!("The file has changed again. Show what it holds now"),
                     cx,
                     move |this, _, cx| {
                         this.reviewed = Some(file_text.clone());
@@ -1420,8 +1437,8 @@ impl SettingsWindow {
                 .child(div().flex_1())
                 .child(self.button(
                     "settings-instructions-clear",
-                    "Clear",
-                    "Delete these, so agents are given no standing instructions",
+                    tr!("Clear"),
+                    tr!("Delete these, so agents are given no standing instructions"),
                     cx,
                     |this, _, cx| this.resolve_outside(String::new(), cx),
                 ))
@@ -1430,14 +1447,14 @@ impl SettingsWindow {
                         .id("settings-instructions-use")
                         .test_support()
                         .a11y_role(Role::GenericContainer)
-                        .aria_label("Give every agent exactly the text shown here")
+                        .aria_label(tr!("Give every agent exactly the text shown here"))
                         .child(
                             Button::new("settings-instructions-use-button")
-                                .label("Use These")
+                                .label(tr!("Use These"))
                                 .small()
                                 .secondary()
                                 .disabled(empty || self.resolving)
-                                .tooltip("Give every agent exactly the text shown here")
+                                .tooltip(tr!("Give every agent exactly the text shown here"))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.resolve_outside(use_text.clone(), cx)
                                 })),
@@ -1454,7 +1471,7 @@ impl SettingsWindow {
                         .line_height(px(17.))
                         .text_color(style::needs_you_text(cx))
                         .child(icons::symbol("exclamationmark.triangle").with_size(px(13.)))
-                        .child(div().flex_1().child("Something other than Settings changed these, so agents aren't being given them.")),
+                        .child(div().flex_1().child(tr!("Something other than Settings changed these, so agents aren't being given them."))),
                 )
                 .child(div().id("settings-instructions-file").max_h(px(160.)).overflow_y_scroll().text_size(px(13.)).line_height(px(17.)).when(empty, |s| s.text_color(secondary)).child(shown))
                 .when_some(self.resolve_error.clone(), |s, e| s.child(div().text_size(px(11.)).text_color(style::failed(cx)).child(e)))
@@ -1469,7 +1486,7 @@ impl SettingsWindow {
                         .id("settings-instructions")
                         .test_support()
                         .a11y_role(Role::GenericContainer)
-                        .aria_label("What every thread's agent should always keep in mind")
+                        .aria_label(tr!("What every thread's agent should always keep in mind"))
                         .child(
                             Textarea::new(&self.instructions)
                                 .h(px(120.))
@@ -1483,8 +1500,8 @@ impl SettingsWindow {
         };
         Some(section_with_body(
             "settings-instructions-section",
-            "Instructions",
-            "Threadbear gives these to every thread's agent in every session, on every login, Claude and Codex alike. A chat that's already going hears a change before your next message.",
+            tr!("Instructions"),
+            tr!("Threadbear gives these to every thread's agent in every session, on every login, Claude and Codex alike. A chat that's already going hears a change before your next message."),
             "draft some for you to paste here. Agents can't change them themselves: only what's saved here is given to them.",
             body,
             cx,
@@ -1543,7 +1560,7 @@ impl SettingsWindow {
                         || format!("{id}, which has no small-job login"),
                         |p| p.1.clone(),
                     ),
-                    None => "None".to_owned(),
+                    None => tr!("None").to_owned(),
                 };
                 let mut choices: Vec<(String, bool, Value)> = pools
                     .iter()
@@ -1556,7 +1573,7 @@ impl SettingsWindow {
                     })
                     .collect();
                 choices.push((
-                    "None".into(),
+                    tr!("None").into(),
                     set.is_none(),
                     json!({ "models": { "pool": Value::Null } }),
                 ));
@@ -1564,16 +1581,16 @@ impl SettingsWindow {
                     "settings-small-jobs",
                     label,
                     face,
-                    "Which pool's logins write titles and do the librarian's work",
+                    tr!("Which pool's logins write titles and do the librarian's work"),
                     choices,
                     cx,
                 );
                 let small_jobs = section(
                     "settings-small-jobs-section",
-                    "Small jobs",
-                    "Titles and the librarian run on one of this pool's logins, trying providers in order (Claude uses Haiku, then Codex and other small-job providers when out of room), and count towards its usage. When every login is out of room they wait. None turns them off.",
+                    tr!("Small jobs"),
+                    tr!("Titles and the librarian run on one of this pool's logins, trying providers in order (Claude uses Haiku, then Codex and other small-job providers when out of room), and count towards its usage. When every login is out of room they wait. None turns them off."),
                     "change this, its provider order, or which model and effort new threads start on. Your agent edits them in runner.json.",
-                    vec![row("Run on", menu, cx)],
+                    vec![row(tr!("Run on"), menu, cx)],
                     cx,
                 );
                 if let Some(order) = self.small_jobs_provider_order(settings, &logins, &small, cx) {
@@ -1595,7 +1612,7 @@ impl SettingsWindow {
             rows.push(row_with(
                 div()
                     .text_color(secondary)
-                    .child("None yet")
+                    .child(tr!("None yet"))
                     .into_any_element(),
                 div().into_any_element(),
                 cx,
@@ -1611,7 +1628,7 @@ impl SettingsWindow {
             let remove = self.icon_button(
                 format!("settings-private-remove-{folder}"),
                 "minus.circle",
-                "Stop keeping this folder private",
+                tr!("Stop keeping this folder private"),
                 cx,
                 move |this, _, cx| {
                     this.update(json!({ "models": { "privateFolders": rest.clone() } }), cx)
@@ -1639,8 +1656,8 @@ impl SettingsWindow {
         let current = settings.private_folders.clone();
         let add = self.button(
             "settings-private-add",
-            "Add Folder…",
-            "Keep a folder's threads from ever being sent for titles and other small jobs",
+            tr!("Add Folder…"),
+            tr!("Keep a folder's threads from ever being sent for titles and other small jobs"),
             cx,
             move |this, window, cx| this.add_private_folders(current.clone(), window, cx),
         );
@@ -1651,8 +1668,8 @@ impl SettingsWindow {
         ));
         sections.push(section(
             "settings-private-folders",
-            "Private folders",
-            "Nothing from threads in these folders, or in folders inside them, is sent for titles and other small jobs.",
+            tr!("Private folders"),
+            tr!("Nothing from threads in these folders, or in folders inside them, is sent for titles and other small jobs."),
             "add several at once. Your agent keeps them in runner.json.",
             rows,
             cx,
@@ -1879,15 +1896,15 @@ impl SettingsWindow {
 /// Why there are no runner settings to show yet (`settingsWaiting`).
 fn waiting_text(app: &WeakEntity<Threadbear>, cx: &App) -> String {
     let Some(app) = app.upgrade() else {
-        return "Not connected to the runner.".into();
+        return tr!("Not connected to the runner.").into();
     };
     let t = app.read(cx);
     if t.settings_unsupported() {
-        "This runner is too old for settings. It gets them when it next updates.".into()
+        tr!("This runner is too old for settings. It gets them when it next updates.").into()
     } else if !t.connected() {
-        "Not connected to the runner.".into()
+        tr!("Not connected to the runner.").into()
     } else {
-        "Loading…".into()
+        tr!("Loading…").into()
     }
 }
 
@@ -2129,8 +2146,10 @@ fn accent_dot(
         }
     };
     let tip: SharedString = match choice {
-        style::Accent::System if cfg!(target_os = "macos") => "Use the Mac's accent colour".into(),
-        style::Accent::System => "Use blue, the usual accent".into(),
+        style::Accent::System if cfg!(target_os = "macos") => {
+            tr!("Use the Mac's accent colour").into()
+        }
+        style::Accent::System => tr!("Use blue, the usual accent").into(),
         _ => format!("Use {} as the accent", choice.title()).into(),
     };
     div()

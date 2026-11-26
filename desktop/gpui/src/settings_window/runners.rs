@@ -16,6 +16,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -127,7 +128,7 @@ impl SettingsWindow {
             default.as_deref(),
             orderable,
         );
-        let mut choices = vec![(None, "This Mac".to_owned(), t.self_runner_symbol())];
+        let mut choices = vec![(None, tr!("This Mac").to_owned(), t.self_runner_symbol())];
         choices.extend(others.iter().map(|r| {
             (
                 Some(r.id.clone()),
@@ -149,7 +150,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(shown) = self.runners_shown(cx) else {
-            return vec![plain_note("Not connected to the runner.", cx)];
+            return vec![plain_note(tr!("Not connected to the runner."), cx)];
         };
         let mut sections = Vec::new();
 
@@ -157,10 +158,10 @@ impl SettingsWindow {
         let picker = self.default_runner_picker(&shown);
         sections.push(section(
             "settings-default-runner",
-            "Default runner",
+            tr!("Default runner"),
             rules::DEFAULT_ABOUT,
             rules::DEFAULT_ASK,
-            vec![row("New threads start on", picker, cx)],
+            vec![row(tr!("New threads start on"), picker, cx)],
             cx,
         ));
 
@@ -180,7 +181,7 @@ impl SettingsWindow {
                 .into_any_element();
             sections.push(super::section_with_body(
                 "settings-runners",
-                "Runners",
+                tr!("Runners"),
                 rules::runners_about(true),
                 rules::RUNNERS_ASK,
                 body,
@@ -189,7 +190,7 @@ impl SettingsWindow {
         } else {
             sections.push(section(
                 "settings-runners",
-                "Runners",
+                tr!("Runners"),
                 rules::runners_about(false),
                 rules::RUNNERS_ASK,
                 rows,
@@ -210,7 +211,7 @@ impl SettingsWindow {
                 shown
                     .default
                     .clone()
-                    .unwrap_or_else(|| "This Mac".to_owned()),
+                    .unwrap_or_else(|| tr!("This Mac").to_owned()),
                 "desktopcomputer",
             ),
         };
@@ -273,7 +274,7 @@ impl SettingsWindow {
                         )))
                         .flex_none()
                         .cursor_grab(),
-                    "Drag to change the order",
+                    tr!("Drag to change the order"),
                     gpui_kit::Role::GenericContainer,
                 )
                 .child(handle_icon(tertiary)),
@@ -289,7 +290,7 @@ impl SettingsWindow {
                     div()
                         .id(SharedString::from(format!("settings-runner-star-{}", r.id)))
                         .flex_none(),
-                    "New threads start here",
+                    tr!("New threads start here"),
                     gpui_kit::Role::Image,
                 )
                 .child(

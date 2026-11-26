@@ -19,6 +19,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use serde_json::{json, Value};
@@ -143,7 +144,7 @@ impl SettingsWindow {
                             Some(link) => this.show_code(rules::pairing_qr(link), window, cx),
                             None => {
                                 this.devices.error =
-                                    Some("The runner gave no pairing link back.".into())
+                                    Some(tr!("The runner gave no pairing link back.").into())
                             }
                         }
                     }
@@ -187,7 +188,7 @@ impl SettingsWindow {
                             }
                             None => {
                                 this.devices.error =
-                                    Some("The runner gave no sign-in link back.".into())
+                                    Some(tr!("The runner gave no sign-in link back.").into())
                             }
                         }
                     }
@@ -311,7 +312,7 @@ impl SettingsWindow {
                 div().child("iPhone").into_any_element(),
                 div()
                     .text_color(secondary)
-                    .child(rules::LOCAL_ONLY_IPHONE)
+                    .child(rules::local_only_iphone())
                     .into_any_element(),
                 cx,
             ));
@@ -320,7 +321,7 @@ impl SettingsWindow {
                     .text_size(px(12.))
                     .line_height(px(style::natural_line(12.)))
                     .text_color(secondary)
-                    .child(rules::LOCAL_ONLY_NOTE)
+                    .child(rules::local_only_note())
                     .into_any_element(),
                 div().into_any_element(),
                 cx,
@@ -336,7 +337,7 @@ impl SettingsWindow {
                             .pt(px(1.))
                             .child(icons::symbol("bell.slash").with_size(px(13.))),
                     )
-                    .child(div().flex_1().child(rules::PUSH_OFF_NOTE));
+                    .child(div().flex_1().child(rules::push_off_note()));
                 rows.push(row_with(
                     note.into_any_element(),
                     div().into_any_element(),
@@ -345,8 +346,8 @@ impl SettingsWindow {
             }
             let pair = self.busy_button(
                 "settings-pair-phone",
-                "Show the code…",
-                rules::PHONE_BUTTON_TIP.to_owned(),
+                tr!("Show the code…"),
+                rules::phone_button_tip().to_owned(),
                 self.devices.pairing,
                 cx,
                 |this, window, cx| this.pair_phone(window, cx),
@@ -356,14 +357,14 @@ impl SettingsWindow {
         let browser = crate::open_gate::default_browser().map(|b| rules::browser_name(&b));
         let open = self.busy_button(
             "settings-open-website",
-            "Open signed in",
+            tr!("Open signed in"),
             rules::website_tip(browser.as_deref()),
             self.devices.opening,
             cx,
             |this, _, cx| this.open_website(cx),
         );
         rows.push(row_with(
-            div().child("Website").into_any_element(),
+            div().child(tr!("Website")).into_any_element(),
             open,
             cx,
         ));
@@ -427,7 +428,7 @@ impl SettingsWindow {
             let id = device.id.clone();
             let revoke = PushButton::new(
                 SharedString::from(format!("settings-revoke-{}", device.id)),
-                "Revoke",
+                tr!("Revoke"),
                 device.revoke_tip(),
             )
             .render(cx, {
@@ -456,8 +457,8 @@ impl SettingsWindow {
         }
         section(
             "settings-devices-paired",
-            "Paired",
-            rules::PAIRED_ABOUT,
+            tr!("Paired"),
+            rules::paired_about(),
             rules::PAIRED_ASK,
             rows,
             cx,
@@ -566,7 +567,7 @@ fn code_sheet(
             .id("settings-pairing-code")
             .test_support()
             .role(Role::Image)
-            .aria_label("Pairing code")
+            .aria_label(tr!("Pairing code"))
             .p(px(10.))
             .rounded(px(10.))
             .bg(white())
@@ -574,13 +575,13 @@ fn code_sheet(
             .into_any_element(),
         None => div()
             .text_color(style::failed(cx))
-            .child("Couldn't draw the code.")
+            .child(tr!("Couldn't draw the code."))
             .into_any_element(),
     };
     let done = prominent_button(
         "settings-pairing-done",
-        "Done",
-        "Close the code. The phone stays paired once it has scanned it.",
+        tr!("Done"),
+        tr!("Close the code. The phone stays paired once it has scanned it."),
         cx,
         move |window, cx| {
             code_closed(&closed, cx);
@@ -592,7 +593,7 @@ fn code_sheet(
         .items_center()
         .gap(px(16.))
         .text_color(label)
-        .child(div().text_size(px(17.)).line_height(px(style::natural_line(17.))).font_semibold().child("Pair your iPhone"))
+        .child(div().text_size(px(17.)).line_height(px(style::natural_line(17.))).font_semibold().child(tr!("Pair your iPhone")))
         .child(code)
         .child(
             v_flex()
@@ -600,8 +601,8 @@ fn code_sheet(
                 .gap(px(4.))
                 .text_size(px(13.))
                 .line_height(px(style::natural_line(13.)))
-                .child(div().child("Scan it with the Threadbear app on your iPhone."))
-                .child(div().text_size(px(12.)).line_height(px(style::natural_line(12.))).text_color(secondary).text_center().child("Don't have the app yet? ios/README.md in the repo says how to put it on your phone.")),
+                .child(div().child(tr!("Scan it with the Threadbear app on your iPhone.")))
+                .child(div().text_size(px(12.)).line_height(px(style::natural_line(12.))).text_color(secondary).text_center().child(tr!("Don't have the app yet? ios/README.md in the repo says how to put it on your phone."))),
         )
         .child(done)
         .into_any_element()
@@ -689,9 +690,9 @@ pub(crate) fn automation(
 ) -> Result<Option<Value>, String> {
     use gpui_kit::test::{TestEventExt as _, TestQueryExt as _, TestWindowExt as _};
     let target = if cmd["pair"].as_bool() == Some(true) {
-        rules::PHONE_BUTTON_TIP.to_owned()
+        rules::phone_button_tip().to_owned()
     } else if cmd["pairDone"].as_bool() == Some(true) {
-        "Close the code. The phone stays paired once it has scanned it.".to_owned()
+        tr!("Close the code. The phone stays paired once it has scanned it.").to_owned()
     } else if let Some(name) = cmd["revoke"].as_str() {
         format!("Revoke {name}")
     } else {

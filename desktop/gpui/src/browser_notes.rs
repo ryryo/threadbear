@@ -17,6 +17,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use threadbear_core::reducer::ImageRef;
+use threadbear_core::tr;
 use threadbear_web::PanelPage;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -198,7 +199,7 @@ impl SidePane {
         self.browser_note_error = None;
         let comment = cx.new(|cx| InputState::new(window, cx));
         comment.update(cx, |s, cx| {
-            s.set_placeholder("Describe what to change", window, cx)
+            s.set_placeholder(tr!("Describe what to change"), window, cx)
         });
         // The actual browser stays painted until a capture is ready.
         self.browser_pick = Some(Pick {
@@ -310,8 +311,9 @@ impl SidePane {
                     pick.rect = Some(rect);
                 } else {
                     pick.element = false;
-                    this.browser_note_error =
-                        Some("That element couldn't be selected. Drag a region instead.");
+                    this.browser_note_error = Some(tr!(
+                        "That element couldn't be selected. Drag a region instead."
+                    ));
                 }
                 cx.notify();
             });
@@ -391,7 +393,8 @@ impl SidePane {
                 {
                     this.browser_pick = None;
                     if failed {
-                        this.browser_note_error = Some("The comment was added without an image.");
+                        this.browser_note_error =
+                            Some(tr!("The comment was added without an image."));
                     }
                 }
                 cx.notify();
@@ -487,16 +490,20 @@ impl SidePane {
             }
         });
         let mut controls = h_flex().gap(px(5.)).child(
-            PushButton::new("browser-note-cancel", "Cancel", "Cancel page comment")
-                .small()
-                .render(cx, cancel),
+            PushButton::new(
+                "browser-note-cancel",
+                tr!("Cancel"),
+                tr!("Cancel page comment"),
+            )
+            .small()
+            .render(cx, cancel),
         );
         let summary = pick.target.as_deref().unwrap_or(if pick.locating {
-            "Finding the element…"
+            tr!("Finding the element…")
         } else if pick.element {
-            "Click an element to mark it."
+            tr!("Click an element to mark it.")
         } else {
-            "Drag over the area to mark."
+            tr!("Drag over the area to mark.")
         });
         let mut editor = v_flex()
             .p(px(6.))
@@ -508,11 +515,11 @@ impl SidePane {
                     PushButton::new(
                         "browser-note-image",
                         if pick.keep_image {
-                            "Skip image"
+                            tr!("Skip image")
                         } else {
-                            "Include image"
+                            tr!("Include image")
                         },
-                        "Choose whether the cutout is attached",
+                        tr!("Choose whether the cutout is attached"),
                     )
                     .small()
                     .disabled(pick.committing)
@@ -521,8 +528,8 @@ impl SidePane {
                 .child(
                     PushButton::new(
                         "browser-note-add",
-                        "Add to draft",
-                        "Attach to this thread's draft",
+                        tr!("Add to draft"),
+                        tr!("Attach to this thread's draft"),
                     )
                     .small()
                     .busy(pick.committing)

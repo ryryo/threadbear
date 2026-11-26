@@ -37,6 +37,7 @@ use threadbear_client::runner::Client;
 use threadbear_core::convex_panel::{self as convex, Choice, Deployment, Key, Login};
 use threadbear_core::highlights::Panel;
 use threadbear_core::inbox::ThreadSummary;
+use threadbear_core::tr;
 use threadbear_core::web_runtime::State;
 use threadbear_web::{PanelEvent, PanelKind, PanelPage};
 
@@ -1176,7 +1177,7 @@ fn starting(cx: &App) -> AnyElement {
             div()
                 .text_size(px(style::size::LABEL))
                 .text_color(secondary)
-                .child("Starting the web runtime…"),
+                .child(tr!("Starting the web runtime…")),
         )
         .into_any_element()
 }

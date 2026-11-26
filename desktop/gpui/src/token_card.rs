@@ -26,6 +26,7 @@ use gpui_kit::*;
 use serde_json::json;
 use std::collections::HashMap;
 use threadbear_core::remote::TokenCard;
+use threadbear_core::tr;
 
 /// How long the card stays away after a token was set, waiting for the box to
 /// say it has one, before it shows again.
@@ -262,7 +263,7 @@ impl Composer {
                 .aria_label(make_tip.clone())
                 .child(
                     Button::new("token-make-button")
-                        .label("Make one")
+                        .label(tr!("Make one"))
                         .small()
                         .primary()
                         .loading(state.busy == Some(Busy::Make))
@@ -285,7 +286,7 @@ impl Composer {
                 .aria_label(paste_tip)
                 .child(
                     Button::new("token-paste-button")
-                        .label("Paste a token")
+                        .label(tr!("Paste a token"))
                         .small()
                         .secondary()
                         .disabled(busy)
@@ -308,7 +309,7 @@ impl Composer {
                     .aria_label(mac_tip.clone())
                     .child(
                         Button::new("token-mac-button")
-                            .label("Use this Mac's token")
+                            .label(tr!("Use this Mac's token"))
                             .small()
                             .secondary()
                             .disabled(busy)
@@ -413,14 +414,14 @@ impl Composer {
             .id("token-set")
             .test_support()
             .a11y_role(Role::GenericContainer)
-            .aria_label("Set this token")
+            .aria_label(tr!("Set this token"))
             .child(
                 Button::new("token-set-button")
-                    .label("Set")
+                    .label(tr!("Set"))
                     .small()
                     .secondary()
                     .disabled(busy)
-                    .tooltip("Set this token for the login")
+                    .tooltip(tr!("Set this token for the login"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.send_pasted_token(&who, for_set.clone(), window, cx);
                     })),
@@ -433,7 +434,9 @@ impl Composer {
                     .id("token-field")
                     .flex_1()
                     .min_w_0()
-                    .tip("A token from claude setup-token, starting sk-ant-oat01-")
+                    .tip(tr!(
+                        "A token from claude setup-token, starting sk-ant-oat01-"
+                    ))
                     .child(Input::new(&field).small().disabled(busy)),
             )
             .child(set)

@@ -29,6 +29,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use threadbear_core::browserbear::{self as bear, AgentTab};
 use threadbear_core::inbox::ThreadSummary;
+use threadbear_core::tr;
 
 pub(crate) use threadbear_core::browserbear::PANEL_ID as BROWSER;
 
@@ -905,8 +906,12 @@ impl SidePane {
         let mut tabs = h_flex().gap(px(5.)).p(px(5.)).flex_none();
         if with_bear {
             for (agent, label, tip) in [
-                (false, "Web", "Browse in Threadbear"),
-                (true, "Agent tabs", "Show the thread's BrowserBear tabs"),
+                (false, tr!("Web"), tr!("Browse in Threadbear")),
+                (
+                    true,
+                    tr!("Agent tabs"),
+                    tr!("Show the thread's BrowserBear tabs"),
+                ),
             ] {
                 let thread = thread.id.clone();
                 let switch = cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -961,7 +966,7 @@ impl SidePane {
         input.update(cx, |s, cx| {
             s.set_placeholder(
                 if url.is_empty() {
-                    "Enter a URL or search".to_owned()
+                    tr!("Enter a URL or search").to_owned()
                 } else {
                     url.clone()
                 },
@@ -988,19 +993,19 @@ impl SidePane {
                 let back = page.clone();
                 let forward = page.clone();
                 row.child(
-                    PushButton::new("browser-back", "Back", "Go back")
+                    PushButton::new("browser-back", tr!("Back"), tr!("Go back"))
                         .small()
                         .disabled(!back.can_go_back())
                         .render(cx, move |_, _, _| back.go_back()),
                 )
                 .child(
-                    PushButton::new("browser-forward", "Forward", "Go forward")
+                    PushButton::new("browser-forward", tr!("Forward"), tr!("Go forward"))
                         .small()
                         .disabled(!forward.can_go_forward())
                         .render(cx, move |_, _, _| forward.go_forward()),
                 )
                 .child(
-                    PushButton::new("browser-reload", "Reload", "Reload this page")
+                    PushButton::new("browser-reload", tr!("Reload"), tr!("Reload this page"))
                         .small()
                         .render(cx, move |_, _, _| page.reload_current()),
                 )
@@ -1009,8 +1014,8 @@ impl SidePane {
                 row.child(
                     PushButton::new(
                         "browser-external",
-                        "Open in browser",
-                        "Open this URL in your external browser",
+                        tr!("Open in browser"),
+                        tr!("Open this URL in your external browser"),
                     )
                     .small()
                     .render(cx, move |_, _, cx| {
@@ -1027,7 +1032,7 @@ impl SidePane {
                         PushButton::new(
                             "browser-chrome",
                             "Chrome",
-                            "Open this URL in Google Chrome",
+                            tr!("Open this URL in Google Chrome"),
                         )
                         .small()
                         .render(cx, move |_, _, cx| {
@@ -1058,8 +1063,8 @@ impl SidePane {
                         .child(
                             PushButton::new(
                                 "browser-comment-element",
-                                "Pick element",
-                                "Mark an element for this thread",
+                                tr!("Pick element"),
+                                tr!("Mark an element for this thread"),
                             )
                             .small()
                             .render(cx, element),
@@ -1067,8 +1072,8 @@ impl SidePane {
                         .child(
                             PushButton::new(
                                 "browser-comment-area",
-                                "Select area",
-                                "Mark a region for this thread",
+                                tr!("Select area"),
+                                tr!("Mark a region for this thread"),
                             )
                             .small()
                             .render(cx, region),
@@ -1081,7 +1086,7 @@ impl SidePane {
             marked
         } else if stored.is_empty() {
             crate::files::pane_note(
-                "Enter an address to open a page beside the conversation.",
+                tr!("Enter an address to open a page beside the conversation."),
                 p,
             )
             .into_any_element()
@@ -1273,7 +1278,7 @@ impl SidePane {
         let (show_tab, show_thread, show_model) = (tab.clone(), thread.to_owned(), model.clone());
         let show = PushButton::new(
             SharedString::from(format!("browser-show-{}", tab.id())),
-            "Show window",
+            tr!("Show window"),
             format!(
                 "Bring this page's window to the front, in {}",
                 tab.place(browser_name)
@@ -1290,8 +1295,8 @@ impl SidePane {
             buttons = buttons.child(
                 PushButton::new(
                     SharedString::from(format!("browser-done-{}", tab.id())),
-                    "Done",
-                    "Tell the agent you've finished here",
+                    tr!("Done"),
+                    tr!("Tell the agent you've finished here"),
                 )
                 .small()
                 .busy(b.pending.contains(&pending_key("markDone", tab)))
@@ -1353,7 +1358,7 @@ impl SidePane {
             .map(|t| {
                 let mut buttons = vec!["Show window"];
                 if t.yours() {
-                    buttons.push("Done");
+                    buttons.push(tr!("Done"));
                 }
                 json!({ "title": t.shown_title(), "host": t.host(), "state": t.state, "action": t.working().then(|| t.action.clone()).flatten(), "buttons": buttons, "still": b.stills.contains_key(&t.id()) })
             })
@@ -1368,7 +1373,7 @@ impl SidePane {
 /// "As the page looked 2 minutes ago".
 fn still_tip(at: Option<f64>) -> String {
     let Some(at) = at else {
-        return "As the page looked lately".into();
+        return tr!("As the page looked lately").into();
     };
     let ago = ((crate::now_ms() as f64 - at) / 1000.).max(0.);
     let when = match ago as u64 {

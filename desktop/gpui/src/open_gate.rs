@@ -10,6 +10,7 @@ use crate::app::Threadbear;
 use gpui_kit::*;
 use std::path::Path;
 use threadbear_core::open_policy::{self as policy, FileVerdict, LinkKind, OpeningApp, Question};
+use threadbear_core::tr;
 
 pub(crate) use threadbear_core::open_policy::Origin;
 
@@ -219,7 +220,7 @@ fn open_chrome_request(url: &str, directory: Option<&str>, cx: &mut App) {
         let directory = directory.map(ToOwned::to_owned);
         cx.defer(move |cx| {
             if !app.update(cx, |app, cx| {
-                app.begin_note("opening-chrome", "Opening Chrome…", cx)
+                app.begin_note("opening-chrome", tr!("Opening Chrome…"), cx)
             }) {
                 return;
             }
@@ -349,7 +350,7 @@ pub(crate) fn open_simulator(cx: &mut App) {
             &NSString::from_str("com.apple.iphonesimulator"),
         );
         let Some(path) = url.and_then(|u| u.path()).map(|p| p.to_string()) else {
-            refuse("Simulator isn't installed on this Mac.".into(), cx);
+            refuse(tr!("Simulator isn't installed on this Mac.").into(), cx);
             return;
         };
         let Some(app) = cx.try_global::<GateNotices>().and_then(|n| n.0.upgrade()) else {
@@ -357,7 +358,7 @@ pub(crate) fn open_simulator(cx: &mut App) {
         };
         cx.defer(move |cx| {
             if !app.update(cx, |app, cx| {
-                app.begin_note("opening-simulator", "Opening Simulator…", cx)
+                app.begin_note("opening-simulator", tr!("Opening Simulator…"), cx)
             }) {
                 return;
             }
@@ -378,13 +379,13 @@ pub(crate) fn open_simulator(cx: &mut App) {
         });
     }
     #[cfg(not(target_os = "macos"))]
-    refuse("Simulator is only available on macOS.".to_owned(), cx);
+    refuse(tr!("Simulator is only available on macOS.").to_owned(), cx);
 }
 
 #[cfg(target_os = "macos")]
 fn apple_simulator(path: &str) -> Result<String, String> {
     if policy::real_path(Path::new(path)).is_err() {
-        return Err("Simulator isn't there any more.".to_owned());
+        return Err(tr!("Simulator isn't there any more.").to_owned());
     }
     // Any .app on this Mac can be registered with Launch Services (Finder
     // and Spotlight do it on sight). A copied bundle id must never turn this
@@ -1253,7 +1254,7 @@ fn ask(question: Question, cx: &mut App, yes: impl FnOnce(&mut App, bool) + 'sta
         else {
             return;
         };
-        let mut answers = vec![PromptButton::cancel("Cancel")];
+        let mut answers = vec![PromptButton::cancel(tr!("Cancel"))];
         if let Some(always) = &question.always {
             answers.push(PromptButton::new(always.clone()));
         }

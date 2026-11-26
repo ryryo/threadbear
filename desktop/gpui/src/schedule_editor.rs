@@ -23,6 +23,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -397,7 +398,7 @@ impl ScheduleEditor {
         let message = cx.new(|cx| TextareaState::new(window, cx).default_value(state.text.clone()));
         let title = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Optional")
+                .placeholder(tr!("Optional"))
                 .default_value(state.title.clone())
         });
         let cron = cx.new(|cx| {
@@ -407,7 +408,7 @@ impl ScheduleEditor {
         });
         let away_folder = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Default folder")
+                .placeholder(tr!("Default folder"))
                 .default_value(if state.is_away() {
                     state.cwd.clone()
                 } else {
@@ -649,7 +650,7 @@ impl ScheduleEditor {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose".into()),
+            prompt: Some(tr!("Choose").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(mut paths))) = paths.await {
@@ -678,13 +679,13 @@ impl ScheduleEditor {
     /// Why the button is greyed out, when it is.
     fn save_tip(&self, cx: &App) -> &'static str {
         if self.can_save(cx) {
-            "Save the schedule (Return)"
+            tr!("Save the schedule (Return)")
         } else if self.saving {
             "Saving…"
         } else if self.message_text(cx).trim().is_empty() {
-            "Type a message first"
+            tr!("Type a message first")
         } else {
-            "Fix when it sends first"
+            tr!("Fix when it sends first")
         }
     }
 
@@ -698,7 +699,7 @@ impl ScheduleEditor {
             return;
         };
         if !app.read(cx).connected() {
-            self.save_error = Some("Not connected to the runner.".into());
+            self.save_error = Some(tr!("Not connected to the runner.").into());
             cx.notify();
             return;
         }
@@ -933,7 +934,7 @@ impl ScheduleEditor {
                     .id("schedule-time")
                     .flex_none()
                     .w(px(110.))
-                    .tip("What time to send it")
+                    .tip(tr!("What time to send it"))
                     .child(TimeField::new(&self.time).small())
                     .into_any_element(),
             ]
@@ -962,7 +963,7 @@ impl ScheduleEditor {
                         "schedule-weekday",
                         current.to_owned(),
                         None,
-                        "Which day of the week",
+                        tr!("Which day of the week"),
                         choices,
                         cx,
                     ),
@@ -1050,7 +1051,7 @@ impl ScheduleEditor {
                 .and_then(|a| a.threads.get(id))
                 .map(|t| t.title.clone())
                 .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| "This thread".into()),
+                .unwrap_or_else(|| tr!("This thread").into()),
             None => "A new thread each time".into(),
         }
     }
@@ -1108,10 +1109,12 @@ impl ScheduleEditor {
         let me = cx.entity().downgrade();
         div()
             .id("schedule-star-threads")
-            .tip("Each thread it starts goes in Starred, above the Inbox")
+            .tip(tr!(
+                "Each thread it starts goes in Starred, above the Inbox"
+            ))
             .child(
                 Checkbox::new("schedule-star")
-                    .label("Star each new thread")
+                    .label(tr!("Star each new thread"))
                     .checked(self.state.star_threads)
                     .small()
                     .on_click(move |on: &bool, _, cx| {
@@ -1165,22 +1168,26 @@ impl Render for ScheduleEditor {
             .gap(px(4.))
             .child(message_box)
             .children(images_note);
-        let title = div().id("schedule-title").tip("Its name in the Scheduled list. Left empty, it's named after the message's first line.").child(Input::new(&self.title).small());
+        let title = div().id("schedule-title").tip(tr!("Its name in the Scheduled list. Left empty, it's named after the message's first line.")).child(Input::new(&self.title).small());
 
         let once = state.once;
         let editor = cx.entity().downgrade();
         let when = div()
             .id("schedule-when")
             .flex_none()
-            .tip("Send it once, or again and again")
+            .tip(tr!("Send it once, or again and again"))
             .child(
                 ButtonGroup::new("schedule-when-group")
                     .small()
                     .outline()
-                    .child(Button::new("schedule-once").label("Once").selected(once))
+                    .child(
+                        Button::new("schedule-once")
+                            .label(tr!("Once"))
+                            .selected(once),
+                    )
                     .child(
                         Button::new("schedule-repeat")
-                            .label("Repeat")
+                            .label(tr!("Repeat"))
                             .selected(!once),
                     )
                     .on_click(move |picked: &Vec<usize>, _, cx| {
@@ -1191,15 +1198,15 @@ impl Render for ScheduleEditor {
 
         let mut rows: Vec<AnyElement> = vec![
             form_row("Message", message, cx).into_any_element(),
-            form_row("Title", title, cx).into_any_element(),
-            form_row("When", h_flex().child(when), cx).into_any_element(),
+            form_row(tr!("Title"), title, cx).into_any_element(),
+            form_row(tr!("When"), h_flex().child(when), cx).into_any_element(),
         ];
         if once {
             let at = div()
                 .id("schedule-at")
                 .flex_none()
                 .w(px(240.))
-                .tip("When to send it")
+                .tip(tr!("When to send it"))
                 .child(DatePicker::new(&self.at).small());
             rows.push(form_row("At", h_flex().child(at), cx).into_any_element());
         } else {
@@ -1227,7 +1234,7 @@ impl Render for ScheduleEditor {
             let detail = self.repeat_detail(cx);
             rows.push(
                 form_row(
-                    "Repeat",
+                    tr!("Repeat"),
                     h_flex()
                         .gap(px(6.))
                         .items_center()
@@ -1240,7 +1247,9 @@ impl Render for ScheduleEditor {
             if kind == RepeatKind::Custom {
                 let cron = div()
                     .id("schedule-cron")
-                    .tip("Minute, hour, day of the month, month and day of the week")
+                    .tip(tr!(
+                        "Minute, hour, day of the month, month and day of the week"
+                    ))
                     .child(
                         Input::new(&self.cron)
                             .small()
@@ -1259,10 +1268,12 @@ impl Render for ScheduleEditor {
             let radios = v_flex()
                 .id("schedule-sends-to")
                 .gap(px(6.))
-                .tip("Send it into this thread, or start a new thread with it each time")
+                .tip(tr!(
+                    "Send it into this thread, or start a new thread with it each time"
+                ))
                 .child(
                     Radio::new("sends-here")
-                        .label("This thread")
+                        .label(tr!("This thread"))
                         .checked(to_thread)
                         .on_click(move |_, _, cx| {
                             let from = from.clone();
@@ -1275,7 +1286,7 @@ impl Render for ScheduleEditor {
                 )
                 .child(
                     Radio::new("sends-new")
-                        .label("A new thread each time")
+                        .label(tr!("A new thread each time"))
                         .checked(!to_thread)
                         .on_click(move |_, _, cx| {
                             e2.update(cx, |e, cx| {
@@ -1285,11 +1296,11 @@ impl Render for ScheduleEditor {
                             .ok();
                         }),
                 );
-            rows.push(form_row("Sends to", radios, cx).into_any_element());
+            rows.push(form_row(tr!("Sends to"), radios, cx).into_any_element());
         } else {
             rows.push(
                 form_row(
-                    "Sends to",
+                    tr!("Sends to"),
                     div()
                         .pt(px(5.))
                         .truncate()
@@ -1359,16 +1370,18 @@ impl Render for ScheduleEditor {
                     .runner_id
                     .as_ref()
                     .and_then(|id| others.iter().find(|o| &o.0 == id))
-                    .map_or_else(|| "This Mac".to_owned(), |o| o.1.clone());
+                    .map_or_else(|| tr!("This Mac").to_owned(), |o| o.1.clone());
                 let current_symbol = state
                     .runner_id
                     .as_ref()
                     .and_then(|id| others.iter().find(|o| &o.0 == id))
                     .map_or(self_symbol, |o| o.3);
                 let mut choices = vec![
-                    choice("This Mac", state.runner_id.is_none(), |e, window, cx| {
-                        e.set_runner(None, window, cx)
-                    }),
+                    choice(
+                        tr!("This Mac"),
+                        state.runner_id.is_none(),
+                        |e, window, cx| e.set_runner(None, window, cx),
+                    ),
                     Choice::Separator,
                 ];
                 for (id, name, online, symbol) in &others {
@@ -1410,7 +1423,7 @@ impl Render for ScheduleEditor {
                 let name = state
                     .runner_name
                     .clone()
-                    .unwrap_or_else(|| "This Mac".into());
+                    .unwrap_or_else(|| tr!("This Mac").into());
                 let symbol = match &state.runner_id {
                     Some(id) => others
                         .iter()
@@ -1425,7 +1438,9 @@ impl Render for ScheduleEditor {
                     .items_center()
                     .text_size(px(style::size::LABEL))
                     .text_color(secondary)
-                    .tip("Where it runs. To run it somewhere else, make a new schedule.")
+                    .tip(tr!(
+                        "Where it runs. To run it somewhere else, make a new schedule."
+                    ))
                     .child(
                         icons::symbol(symbol)
                             .with_size(px(12.))
@@ -1456,7 +1471,7 @@ impl Render for ScheduleEditor {
                         about,
                         cx,
                     ));
-                rows.push(form_row("Folder", folder, cx).into_any_element());
+                rows.push(form_row(tr!("Folder"), folder, cx).into_any_element());
             } else {
                 let mut choices: Vec<Choice> = recent
                     .into_iter()
@@ -1476,7 +1491,7 @@ impl Render for ScheduleEditor {
                     .collect();
                 choices.push(Choice::Separator);
                 choices.push(Choice::Item {
-                    title: "Choose…".into(),
+                    title: tr!("Choose…").into(),
                     symbol: Some("folder.badge.plus"),
                     checked: false,
                     pick: Rc::new(|e, window, cx| e.choose_folder(window, cx)),
@@ -1484,7 +1499,7 @@ impl Render for ScheduleEditor {
                 let label = abbreviate_home(&state.cwd, &home);
                 rows.push(
                     form_row(
-                        "Folder",
+                        tr!("Folder"),
                         h_flex().child(self.menu_button(
                             "schedule-folder",
                             label,
@@ -1607,13 +1622,17 @@ impl Render for ScheduleEditor {
                     "schedule-effort",
                     effort_label,
                     None,
-                    "How hard it thinks",
+                    tr!("How hard it thinks"),
                     effort_choices,
                     cx,
                 );
                 rows.push(
-                    form_row("Model", h_flex().gap(px(6.)).child(model).child(effort), cx)
-                        .into_any_element(),
+                    form_row(
+                        tr!("Model"),
+                        h_flex().gap(px(6.)).child(model).child(effort),
+                        cx,
+                    )
+                    .into_any_element(),
                 );
             }
         }
@@ -1629,7 +1648,7 @@ impl Render for ScheduleEditor {
             .when(!state.is_new(), |s| {
                 s.child(
                     Button::new("schedule-delete")
-                        .label("Delete…")
+                        .label(tr!("Delete…"))
                         .small()
                         .outline()
                         .disabled(self.saving)
@@ -1644,10 +1663,10 @@ impl Render for ScheduleEditor {
             .child(div().flex_1())
             .child(
                 Button::new("schedule-cancel")
-                    .label("Cancel")
+                    .label(tr!("Cancel"))
                     .small()
                     .outline()
-                    .tooltip("Close without saving (Esc)")
+                    .tooltip(tr!("Close without saving (Esc)"))
                     .on_click(cx.listener(|this, _, window, cx| this.cancel(window, cx))),
             )
             .child(

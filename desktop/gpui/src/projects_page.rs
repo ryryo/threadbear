@@ -17,6 +17,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use threadbear_core::projects::{self as rules, CardPart, CardStatus, Project, Sections};
+use threadbear_core::tr;
 
 /// Cards are this wide at least and at most (`GridItem(.adaptive(minimum:
 /// 240, maximum: 340))`), this far apart across and down.
@@ -51,7 +52,7 @@ impl Threadbear {
         if let Some((search, _)) = &self.projects.search {
             return search.clone();
         }
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search projects"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(tr!("Search projects")));
         let events = cx.subscribe(&search, |this, _, ev: &InputEvent, cx| match ev {
             InputEvent::Change => cx.notify(),
             InputEvent::PressEnter { .. } => {
@@ -143,7 +144,7 @@ impl Threadbear {
                     .text_size(px(24.))
                     .line_height(px(29.))
                     .font_semibold()
-                    .child("Projects"),
+                    .child(tr!("Projects")),
             )
             // In a narrow window the summary is what gives way: one line cut
             // short, rather than the search's width jumping with each key.
@@ -166,20 +167,20 @@ impl Threadbear {
             .child(div().mt(px(6.)).child(icon_push_button(
                 "projects-new",
                 "plus",
-                "New project",
-                "Make a new project",
+                tr!("New project"),
+                tr!("Make a new project"),
                 busy,
                 cx,
                 cx.listener(|this, _: &ClickEvent, window, cx| this.new_project(None, window, cx)),
             )));
         let body: AnyElement = if total == 0 {
-            div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(secondary).child("No projects yet. The librarian makes them as threads run, or you can make one.").into_any_element()
+            div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(secondary).child(tr!("No projects yet. The librarian makes them as threads run, or you can make one.")).into_any_element()
         } else if all.is_empty() {
             div()
                 .text_size(px(style::size::LABEL))
                 .line_height(px(16.))
                 .text_color(secondary)
-                .child("No projects match that.")
+                .child(tr!("No projects match that."))
                 .into_any_element()
         } else {
             self.render_project_cards(all, cx)
@@ -215,7 +216,7 @@ impl Threadbear {
         let clear = search.clone();
         div()
             .id("projects-search")
-            .tip("Search projects")
+            .tip(tr!("Search projects"))
             .flex_shrink(1.)
             .min_w(px(120.))
             .w(px(240.))

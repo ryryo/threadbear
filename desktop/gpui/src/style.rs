@@ -59,11 +59,15 @@ impl Appearance {
         match self {
             // Named for the machine it's on: "Same as the Mac" read oddly on
             // Windows (17 Nov).
-            Appearance::System if cfg!(target_os = "macos") => "Same as the Mac",
-            Appearance::System if cfg!(target_os = "windows") => "Same as Windows",
-            Appearance::System => "Same as the system",
-            Appearance::Light => "Light",
-            Appearance::Dark => "Dark",
+            Appearance::System if cfg!(target_os = "macos") => {
+                threadbear_core::tr!("Same as the Mac")
+            }
+            Appearance::System if cfg!(target_os = "windows") => {
+                threadbear_core::tr!("Same as Windows")
+            }
+            Appearance::System => threadbear_core::tr!("Same as the system"),
+            Appearance::Light => threadbear_core::tr!("Light"),
+            Appearance::Dark => threadbear_core::tr!("Dark"),
         }
     }
 }

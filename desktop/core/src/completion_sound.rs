@@ -29,9 +29,9 @@ impl Ding {
 
     pub fn title(self) -> &'static str {
         match self {
-            Ding::Chime => "Chime",
-            Ding::Bell => "Bell",
-            Ding::Droplet => "Droplet",
+            Ding::Chime => crate::tr!("Chime"),
+            Ding::Bell => crate::tr!("Bell"),
+            Ding::Droplet => crate::tr!("Droplet"),
         }
     }
 

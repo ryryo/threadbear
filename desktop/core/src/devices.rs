@@ -79,9 +79,9 @@ impl Device {
             return self.name.clone();
         }
         if self.kind == Kind::Browser {
-            "Browser"
+            crate::tr!("Browser")
         } else {
-            "Phone"
+            crate::tr!("Phone")
         }
         .to_owned()
     }
@@ -224,17 +224,18 @@ fn is_loopback(url: &str) -> bool {
 /// first branches), or None when the sections can show.
 pub fn blocked(unsupported: bool, connected: bool, list: &DeviceList) -> Option<Vec<String>> {
     if unsupported {
-        return Some(vec![
-            "This runner is too old to pair phones. It gets it when it next updates.".to_owned(),
-        ]);
+        return Some(vec![crate::tr!(
+            "This runner is too old to pair phones. It gets it when it next updates."
+        )
+        .to_owned()]);
     }
     if !connected {
-        return Some(vec!["Not connected to the runner.".to_owned()]);
+        return Some(vec![crate::tr!("Not connected to the runner.").to_owned()]);
     }
     list.reason.as_ref().map(|reason| {
         vec![
-            format!("Your threads aren't mirrored to Convex yet ({reason}), so there's nothing for a phone or browser to read."),
-            "Ask your agent to set it up, or run ./threadbear setup in the repo, then come back here.".to_owned(),
+            crate::trf!("Your threads aren't mirrored to Convex yet ({reason}), so there's nothing for a phone or browser to read.", reason = reason),
+            crate::tr!("Ask your agent to set it up, or run ./threadbear setup in the repo, then come back here.").to_owned(),
         ]
     })
 }
@@ -242,9 +243,9 @@ pub fn blocked(unsupported: bool, connected: bool, list: &DeviceList) -> Option<
 /// The first section's heading.
 pub fn add_title(local_only: bool) -> &'static str {
     if local_only {
-        "Add a browser"
+        crate::tr!("Add a browser")
     } else {
-        "Add a phone or browser"
+        crate::tr!("Add a phone or browser")
     }
 }
 
@@ -264,11 +265,21 @@ pub fn add_about(local_only: bool, site: Option<&str>) -> String {
 }
 
 pub const ADD_ASK: &str = "put the iPhone app on your phone, or change how the mirror is set up.";
-pub const LOCAL_ONLY_IPHONE: &str = "Can't pair: your backend is on this Mac only";
-pub const LOCAL_ONLY_NOTE: &str = "A phone can't reach it. To use the iPhone app, run ./threadbear setup --self-hosted --tailnet (with Tailscale), or with --url and --site-url for an address of your own. Your threads stay.";
-pub const PUSH_OFF_NOTE: &str = "Your backend is self-hosted, so the iPhone app gets no notifications. It shows what needs you when you open it.";
-pub const PHONE_BUTTON_TIP: &str = "A code to scan with the Threadbear iPhone app. It pairs the phone with your threads for 90 days.";
-pub const PAIRED_ABOUT: &str = "Each phone and browser holds a key of its own, good for 90 days. Revoke signs that one out at its next request; pair it again for a new key.";
+pub fn local_only_iphone() -> &'static str {
+    crate::tr!("Can't pair: your backend is on this Mac only")
+}
+pub fn local_only_note() -> &'static str {
+    crate::tr!("A phone can't reach it. To use the iPhone app, run ./threadbear setup --self-hosted --tailnet (with Tailscale), or with --url and --site-url for an address of your own. Your threads stay.")
+}
+pub fn push_off_note() -> &'static str {
+    crate::tr!("Your backend is self-hosted, so the iPhone app gets no notifications. It shows what needs you when you open it.")
+}
+pub fn phone_button_tip() -> &'static str {
+    crate::tr!("A code to scan with the Threadbear iPhone app. It pairs the phone with your threads for 90 days.")
+}
+pub fn paired_about() -> &'static str {
+    crate::tr!("Each phone and browser holds a key of its own, good for 90 days. Revoke signs that one out at its next request; pair it again for a new key.")
+}
 pub const PAIRED_ASK: &str = "explain what a paired phone or browser can see and do.";
 
 /// Open signed in's tooltip, naming the browser the link goes to.
@@ -282,9 +293,9 @@ pub fn website_tip(browser: Option<&str>) -> String {
 /// What the Paired list says with nothing in it.
 pub fn empty_line(loaded: bool) -> &'static str {
     if loaded {
-        "Nothing paired yet"
+        crate::tr!("Nothing paired yet")
     } else {
-        "Loading…"
+        crate::tr!("Loading…")
     }
 }
 

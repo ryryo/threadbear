@@ -12,6 +12,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::{h_flex, Sizable as _, StyledExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use serde_json::json;
@@ -77,7 +78,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let Some(app) = self.app.upgrade() else {
-            return vec![plain_note("Not connected to the runner.", cx)];
+            return vec![plain_note(tr!("Not connected to the runner."), cx)];
         };
         let (runner_pools, accounts, connected) = {
             let t = app.read(cx);
@@ -92,7 +93,7 @@ impl SettingsWindow {
                 if connected {
                     "This runner is too old for pools. It gets them when it next updates."
                 } else {
-                    "Not connected to the runner."
+                    tr!("Not connected to the runner.")
                 },
                 cx,
             )];
@@ -134,7 +135,7 @@ impl SettingsWindow {
             .collect();
         let can_delete = self.pools.list.len() > 1 && current.is_some();
         let delete_tip = if self.pools.list.len() < 2 {
-            "There has to be at least one pool".to_owned()
+            tr!("There has to be at least one pool").to_owned()
         } else {
             format!(
                 "Delete {}",
@@ -144,7 +145,7 @@ impl SettingsWindow {
         let add = self.icon_button(
             "settings-pool-add".into(),
             "plus",
-            "Add a pool",
+            tr!("Add a pool"),
             cx,
             |this, window, cx| this.add_pool(window, cx),
         );
@@ -182,8 +183,8 @@ impl SettingsWindow {
         ));
         sections.push(section(
             "settings-pools",
-            "Pools",
-            "New threads start on their folder's pool, or on the one you picked last. Each turn runs on a login with room, and the thread moves on when that login runs out.",
+            tr!("Pools"),
+            tr!("New threads start on their folder's pool, or on the one you picked last. Each turn runs on a login with room, and the thread moves on when that login runs out."),
             "set up pools for you, such as one for work and one for everything else, or to add another login.",
             rows,
             cx,
@@ -192,17 +193,17 @@ impl SettingsWindow {
         if let Some(pool) = current {
             // Its name, icon and logins.
             let mut rows = vec![row_with(
-                div().child("Name").into_any_element(),
+                div().child(tr!("Name")).into_any_element(),
                 crate::highlights::tipped(
                     div().id("pool-name-holder").w(px(220.)),
-                    "Rename this pool. It saves when you press Return or click away.",
+                    tr!("Rename this pool. It saves when you press Return or click away."),
                 )
                 .child(Input::new(&name).small())
                 .into_any_element(),
                 cx,
             )];
             rows.push(row_with(
-                div().child("Icon").into_any_element(),
+                div().child(tr!("Icon")).into_any_element(),
                 self.icon_picker(&pool, &accounts, cx),
                 cx,
             ));
@@ -212,7 +213,7 @@ impl SettingsWindow {
             sections.push(section_with_body(
                 "settings-pool-logins",
                 &pool.title,
-                "Tick the logins this pool can use. A mixed pool tries providers in this order; within one provider, the login with the most room goes first.",
+                tr!("Tick the logins this pool can use. A mixed pool tries providers in this order; within one provider, the login with the most room goes first."),
                 "change its logins or their order, or add a login that isn't listed.",
                 group(rows, cx),
                 cx,
@@ -224,7 +225,7 @@ impl SettingsWindow {
                 rows.push(row_with(
                     div()
                         .text_color(secondary)
-                        .child("None yet")
+                        .child(tr!("None yet"))
                         .into_any_element(),
                     div().into_any_element(),
                     cx,
@@ -264,7 +265,7 @@ impl SettingsWindow {
             let id = pool.id.clone();
             let add = self.button_owned(
                 "settings-pool-folder-add",
-                "Add Folder…",
+                tr!("Add Folder…"),
                 format!("Pick folders whose new threads start on {}", pool.title),
                 cx,
                 move |this, window, cx| this.add_pool_folders(id.clone(), window, cx),
@@ -276,7 +277,7 @@ impl SettingsWindow {
             ));
             sections.push(section(
                 "settings-pool-folders",
-                "Folders",
+                tr!("Folders"),
                 &format!(
                     "New threads in these folders, or a folder inside one, start on {}.",
                     pool.title
@@ -339,7 +340,7 @@ impl SettingsWindow {
             .unwrap_or_default();
         let name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Pool name")
+                .placeholder(tr!("Pool name"))
                 .default_value(title)
         });
         // A new name typed and not yet taken: an update's restart waits for
@@ -414,10 +415,12 @@ impl SettingsWindow {
             let (me, id) = (me.clone(), pool.id.clone());
             alert
                 .title(format!("Delete {}?", pool.title))
-                .description("Threads on it carry on with the login they're on, pinned to it.")
+                .description(tr!(
+                    "Threads on it carry on with the login they're on, pinned to it."
+                ))
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Delete")
+                        .ok_text(tr!("Delete"))
                         .show_cancel(true),
                 )
                 .on_ok(move |_, window, cx| {
@@ -439,7 +442,7 @@ impl SettingsWindow {
             files: false,
             directories: true,
             multiple: true,
-            prompt: Some("Add".into()),
+            prompt: Some(tr!("Add").into()),
         });
         let home = std::env::var("HOME").unwrap_or_default();
         cx.spawn_in(window, async move |this, cx| {
@@ -726,8 +729,8 @@ impl SettingsWindow {
             let first = pool.account_ids.first() == Some(&account.id);
             let last = pool.account_ids.last() == Some(&account.id);
             for (step, symbol, tip, disabled) in [
-                (-1, "chevron.up", "Earlier in the order", first),
-                (1, "chevron.down", "Later in the order", last),
+                (-1, "chevron.up", tr!("Earlier in the order"), first),
+                (1, "chevron.down", tr!("Later in the order"), last),
             ] {
                 let (pool_id, login) = (pool_id.clone(), login.clone());
                 controls = controls.child(if disabled {
@@ -794,7 +797,7 @@ fn pool_detail(pool: &Pool, accounts: &[Account]) -> String {
         .map(|id| threadbear_core::logins::short_account_name(id, accounts))
         .collect();
     let mut text = if logins.is_empty() {
-        "No logins yet".to_owned()
+        tr!("No logins yet").to_owned()
     } else {
         logins.join(", ")
     };
@@ -840,7 +843,7 @@ impl RenderOnce for IconFace {
                 .rounded(px(6.))
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover)),
-            "Pick this pool's icon. It shows in front of the model chip under the composer.",
+            tr!("Pick this pool's icon. It shows in front of the model chip under the composer."),
         )
         .child(
             icons::try_symbol(&self.symbol)

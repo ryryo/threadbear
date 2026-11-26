@@ -23,6 +23,7 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::{h_flex, v_flex, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -308,10 +309,10 @@ impl Threadbear {
             let (entity, id) = (entity.clone(), id.clone());
             alert
                 .title(title.clone())
-                .description("It won't send its message again.")
+                .description(tr!("It won't send its message again."))
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Delete")
+                        .ok_text(tr!("Delete"))
                         .show_cancel(true),
                 )
                 .on_ok(move |_, window, cx| {
@@ -374,7 +375,7 @@ impl Threadbear {
             "pencil",
             MenuAction::EditSchedule(id.clone()),
         )];
-        let run = MenuRow::item("Run now", "play", MenuAction::RunSchedule(id.clone()));
+        let run = MenuRow::item(tr!("Run now"), "play", MenuAction::RunSchedule(id.clone()));
         rows.push(if self.scheduled.busy.contains(&format!("run:{id}")) {
             run.disabled()
         } else {
@@ -382,9 +383,9 @@ impl Threadbear {
         });
         if !schedule.is_finished() {
             let (title, symbol) = if schedule.paused {
-                ("Resume", "playpause")
+                (tr!("Resume"), "playpause")
             } else {
-                ("Pause", "pause")
+                (tr!("Pause"), "pause")
             };
             let pause = MenuRow::item(
                 title,
@@ -399,7 +400,7 @@ impl Threadbear {
         }
         rows.push(MenuRow::separator());
         rows.push(MenuRow::item(
-            "Delete…",
+            tr!("Delete…"),
             "trash",
             MenuAction::DeleteSchedule(id),
         ));
@@ -464,7 +465,7 @@ impl Threadbear {
                     .pt(px(10.))
                     .text_size(px(style::size::SIDEBAR_PREVIEW))
                     .text_color(p.secondary)
-                    .child("Nothing scheduled."),
+                    .child(tr!("Nothing scheduled.")),
             );
         }
         let count = self.scheduled.active_count();
@@ -473,7 +474,7 @@ impl Threadbear {
             .relative()
             .size_full()
             .bg(p.side)
-            .child(mode_header("Scheduled", Some(count), &p))
+            .child(mode_header(tr!("Scheduled"), Some(count), &p))
             .child(
                 div()
                     .px(px(OUTER_INSET))
@@ -526,7 +527,7 @@ impl Threadbear {
                 .rounded(px(CORNER))
                 .hover(move |s| s.bg(hover)),
             "new-schedule",
-            "Schedule a message for later"
+            tr!("Schedule a message for later")
         )
         .on_click(
             cx.listener(|this, _: &ClickEvent, window, cx| this.new_schedule(None, window, cx)),
@@ -541,7 +542,7 @@ impl Threadbear {
                 .text_size(px(style::size::SIDEBAR_BUTTON))
                 .line_height(px(17.))
                 .text_color(fg)
-                .child("New schedule"),
+                .child(tr!("New schedule")),
         )
     }
 
@@ -768,9 +769,9 @@ impl Threadbear {
             return div().min_w_0().truncate().child(label).into_any_element();
         };
         let tip = if schedule.thread_id.is_none() {
-            "Open the last thread it started"
+            tr!("Open the last thread it started")
         } else {
-            "Open the thread"
+            tr!("Open the thread")
         };
         let underline = p.secondary;
         tipped!(
@@ -821,7 +822,7 @@ impl Threadbear {
             );
         } else {
             let tip = away.map_or_else(
-                || "Run now".to_owned(),
+                || tr!("Run now").to_owned(),
                 |away| format!("Ask {away} to run it now"),
             );
             let run_id = id.clone();
@@ -838,9 +839,9 @@ impl Threadbear {
         if !schedule.is_finished() {
             let paused = schedule.paused;
             let (symbol, tip) = if paused {
-                ("play", "Resume")
+                ("play", tr!("Resume"))
             } else {
-                ("pause", "Pause")
+                ("pause", tr!("Pause"))
             };
             let pausing = self.scheduled.busy.contains(&format!("pause:{id}"));
             let pause_id = id.clone();
@@ -869,7 +870,7 @@ impl Threadbear {
         row = row.child(icon_button(
             ElementId::Name(format!("delete-{id}").into()),
             icon("trash", 13., p.secondary),
-            "Delete",
+            tr!("Delete"),
             p,
             cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.delete_schedule(delete_id.clone(), window, cx)
@@ -887,7 +888,7 @@ impl Threadbear {
         let local = Local::now();
         let next = rules::next(&self.scheduled.list);
         let status = next.map_or_else(
-            || "Nothing coming up".to_owned(),
+            || tr!("Nothing coming up").to_owned(),
             |s| format!("Next: {}, {}", rules::title(s), rules::when(s, &local)),
         );
         let stats = if self.schedules_supported {
@@ -898,7 +899,7 @@ impl Threadbear {
         let about = v_flex()
             .gap(px(12.))
             .child(home_title(
-                "Scheduled",
+                tr!("Scheduled"),
                 "Messages that send themselves later, once or on repeat.",
                 SCHEDULED_MORE,
                 cx,
@@ -924,11 +925,11 @@ impl Threadbear {
                         let hovered = self.sidebar.hover_override.as_deref() == Some(s.id.as_str());
                         let away = self.away_runner_name(s);
                         let waiting = away.as_ref().filter(|_| s.run_requested_at.is_some()).map(|away| format!("Waiting for {away} to run it"));
-                        let mut buttons = vec![away.as_ref().map_or_else(|| "Run now".to_owned(), |a| format!("Ask {a} to run it now"))];
+                        let mut buttons = vec![away.as_ref().map_or_else(|| tr!("Run now").to_owned(), |a| format!("Ask {a} to run it now"))];
                         if !s.is_finished() {
-                            buttons.push(if s.paused { "Resume" } else { "Pause" }.to_owned());
+                            buttons.push(if s.paused { tr!("Resume") } else { tr!("Pause") }.to_owned());
                         }
-                        buttons.push("Delete".to_owned());
+                        buttons.push(tr!("Delete").to_owned());
                         let place = [Some(s.when_text.clone()), away.clone(), Some(self.schedule_target(s))].into_iter().flatten().collect::<Vec<_>>().join(" · ");
                         json!({
                             "id": s.id, "title": s.title,
@@ -953,7 +954,7 @@ impl Threadbear {
         let local = Local::now();
         let next = rules::next(&self.scheduled.list);
         let status = next.map_or_else(
-            || "Nothing coming up".to_owned(),
+            || tr!("Nothing coming up").to_owned(),
             |s| format!("Next: {}, {}", rules::title(s), rules::when(s, &local)),
         );
         let stats = if self.schedules_supported {
@@ -962,7 +963,7 @@ impl Threadbear {
             Vec::new()
         };
         json!({
-            "title": "Scheduled",
+            "title": tr!("Scheduled"),
             "status": status,
             "poke": self.scheduled.pokes.line,
             "stats": stats.iter().map(|s| json!({ "value": s.value, "label": s.label })).collect::<Vec<_>>(),

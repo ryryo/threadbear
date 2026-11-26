@@ -14,6 +14,7 @@ use gpui_kit::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use threadbear_core::inbox::ThreadSummary;
+use threadbear_core::tr;
 
 mod tasks;
 use tasks::TaskCard;
@@ -216,16 +217,16 @@ enum Edit {
 impl Edit {
     fn label(&self) -> &'static str {
         match self {
-            Self::New | Self::Name => "Bot name",
+            Self::New | Self::Name => tr!("Bot name"),
             Self::Role => "Role",
-            Self::Instructions => "Instructions",
+            Self::Instructions => tr!("Instructions"),
             Self::Note(_) => "Note",
-            Self::Privacy => "Dedicated work folder",
-            Self::Review(_, _) => "Proposed note",
-            Self::RequestRerun(_, _) => "Instructions for the new run",
-            Self::TaskStart => "Task title on the first line, then the brief",
-            Self::TaskWrite(_) => "Instruction for the task",
-            Self::TaskRetry(_, _) => "Brief for the new task run",
+            Self::Privacy => tr!("Dedicated work folder"),
+            Self::Review(_, _) => tr!("Proposed note"),
+            Self::RequestRerun(_, _) => tr!("Instructions for the new run"),
+            Self::TaskStart => tr!("Task title on the first line, then the brief"),
+            Self::TaskWrite(_) => tr!("Instruction for the task"),
+            Self::TaskRetry(_, _) => tr!("Brief for the new task run"),
         }
     }
 }
@@ -396,7 +397,8 @@ impl Threadbear {
                             }
                         }
                         Err(_) => {
-                            this.bots.error = Some("Could not read this Bot’s settings.".into())
+                            this.bots.error =
+                                Some(tr!("Could not read this Bot’s settings.").into())
                         }
                     },
                     Err(error) => this.bots.error = Some(error.message),
@@ -637,11 +639,11 @@ impl Threadbear {
             div()
                 .text_size(px(17.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .child("Bots"),
+                .child(tr!("Bots")),
         );
         if self.bots.available {
             list = list.child(
-                bot_button("new-bot", "New Bot", disabled)
+                bot_button("new-bot", tr!("New Bot"), disabled)
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.edit_bot(Edit::New, String::new(), window, cx);
@@ -685,13 +687,13 @@ impl Threadbear {
             page = page.child(
                 div()
                     .text_color(style::secondary_text(cx))
-                    .child("Waiting for the Runner…"),
+                    .child(tr!("Waiting for the Runner…")),
             );
         }
         if !self.bots.available {
             return page
                 .child(self.bots.reason.clone().unwrap_or_else(|| {
-                    "Checking whether Bots are available on this Runner…".into()
+                    tr!("Checking whether Bots are available on this Runner…").into()
                 }))
                 .into_any_element();
         }
@@ -703,9 +705,9 @@ impl Threadbear {
         }
         let Some(detail) = &self.bots.detail else {
             let prompt = if self.bots.list.is_empty() {
-                "Create a Bot to give your conversations shared settings and notes."
+                tr!("Create a Bot to give your conversations shared settings and notes.")
             } else {
-                "Select a Bot to open its conversations, memory and settings."
+                tr!("Select a Bot to open its conversations, memory and settings.")
             };
             return page.child(prompt).into_any_element();
         };
@@ -720,7 +722,7 @@ impl Threadbear {
                 page.child(
                     div()
                         .text_color(style::secondary_text(cx))
-                        .child("Archived"),
+                        .child(tr!("Archived")),
                 )
             })
             .child(self.render_bot_tabs(&detail.capabilities, cx));
@@ -746,11 +748,11 @@ impl Threadbear {
             .children(
                 [
                     (Tab::Conversations, "bot-tab-conversations", "Conversations"),
-                    (Tab::Memory, "bot-tab-memory", "Memory"),
-                    (Tab::Reviews, "bot-tab-reviews", "Memory review"),
-                    (Tab::Requests, "bot-tab-requests", "Requests"),
-                    (Tab::Tasks, "bot-tab-tasks", "Background tasks"),
-                    (Tab::Settings, "bot-tab-settings", "Settings"),
+                    (Tab::Memory, "bot-tab-memory", tr!("Memory")),
+                    (Tab::Reviews, "bot-tab-reviews", tr!("Memory review")),
+                    (Tab::Requests, "bot-tab-requests", tr!("Requests")),
+                    (Tab::Tasks, "bot-tab-tasks", tr!("Background tasks")),
+                    (Tab::Settings, "bot-tab-settings", tr!("Settings")),
                 ]
                 .into_iter()
                 .filter(|(tab, _, _)| match tab {
@@ -991,7 +993,7 @@ impl Threadbear {
                             ),
                     )
                     .child(
-                        bot_button("bot-editor-cancel", "Cancel", busy).on_click(cx.listener(
+                        bot_button("bot-editor-cancel", tr!("Cancel"), busy).on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.bots.editor = None;
                                 this.bots.error = None;
@@ -1008,11 +1010,15 @@ impl Threadbear {
         let mut list = v_flex().gap(px(10.)).max_w(px(640.));
         if detail.bot.archived_at.is_none() {
             list = list.child(
-                bot_button("bot-new-conversation", "New conversation", self.bots.busy)
-                    .primary()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.new_bot_conversation(bot_id.clone(), window, cx)
-                    })),
+                bot_button(
+                    "bot-new-conversation",
+                    tr!("New conversation"),
+                    self.bots.busy,
+                )
+                .primary()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.new_bot_conversation(bot_id.clone(), window, cx)
+                })),
             );
         }
         for (index, row) in detail.conversations.iter().enumerate().rev() {
@@ -1038,7 +1044,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-notes-from-{source}")),
-                            "Notes",
+                            tr!("Notes"),
                             missing || self.bots.busy,
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1084,7 +1090,7 @@ impl Threadbear {
                     .gap(px(4.))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
                     .child(div().child(if text.is_empty() {
-                        "None".into()
+                        tr!("None").into()
                     } else {
                         text.clone()
                     }))
@@ -1099,9 +1105,9 @@ impl Threadbear {
         section = section.child(self.render_bot_model(bot, disabled, cx));
         if let Some(privacy) = &bot.privacy {
             let title = if privacy.moving.is_some() {
-                "Moving to a private work folder"
+                tr!("Moving to a private work folder")
             } else {
-                "Private work folder"
+                tr!("Private work folder")
             };
             section = section.child(
                 v_flex()
@@ -1112,25 +1118,29 @@ impl Threadbear {
             if privacy.moving.is_some() {
                 let retry = json!({ "botId": bot.id, "expectedRevision": bot.revision, "folder": privacy.folder, "operationId": privacy.operation_id });
                 section = section.child(
-                    bot_button("bot-retry-privacy", "Retry making private", self.bots.busy)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.bot_write(
-                                "bots.settings.privacy",
-                                retry.clone(),
-                                After::Profile,
-                                window,
-                                cx,
-                            )
-                        })),
+                    bot_button(
+                        "bot-retry-privacy",
+                        tr!("Retry making private"),
+                        self.bots.busy,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.bot_write(
+                            "bots.settings.privacy",
+                            retry.clone(),
+                            After::Profile,
+                            window,
+                            cx,
+                        )
+                    })),
                 );
             }
         } else if detail.capabilities.privacy {
             if !detail.conversations.is_empty() {
                 section = section.child(div().text_color(style::secondary_text(cx))
-                    .child("Stop the Bot’s conversations first. Making them private withdraws their copies from sync."));
+                    .child(tr!("Stop the Bot’s conversations first. Making them private withdraws their copies from sync.")));
             }
             section = section.child(
-                bot_button("bot-make-private", "Set private work folder", disabled).on_click(
+                bot_button("bot-make-private", tr!("Set private work folder"), disabled).on_click(
                     cx.listener(|this, _, window, cx| {
                         this.edit_bot(Edit::Privacy, String::new(), window, cx)
                     }),
@@ -1139,17 +1149,19 @@ impl Threadbear {
         }
         let (id, revision) = (bot.id.clone(), bot.revision);
         if bot.archived_at.is_none() {
-            section = section.child(bot_button("bot-archive", "Archive Bot", disabled).on_click(
-                cx.listener(move |this, _, window, cx| {
-                    this.bot_write(
-                        "bots.archive",
-                        json!({ "botId": id, "expectedRevision": revision }),
-                        After::Profile,
-                        window,
-                        cx,
-                    );
-                }),
-            ));
+            section = section.child(
+                bot_button("bot-archive", tr!("Archive Bot"), disabled).on_click(cx.listener(
+                    move |this, _, window, cx| {
+                        this.bot_write(
+                            "bots.archive",
+                            json!({ "botId": id, "expectedRevision": revision }),
+                            After::Profile,
+                            window,
+                            cx,
+                        );
+                    },
+                )),
+            );
         }
         section.into_any_element()
     }
@@ -1161,7 +1173,7 @@ impl Threadbear {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = bot.model_binding.as_ref().map_or_else(
-            || "Runner defaults".to_owned(),
+            || tr!("Runner defaults").to_owned(),
             |binding| {
                 let title = self
                     .logins
@@ -1177,7 +1189,7 @@ impl Threadbear {
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Model for new conversations"),
+                    .child(tr!("Model for new conversations")),
             )
             .child(div().child(label));
         if let Some(source) = self
@@ -1191,7 +1203,7 @@ impl Threadbear {
             section = section.child(
                 bot_button(
                     "bot-use-conversation-model",
-                    "Use this conversation’s model",
+                    tr!("Use this conversation’s model"),
                     disabled,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -1209,7 +1221,7 @@ impl Threadbear {
             let params =
                 json!({ "botId": bot.id, "expectedRevision": bot.revision, "threadId": null });
             section = section.child(
-                bot_button("bot-reset-model", "Use Runner defaults", disabled).on_click(
+                bot_button("bot-reset-model", tr!("Use Runner defaults"), disabled).on_click(
                     cx.listener(move |this, _, window, cx| {
                         this.bot_write(
                             "bots.settings.conversationModel",
@@ -1243,7 +1255,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             "bot-memory-personal",
-                            "Conversation notes",
+                            tr!("Conversation notes"),
                             self.bots.busy || self.bots.source.is_none(),
                         )
                         .when(scope.is_none(), |button| button.primary())
@@ -1298,13 +1310,13 @@ impl Threadbear {
             )
         } else {
             return section
-                .child("Start a conversation to file notes from it.")
+                .child(tr!("Start a conversation to file notes from it."))
                 .into_any_element();
         };
         section = section
             .child(div().text_color(style::secondary_text(cx)).child(caption))
             .child(
-                bot_button("bot-add-note", "Add note", disabled)
+                bot_button("bot-add-note", tr!("Add note"), disabled)
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.edit_bot(Edit::Note(None), String::new(), window, cx)
@@ -1314,8 +1326,8 @@ impl Threadbear {
             let mut tidy = target.clone();
             tidy["botId"] = json!(detail.bot.id);
             section = section.child(
-                bot_button("bot-tidy-scope", "Tidy this memory", disabled).on_click(cx.listener(
-                    move |this, _, window, cx| {
+                bot_button("bot-tidy-scope", tr!("Tidy this memory"), disabled).on_click(
+                    cx.listener(move |this, _, window, cx| {
                         this.bot_write(
                             "bots.memory.scope.tidy",
                             tidy.clone(),
@@ -1323,12 +1335,12 @@ impl Threadbear {
                             window,
                             cx,
                         )
-                    },
-                )),
+                    }),
+                ),
             );
         }
         if self.bots.notes.is_empty() && !self.bots.busy {
-            section = section.child(div().child("No saved notes."));
+            section = section.child(div().child(tr!("No saved notes.")));
         }
         for note in &self.bots.notes {
             section = section.child(self.render_bot_note(note, &target, disabled, cx));
@@ -1351,9 +1363,9 @@ impl Threadbear {
             bot_button(
                 "bot-review-toggle",
                 if enabled {
-                    "Turn off automatic review"
+                    tr!("Turn off automatic review")
                 } else {
-                    "Turn on automatic review"
+                    tr!("Turn on automatic review")
                 },
                 disabled || (!enabled && no_model),
             )
@@ -1373,9 +1385,9 @@ impl Threadbear {
             bot_button(
                 "bot-tidy-toggle",
                 if tidy {
-                    "Turn off automatic tidy"
+                    tr!("Turn off automatic tidy")
                 } else {
-                    "Turn on automatic tidy"
+                    tr!("Turn on automatic tidy")
                 },
                 disabled || (!tidy && no_model),
             )
@@ -1391,14 +1403,14 @@ impl Threadbear {
         );
         if let Some(reason) = self.bots.review_unavailable.clone().or_else(|| {
             bot.model_binding.is_none().then(|| {
-                "Choose a conversation’s login and model in Bot settings first.".to_owned()
+                tr!("Choose a conversation’s login and model in Bot settings first.").to_owned()
             })
         }) {
             section = section.child(div().text_color(style::secondary_text(cx)).child(reason));
         }
         if detail.conversations.is_empty() {
             return section
-                .child("Start a conversation to see its memory reviews.")
+                .child(tr!("Start a conversation to see its memory reviews."))
                 .into_any_element();
         }
         section = section.child(h_flex().flex_wrap().gap(px(6.)).children(
@@ -1419,11 +1431,15 @@ impl Threadbear {
             }),
         ));
         section = section.child(
-            bot_button("bot-refresh-reviews", "Refresh reviews", self.bots.busy)
-                .on_click(cx.listener(|this, _, _, cx| this.load_bot_reviews(cx))),
+            bot_button(
+                "bot-refresh-reviews",
+                tr!("Refresh reviews"),
+                self.bots.busy,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.load_bot_reviews(cx))),
         );
         if self.bots.reports.is_empty() && !self.bots.busy {
-            section = section.child("No memory reviews yet.");
+            section = section.child(tr!("No memory reviews yet."));
         }
         section
             .children(
@@ -1469,7 +1485,7 @@ impl Threadbear {
             }
         }
         if report.diagnostic.is_some() {
-            row = row.child("The model reply could not be read.");
+            row = row.child(tr!("The model reply could not be read."));
         }
         if report.rejected > 0 {
             row = row.child(format!(
@@ -1481,7 +1497,7 @@ impl Threadbear {
         row = row.child(
             bot_button(
                 SharedString::from(format!("bot-review-retry-{}", report.id)),
-                "Review these messages again",
+                tr!("Review these messages again"),
                 disabled || self.bots.review_unavailable.is_some(),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -1496,8 +1512,8 @@ impl Threadbear {
         );
         for (index, change) in report.changes.iter().enumerate() {
             let action = match change.op.as_str() {
-                "add" => "Add",
-                "remove" => "Remove",
+                "add" => tr!("Add"),
+                "remove" => tr!("Remove"),
                 _ => "Edit",
             };
             let proposal = change
@@ -1534,7 +1550,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-review-approve-{}-{index}", report.id)),
-                            "Accept",
+                            tr!("Accept"),
                             disabled,
                         )
                         .on_click(cx.listener(
@@ -1552,7 +1568,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-review-reject-{}-{index}", report.id)),
-                            "Reject",
+                            tr!("Reject"),
                             disabled,
                         )
                         .on_click(cx.listener(
@@ -1571,7 +1587,7 @@ impl Threadbear {
                     buttons = buttons.child(
                         bot_button(
                             SharedString::from(format!("bot-review-edit-{}-{index}", report.id)),
-                            "Edit and accept",
+                            tr!("Edit and accept"),
                             disabled,
                         )
                         .on_click(cx.listener(
@@ -1657,7 +1673,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-remove-note-{note_id}")),
-                            "Remove",
+                            tr!("Remove"),
                             disabled,
                         )
                         .on_click(cx.listener(
@@ -1676,15 +1692,16 @@ impl Threadbear {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut history = v_flex()
-            .mt(px(8.))
-            .gap(px(8.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("History"));
+        let mut history = v_flex().mt(px(8.)).gap(px(8.)).child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(tr!("History")),
+        );
         if self.bots.changes.is_empty() && !self.bots.busy {
             history = history.child(
                 div()
                     .text_color(style::secondary_text(cx))
-                    .child("No changes yet."),
+                    .child(tr!("No changes yet.")),
             );
         }
         for change in &self.bots.changes {
@@ -1731,7 +1748,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-restore-{}", change.id)),
-                            "Undo change",
+                            tr!("Undo change"),
                             disabled || restored,
                         )
                         .on_click(cx.listener(
@@ -1744,8 +1761,12 @@ impl Threadbear {
         }
         if self.bots.more.is_some() {
             history = history.child(
-                bot_button("bot-more-history", "Load older changes", self.bots.busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.load_bot_memory(true, cx))),
+                bot_button(
+                    "bot-more-history",
+                    tr!("Load older changes"),
+                    self.bots.busy,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.load_bot_memory(true, cx))),
             );
         }
         history.into_any_element()
@@ -1772,9 +1793,9 @@ impl Threadbear {
             .map_or("Bot", |bot| bot.name.as_str())
             .to_owned();
         let tip = if task {
-            "Show this Bot’s background tasks"
+            tr!("Show this Bot’s background tasks")
         } else {
-            "Show the Bot’s notes and settings"
+            tr!("Show the Bot’s notes and settings")
         };
         let chip = div()
             .id("thread-bot-chip")
@@ -2060,7 +2081,7 @@ impl Threadbear {
         match after {
             After::Profile => {
                 let Ok(profile) = serde_json::from_value::<Profile>(value["bot"].clone()) else {
-                    self.bots.error = Some("The Runner did not return the saved Bot.".into());
+                    self.bots.error = Some(tr!("The Runner did not return the saved Bot.").into());
                     return;
                 };
                 self.bots.editor = None;
@@ -2077,7 +2098,7 @@ impl Threadbear {
                 let Ok(thread) = serde_json::from_value::<ThreadSummary>(value["thread"].clone())
                 else {
                     self.bots.error =
-                        Some("The Runner did not return the new conversation.".into());
+                        Some(tr!("The Runner did not return the new conversation.").into());
                     return;
                 };
                 self.bots.pending_conversation = None;

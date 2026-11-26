@@ -16,6 +16,7 @@ use threadbear_core::logins::RunnerLogins;
 use threadbear_core::runner_settings::{
     default_small_job_providers, provider_dropped, small_job_providers_change, RunnerSettings,
 };
+use threadbear_core::tr;
 
 #[derive(Clone)]
 struct DraggedSmallJobProvider {
@@ -168,7 +169,7 @@ impl SettingsWindow {
             rows.push(row_with(
                 div()
                     .text_color(style::tertiary_label(cx))
-                    .child("No providers — add one or reset to default")
+                    .child(tr!("No providers — add one or reset to default"))
                     .into_any_element(),
                 div().into_any_element(),
                 cx,
@@ -190,9 +191,9 @@ impl SettingsWindow {
                 .collect();
             let add = self.menu_owned(
                 "settings-small-jobs-provider-add".into(),
-                "Add Provider".into(),
+                tr!("Add Provider").into(),
                 None,
-                "Add a provider to the end of the small-job fallback list".into(),
+                tr!("Add a provider to the end of the small-job fallback list").into(),
                 choices,
                 cx,
             );
@@ -203,8 +204,8 @@ impl SettingsWindow {
             has_footer = true;
             self.button(
                 "settings-small-jobs-provider-reset",
-                "Reset",
-                "Go back to the automatic order for this pool (Claude, then Codex, then the rest)",
+                tr!("Reset"),
+                tr!("Go back to the automatic order for this pool (Claude, then Codex, then the rest)"),
                 cx,
                 |this, _, cx| this.update(small_job_providers_change(None), cx),
             )
@@ -225,9 +226,9 @@ impl SettingsWindow {
                 .unwrap_or_else(|| "one provider".into());
             format!("Only {only} logins are in this pool. Pick a pool with other providers to fall back to them.")
         } else if custom {
-            "Tried from top to bottom inside this pool. Drag to change the order.".into()
+            tr!("Tried from top to bottom inside this pool. Drag to change the order.").into()
         } else {
-            "Tried from top to bottom inside this pool (Claude, then Codex, then the rest). Drag to change the order.".into()
+            tr!("Tried from top to bottom inside this pool (Claude, then Codex, then the rest). Drag to change the order.").into()
         };
 
         Some(
@@ -243,7 +244,7 @@ impl SettingsWindow {
                                 .text_size(px(13.))
                                 .line_height(px(16.))
                                 .font_weight(FontWeight::MEDIUM)
-                                .child("Provider order"),
+                                .child(tr!("Provider order")),
                         )
                         .child(
                             div()
@@ -291,7 +292,7 @@ impl SettingsWindow {
                         .items_center()
                         .justify_center()
                         .cursor_grab(),
-                    "Drag to change the order",
+                    tr!("Drag to change the order"),
                     gpui_kit::Role::GenericContainer,
                 )
                 .child(
@@ -325,7 +326,7 @@ impl SettingsWindow {
                         .whitespace_nowrap(),
                     format!("This pool has no {name} login, so it's passed over"),
                 )
-                .child("Not in pool"),
+                .child(tr!("Not in pool")),
             );
         }
 

@@ -13,6 +13,7 @@ use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // Shadows gpui's px, so sizes here follow the app's zoom (style.rs).
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -575,12 +576,12 @@ impl Composer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if view.loading {
-            return palette_placeholder("Getting this thread's commands…".to_owned(), cx)
+            return palette_placeholder(tr!("Getting this thread's commands…").to_owned(), cx)
                 .into_any_element();
         }
         if matches.is_empty() {
             let note = if view.query.is_empty() {
-                "Nothing here yet.".to_owned()
+                tr!("Nothing here yet.").to_owned()
             } else {
                 format!(
                     "No command matches /{}. Send it and it goes to the agent as words.",
@@ -760,7 +761,7 @@ impl Composer {
         let mut row = h_flex().flex_none().gap(px(8.)).px(px(16.)).py(px(12.));
         if view.mid_message {
             row = row.child(palette_button(
-                "Insert",
+                tr!("Insert"),
                 format!(
                     "Put /{} in the message, for the agent to run (Return or Tab)",
                     command.name
@@ -773,7 +774,7 @@ impl Composer {
         } else {
             row = row
                 .child(palette_button(
-                    "Run",
+                    tr!("Run"),
                     format!("Send /{} now (Return)", command.name),
                     cx,
                     cx.listener(move |this, _: &ClickEvent, window, cx| {
@@ -781,7 +782,7 @@ impl Composer {
                     }),
                 ))
                 .child(palette_button(
-                    "Add details",
+                    tr!("Add details"),
                     format!(
                         "Put /{} in the box to type more after it (Tab)",
                         command.name
@@ -798,7 +799,7 @@ impl Composer {
                 slash::short_path(&path, &view.home)
             );
             row = row.child(palette_button(
-                "Open file",
+                tr!("Open file"),
                 tip,
                 cx,
                 cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -848,10 +849,10 @@ impl Composer {
             .map(|(c, n)| json!({ "title": view.category_title(c), "count": n }))
             .collect();
         let note = if view.loading {
-            Some("Getting this thread's commands…".to_owned())
+            Some(tr!("Getting this thread's commands…").to_owned())
         } else if matches.is_empty() {
             Some(if query.is_empty() {
-                "Nothing here yet.".to_owned()
+                tr!("Nothing here yet.").to_owned()
             } else {
                 format!("No command matches /{query}. Send it and it goes to the agent as words.")
             })
@@ -859,15 +860,15 @@ impl Composer {
             None
         };
         let detail = picked.as_ref().map(|c| {
-            let mut buttons = if view.mid_message { vec!["Insert"] } else { vec!["Run", "Add details"] };
+            let mut buttons = if view.mid_message { vec![tr!("Insert")] } else { vec![tr!("Run"), tr!("Add details")] };
             if c.path.is_some() && view.can_open_files {
-                buttons.push("Open file");
+                buttons.push(tr!("Open file"));
             }
             json!({
                 "title": format!("/{}", c.name),
                 "usage": c.usage(),
                 "description": c.description.clone().filter(|d| !d.is_empty()),
-                "now": view.current.get(&c.name),
+                tr!("now"): view.current.get(&c.name),
                 "also": c.aliases.as_ref().filter(|a| !a.is_empty()).map(|a| format!("Also {}", a.iter().map(|x| format!("/{x}")).collect::<Vec<_>>().join(", "))),
                 "origin": slash::origin_named(c, &view.cli_name),
                 "path": c.path.as_ref().map(|p| slash::short_path(p, &view.home)),

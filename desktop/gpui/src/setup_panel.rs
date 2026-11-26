@@ -16,6 +16,7 @@ use gpui_kit::*;
 use serde_json::{json, Value};
 use threadbear_core::devices::{self as devices_rules, DeviceList};
 use threadbear_core::tour::{SetupChecklist, SetupItem};
+use threadbear_core::tr;
 
 /// What the checklist needs to know that the app doesn't keep anyway: the
 /// paired devices and whether the backend is on this Mac only, from
@@ -171,7 +172,7 @@ impl Threadbear {
                             .text_size(px(style::size::CARD_TITLE))
                             .font_semibold()
                             .text_color(fg)
-                            .child("All set."),
+                            .child(tr!("All set.")),
                     )
                     .into_any_element(),
             );
@@ -187,7 +188,7 @@ impl Threadbear {
                     .cursor_pointer()
                     .text_size(px(style::size::DETAIL))
                     .text_color(secondary)
-                    .child("Hide this list")
+                    .child(tr!("Hide this list"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.settings.saved.setup_hidden = Some(true);
                         this.save_settings_soon(cx);
@@ -230,14 +231,14 @@ impl Threadbear {
                 secondary,
             ));
             let action: Option<AnyElement> = match item {
-                SetupItem::FirstThread if !no_login => Some(PushButton::new("setup-new-thread", "New thread", "A new thread, in your threads folder unless you pick another").render(cx, {
+                SetupItem::FirstThread if !no_login => Some(PushButton::new("setup-new-thread", tr!("New thread"), tr!("A new thread, in your threads folder unless you pick another")).render(cx, {
                     let app = cx.entity().downgrade();
                     move |_, _, cx| {
                         app.update(cx, |this, cx| this.new_thread(cx)).ok();
                     }
                 })),
                 SetupItem::FirstThread => None,
-                SetupItem::Phone => Some(PushButton::new("setup-phone", "Open Phone & browser", "Settings › Phone & browser, where Show the code… gives the iPhone app a code to scan").render(cx, {
+                SetupItem::Phone => Some(PushButton::new("setup-phone", tr!("Open Phone & browser"), "Settings › Phone & browser, where Show the code… gives the iPhone app a code to scan").render(cx, {
                     let app = cx.entity().downgrade();
                     move |_, _, cx| {
                         app.update(cx, |this, cx| this.open_settings(Some(crate::settings_window::Tab::Devices), cx)).ok();
@@ -246,7 +247,7 @@ impl Threadbear {
                 SetupItem::Website => {
                     let browser = crate::open_gate::default_browser().map(|b| devices_rules::browser_name(&b));
                     let tip = format!("Opens your Threadbear website in {}, signed in for 90 days", browser.as_deref().unwrap_or("your browser"));
-                    Some(PushButton::new("setup-website", "Open signed in", tip).busy(self.setup.opening).render(cx, {
+                    Some(PushButton::new("setup-website", tr!("Open signed in"), tip).busy(self.setup.opening).render(cx, {
                         let app = cx.entity().downgrade();
                         move |_, _, cx| {
                             app.update(cx, |this, cx| this.setup_open_website(cx)).ok();
