@@ -135,7 +135,9 @@
       "sha256": "10d2b0458317db525dabe036eb4ea54624f4622277144b77678f7a1107893a1a",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-review.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/review-lines.js",
+      "changes": "Keep the original role formatting and clipping. Count separators in the length budget. Use ThreadStore, the Runner clock and authenticated source events in runner/src/bots/memory-review.ts and review-events.ts."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory-copy.js",
@@ -143,7 +145,9 @@
       "sha256": "dc319d454d31386d764e118987151dd44eeb7ba8a4069019cb27a0c5f7b80bf1",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-copy.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/memory-copy.js",
+      "changes": "Copy the prompt family, name Threadbear as the host and recognize Japanese."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory-tidy.js",
@@ -151,7 +155,9 @@
       "sha256": "6b21c378d0ed1fa1f6e08707f0a69aca3e68ab932851987b22e21fd708c388ea",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-tidy.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/tidy-draft.js",
+      "changes": "Keep the original bounded merge, archive and pin rules. Build a draft against current entry lines for later review."
     },
     {
       "upstreamPath": "ds-bot/src/host/privacy.js",
@@ -159,7 +165,9 @@
       "sha256": "2f883e61b9f432e84b1e8866c673b781461d3c6f9a3dcdf31f05019b132ea862",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/privacy.js",
       "phase": 2,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/privacy-folders.ts",
+      "changes": "Port path spelling, containment and alias checks. Reject a dangling alias and compare real ancestors of prospective folders."
     },
     {
       "upstreamPath": "ds-bot/src/host/permissions.js",

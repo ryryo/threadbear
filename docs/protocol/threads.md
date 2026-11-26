@@ -43,6 +43,30 @@ When given a linked conversation, its login, model and effort
 become the Bot's defaults for new conversations. A null `threadId` restores
 the Runner defaults. Existing conversations retain their own settings.
 
+### Bot memory review and visibility
+
+The Runner identifies the author of a review input from the persisted
+`botInput.source`, matched to the conversation. Only a new authenticated owner
+message can start an automatic review. The review can include the Bot's reply
+for context. It ignores quoted text, fenced blocks and tool events. The review
+records the source conversation and event sequence range with its result. The
+owner must enable automatic review for each Bot, and reviews use that Bot's
+selected model and account. An unsupported binding leaves review unavailable.
+
+Memory access uses the actor established by the Runner and current scope
+membership. A Bot's own scope, a team, a group and a project are distinct
+scopes. A shared Bot's notes require an explicit same-team read or grant.
+Project access requires both the active conversation's project and a grant.
+Group access requires current membership and must be in the group's context.
+
+Private conversations and their notes are owner-local. Thread RPC and agent
+tools enforce visibility at each read, including filtered lists and searches,
+and before replaying or sending another live event to a subscriber. The same
+restriction holds for archived Bot data. A private conversation must stay out
+of the synchronization projection and notifications. Thread keys cannot
+change those rules. Private protects these Runner interfaces. It does not
+provide filesystem isolation from another process using the same OS account.
+
 ## Pictures in a message
 
 A message's words can say where its pictures go. `[Picture N]` in the
