@@ -181,12 +181,14 @@ fn reading_an_impostors_icon_does_not_register_it() {
 fn only_googles_chrome_passes_the_chrome_check() {
     let app = bundle("chrome", "Multi", true);
     assert!(super::signed_as(&app.0.to_string_lossy(), super::GOOGLE_CHROME).is_err());
-    assert!(super::start_chrome_profile(
-        &app.0.to_string_lossy(),
-        "https://example.com",
-        "Default"
-    )
-    .is_err());
+    for profile in [None, Some("Default")] {
+        assert!(super::start_chrome_profile(
+            &app.0.to_string_lossy(),
+            "https://example.com",
+            profile,
+        )
+        .is_err());
+    }
     // Apple's own app, where apps are installed, passes; a link to it from
     // a temp folder is followed to it. Anywhere else isn't started however
     // it's signed: a copy in a folder something else writes could be
