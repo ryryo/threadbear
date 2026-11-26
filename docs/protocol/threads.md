@@ -2,6 +2,16 @@
 
 Part of the runner protocol. [docs/protocol.md](../protocol.md) has the rules for all of it and which file each section is in.
 
+Bot conversations keep an internal `botLink` on the persisted Thread record
+with `botId` and `conversationId`. The Bot workspace reserves the conversation
+and Thread IDs before saving the Thread. A retry confirms that same link if the
+Thread was already saved. The Thread owns its native CLI session ID and events.
+`threads.create` does not accept a Bot link from a client.
+Fresh sessions receive the Bot settings and current notes with their startup
+instructions. A live or resumed session receives changes before the next normal
+message. The Runner tracks the context it sent and retries it if sending fails
+or the turn fails to complete.
+
 ## Pictures in a message
 
 A message's words can say where its pictures go. `[Picture N]` in the

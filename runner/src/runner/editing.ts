@@ -103,6 +103,7 @@ export const editingPart = {
       delete rec.contextUsage;
       // The cut may undo what the session was told about them (Codex review).
       if (!cut.fresh && rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+      delete rec.botContextTold;
       // And what it was told of reply button presses (Codex review).
       this.retellPressesFrom(rec, seq, Boolean(cut.fresh));
       (rec.rewinds ??= []).push({ from: seq, to: toSeq });

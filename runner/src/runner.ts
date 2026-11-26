@@ -447,6 +447,7 @@ export type Runtime = {
   retriedFresh: boolean;
   // News of the standing instructions went out in this turn (settleInstructionsNews).
   instructionsNewsSent?: boolean;
+  botContextNewsSent?: boolean;
   // Where the live session's transcript was carried from, if it moved
   // folder; used only if resuming the copy fails.
   carried?: ThreadRecord['handoff'];
@@ -684,6 +685,7 @@ export type RunnerDeps = {
   projects?: Projects;
   /** Mike's standing instructions for every session (instructions.ts); '' for none. */
   standingInstructions?: () => string;
+  botContext?: (rec: ThreadRecord) => string;
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
@@ -791,6 +793,7 @@ export class Runner {
   models?: Pick<Models, 'generate'>;
   projects?: Projects;
   standingInstructions?: () => string;
+  private botContext?: (rec: ThreadRecord) => string;
   coordinators?: Coordinators;
   activity = new Set<(a: ThreadActivity) => void>();
   patchCache: PatchCache = new Map();
@@ -920,6 +923,7 @@ export class Runner {
     this.models = deps.models;
     this.projects = deps.projects;
     this.standingInstructions = deps.standingInstructions;
+    this.botContext = deps.botContext;
     this.appRestartAsked = deps.appRestartAsked;
     this.awaitingAppRestart = deps.awaitingAppRestart;
     this.appRestartWant = deps.appRestartWant;
@@ -1406,6 +1410,7 @@ export class Runner {
     // thread.json being saved; then it only needs its status back.
     const ended = midTurn && rec.turnId ? this.findTurnCompleted(rec.id, rec.turnId) : undefined;
     // Only a turn that completed kept what it was told (Codex's second look).
+    if (midTurn && ended?.outcome !== 'completed') delete rec.botContextTold;
     if (midTurn && ended?.type === 'turn.completed' && ended.outcome === 'completed' && rec.wakeNews?.check && rec.wakeNews.check === rec.turnId) delete rec.wakeNews;
     if (midTurn) this.settlePresses(rec, ended?.type === 'turn.completed' && ended.outcome === 'completed');
     // thread.json can be behind the log (a crash before it was saved): a card
@@ -2110,6 +2115,7 @@ export class Runner {
 
   sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
+    if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
     // Written with less access than it has now: Mike's to read, not its
     // agent's (runner/ceiling.ts). Checked again as it leaves the queue.
     if (!this.underCeiling(st, opts.ceiling)) {
@@ -2596,6 +2602,7 @@ export class Runner {
       // The same CLI goes on with the system prompt it started with, and
       // whatever a message told it has gone (Codex review).
       if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+      delete rec.botContextTold;
     }
     while (rt.preparing) await rt.preparing;
     if (gone()) return;
@@ -3913,6 +3920,7 @@ export class Runner {
           rec.sessionUsed = true;
           // The old session goes on, not the fresh one the brief was for.
           if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+          delete rec.botContextTold;
         } else {
           rec.sessionUsed = false;
           rec.nativeSessionId = crypto.randomUUID();
@@ -5284,6 +5292,7 @@ export class Runner {
   // fresh session: Claude Code keeps a resumed session's system prompt and
   // ignores an appended one, so a resume hears through projectNews.
   briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
+    if (rec.botLink && !this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
     if (resume) return {};
     const parts: string[] = [];
     // Mike's own standing instructions first: they're for everything.
@@ -5295,6 +5304,11 @@ export class Runner {
       // Not forgotten: a session id already in use goes back to the session
       // that held them (below, inUse). With none ever, nothing's written.
       rec.instructionsTold = INSTRUCTIONS_CLEARED;
+    }
+    if (rec.botLink) {
+      const bot = this.botContext!(rec);
+      rec.botContextTold = instructionsHash(bot);
+      parts.push(bot);
     }
     if (this.projects) {
       rec.projectsTold = this.projects.briefIds(rec);
@@ -5479,6 +5493,13 @@ export class Runner {
   // reaches every thread, so it shouldn't only be something agents can see.
   sendWithInstructionsNews(st: ThreadState, message: UserInput): void {
     const { rec, rt } = st;
+    let botNews: { hash: string; text: string } | undefined;
+    if (rec.botLink) {
+      if (!this.botContext) throw new Error('Bot conversations are unavailable on this Runner');
+      const text = this.botContext(rec);
+      const hash = instructionsHash(text);
+      if (hash !== rec.botContextTold) botNews = { hash, text: `Note from Threadbear: use this current Bot configuration and notes in place of earlier Bot context.\n\n${text}` };
+    }
     const before = rec.instructionsTold;
     const standing = this.instructionsNews(rec);
     const presses = structuredClone(rec.presses);
@@ -5497,7 +5518,7 @@ export class Runner {
       ? `[Threadbear note: your previous turn left these carry-on items for the user (${prevNext.nextPick === 'one' ? 'pick one' : 'pick any'}): ${prevNext.next!.map((s, i) => `${i + 1}. "${s}"${prevNext.nextPick === 'one' && prevNext.nextSuggested === i ? ' (recommended)' : ''}`).join('; ')}. If you end with needs "nothing" and omit next, Threadbear will keep them; pass next: [...] to replace them or next: [] to clear them.]`
       : '';
     if (nextNote && rt.turn) rt.turn.nextReminded = true;
-    const lead = [standing, this.coordinators?.context(rec.id), woke, pressed, nextNote].filter(Boolean).join('\n\n');
+    const lead = [standing, botNews?.text, this.coordinators?.context(rec.id), woke, pressed, nextNote].filter(Boolean).join('\n\n');
     try {
       rt.session!.send(lead ? { ...message, text: `${lead}\n\n${message.text}` } : message);
     } catch (e) {
@@ -5507,6 +5528,10 @@ export class Runner {
       if (wokeBefore) rec.wakeNews = wokeBefore;
       if (nextNote && rt.turn) delete rt.turn.nextReminded;
       throw e;
+    }
+    if (botNews) {
+      rec.botContextTold = botNews.hash;
+      rt.botContextNewsSent = true;
     }
     if (!standing) return;
     // A turn that ends any other way may have dropped it (a message Codex was
@@ -5544,6 +5569,8 @@ export class Runner {
     this.settlePresses(rec, completed);
     if (rt.instructionsNewsSent && !completed && rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
     rt.instructionsNewsSent = false;
+    if (rt.botContextNewsSent && !completed) delete rec.botContextTold;
+    rt.botContextNewsSent = false;
   }
 
   // The thread's projects its session hasn't been told about, as lines to

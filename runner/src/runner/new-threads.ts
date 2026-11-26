@@ -22,6 +22,8 @@ import { newRuntime } from './runtime.ts';
 import { providerInfo, providerName } from '../providers.ts';
 import { cutSafely } from '../safe-cut.ts';
 
+type ThreadIdentity = { id: string; sessionId: string; botLink?: ThreadRecord['botLink'] };
+
 export const newThreadsPart = {
   create(this: Runner, params: {
     text: string;
@@ -197,7 +199,7 @@ export const newThreadsPart = {
     detached?: boolean;
     coordinatorHelperFor?: string;
     id?: string;
-  }, ids?: { id: string; sessionId: string }): { st: ThreadState; notes: string[]; loginNote?: string } {
+  }, ids?: ThreadIdentity): { st: ThreadState; notes: string[]; loginNote?: string } {
     this.checkAccepting();
     const { rec, account, poolId, notes, loginNote } = this.draftRecord(params, ids);
     this.store.create(rec);
@@ -233,7 +235,7 @@ export const newThreadsPart = {
     detached?: boolean;
     coordinatorHelperFor?: string;
     id?: string;
-  }, ids?: { id: string; sessionId: string }): { rec: ThreadRecord; account: Account; poolId?: string; notes: string[]; loginNote?: string } {
+  }, ids?: ThreadIdentity): { rec: ThreadRecord; account: Account; poolId?: string; notes: string[]; loginNote?: string } {
     // A box runs one thread (docs/virtual-runners.md, decision 1): only that
     // one, once, under its own id. Anything else asks the main Mac
     // (create_thread from a box files a request, as from any runner key).
@@ -278,6 +280,7 @@ export const newThreadsPart = {
     const id = params.id ?? ids?.id ?? crypto.randomUUID();
     const rec: ThreadRecord = {
       id,
+      ...(ids?.botLink ? { botLink: ids.botLink } : {}),
       title: params.title?.trim() ? cutSafely(params.title.trim(), 200) : titleFrom(params.text),
       titleSet: Boolean(params.title?.trim()),
       cwd,

@@ -153,6 +153,7 @@ export function normaliseRecord(rec: Record<string, unknown>): boolean {
 
 export type ThreadRecord = {
   id: string;
+  botLink?: { botId: string; conversationId: string };
   title: string;
   cwd: string;
   accountId: string;
@@ -382,6 +383,8 @@ export type ThreadRecord = {
   // told, so it hears each change once; 'cleared' or 'rewound' (instructions.ts).
   // Absent while it has never held any.
   instructionsTold?: string;
+  // Bot settings and notes this native session last heard, when linked.
+  botContextTold?: string;
   // Its reply buttons Mike has pressed, for its agent to hear of before his
   // next message (Runner.takePressNews), so it doesn't send the same job
   // again itself. Each keeps its own line, as the button can go (MAX_BUTTONS,
