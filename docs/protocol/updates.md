@@ -4,6 +4,22 @@ Part of the runner protocol. [docs/protocol.md](../protocol.md) has the rules fo
 
 ## Runner updates
 
+Managed releases check `bots-format.json` in the Runner data directory before
+starting or switching releases. When present, it contains the positive integer
+required by that data directory. A release advertises the format it handles in
+`src/bots/format.json`. Zero means the release includes the guard and has yet
+to support a Bot data format. A missing or unreadable release declaration cannot
+satisfy a requirement. An unreadable data requirement stops the managed boot.
+If the selected release cannot handle the required format, startup may select
+`lastGood` only if it handles that format. The same check runs for handover and
+before changing `current`. The Runner also checks after acquiring the data lock
+and before opening persisted threads. An absent data requirement leaves existing
+installations and rollback behavior unchanged.
+
+Bot data can be enabled only after the running supervisor advertises support
+for this guard on a managed install. The capability comes from the running supervisor,
+since a staged `launch.mjs` can still be waiting for the next system restart.
+
 `hello` carries `updates?: RunnerUpdates`, and `runner.updates` sends it
 again whenever it changes, so a client can show that the runner is
 updating itself (docs/dev-tools.md, "The runner updating itself").

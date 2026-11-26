@@ -82,6 +82,7 @@ import { RpcServer } from './rpc.ts';
 import { AppSeen } from './app-seen.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
+import { checkBotDataFormat } from './bots/format.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
@@ -213,6 +214,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   process.on('exit', () => lock.release());
+  checkBotDataFormat(cfg.home);
 
   // Box mode's first step, before anything else talks to the backend: the
   // boot exchange, then the thread's folder (a clone, or its last save).

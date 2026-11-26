@@ -84,6 +84,7 @@ export function readCurrentLink(dir, platform = process.platform) {
 // one: rename is atomic, so `current` always names a whole release. The
 // target is relative so the data dir can move.
 export function pointCurrent(dir, id, platform = process.platform) {
+  if (!releaseCanUseBotData(dir, id)) throw new Error(`Release ${id} does not support the required Bot data format`);
   const link = path.join(dir, 'current');
   const tmp = `${link}.${process.pid}.tmp`;
   fs.rmSync(tmp, { force: true });
@@ -94,6 +95,32 @@ export function pointCurrent(dir, id, platform = process.platform) {
 
 export function releaseExists(dir, id) {
   return typeof id === 'string' && id !== '' && fs.existsSync(path.join(dir, 'releases', id, 'src', 'main.ts'));
+}
+
+// A supervisor is installed independently of releases. Keep the marker check
+// in step with src/bots/format.ts, which runs again under the Runner data lock.
+function requiredBotDataFormat(dir) {
+  const marker = path.join(dir, '..', 'bots-format.json');
+  let required;
+  try {
+    if (!fs.lstatSync(marker).isFile()) throw new Error('The Bot data format marker must be a regular file');
+    required = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error('Could not read the required Bot data format', { cause: error });
+  }
+  if (!Number.isSafeInteger(required) || required < 1) throw new Error('Invalid Bot data format requirement');
+  return required;
+}
+
+export function releaseCanUseBotData(dir, id, required = requiredBotDataFormat(dir)) {
+  if (required === null) return true;
+  if (typeof id !== 'string' || !id || /[\\/]/.test(id) || id === '.' || id === '..') return false;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'releases', id, 'src', 'bots', 'format.json'), 'utf8')) === required;
+  } catch {
+    return false;
+  }
 }
 
 // Decides what this boot starts, without touching the disk. `state.current`
@@ -107,7 +134,7 @@ export function releaseExists(dir, id) {
 // `configBroken` (runnerJsonBroken below) holds back the rollback: a runner
 // that won't start on a broken runner.json isn't a broken release, and one
 // from before 9 Nov reads that file as {} and writes over it.
-export function planBoot(state, now, exists, pid = process.pid, configBroken = false) {
+export function planBoot(state, now, exists, pid = process.pid, configBroken = false, compatible = () => true) {
   const at = new Date(now).toISOString();
   const current = state.current;
   const activatedAt = state.activated && state.activated.release === current ? Date.parse(state.activated.at) : NaN;
@@ -116,7 +143,9 @@ export function planBoot(state, now, exists, pid = process.pid, configBroken = f
   // This boot counts: the third start in the window is the one that
   // switches, so a broken release gets two tries.
   const crashLooping = Boolean(current) && current !== state.lastGood && earlier + 1 >= CRASH_BOOTS;
-  const canRollBack = crashLooping && !configBroken && exists(state.lastGood);
+  const incompatible = !compatible(current);
+  const canRollBack = (crashLooping || incompatible) && !configBroken && exists(state.lastGood) && compatible(state.lastGood);
+  if (incompatible && !canRollBack) return { state, start: null, rolledBack: null, stuck: false, heldForConfig: false };
   const start = canRollBack ? state.lastGood : current;
   const next = { ...state, boots: [...state.boots, { release: start, at, pid }].slice(-KEEP_BOOTS) };
   let rolledBack = null;
@@ -364,10 +393,25 @@ async function main() {
       log('ERROR', 'no release to start; build one with scripts/deploy-runner.sh or reinstall with scripts/install-runner.sh', { dir });
       return null;
     }
-    const plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id), 0, runnerJsonBroken(path.dirname(dir)));
+    let plan;
+    let incompatible;
+    try {
+      const required = requiredBotDataFormat(dir);
+      const compatible = (id) => releaseCanUseBotData(dir, id, required);
+      incompatible = !compatible(state.current);
+      plan = planBoot(state, Date.now(), (id) => releaseExists(dir, id), 0, runnerJsonBroken(path.dirname(dir)), compatible);
+    } catch (error) {
+      log('ERROR', 'could not check the required Bot data format', { error: String(error) });
+      return null;
+    }
+    if (!plan.start) {
+      log('ERROR', 'there is no release that can open the required Bot data format', { current: state.current, lastGood: state.lastGood });
+      return null;
+    }
     if (plan.heldForConfig) log('WARN', `release ${plan.start} keeps stopping at startup, but runner.json is broken, so not going back to an older release (it would write over the file); fix runner.json and it starts`);
     if (plan.rolledBack) {
-      log('WARN', `release ${plan.rolledBack.from} failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good; going back to ${plan.start}`);
+      const reason = incompatible ? 'cannot open the required Bot data format' : `failed to start ${CRASH_BOOTS} times in ${CRASH_WINDOW_MS / 60_000} minutes without being marked good`;
+      log('WARN', `release ${plan.rolledBack.from} ${reason}; going back to ${plan.start}`);
       try {
         pointCurrent(dir, plan.start);
       } catch (e) {
@@ -379,6 +423,16 @@ async function main() {
     } else if (plan.stuck) {
       log('WARN', `release ${plan.start} keeps crashing at startup and there's no other good release to go back to`, { lastGood: state.lastGood });
     }
+    // A live runner can protect its data while an update is being planned.
+    try {
+      if (!releaseCanUseBotData(dir, plan.start)) {
+        log('ERROR', 'the required Bot data format changed before startup', { release: plan.start });
+        return null;
+      }
+    } catch (error) {
+      log('ERROR', 'could not check the required Bot data format', { error: String(error) });
+      return null;
+    }
     const root = path.join(dir, 'releases', plan.start);
     // A small young generation: Node's default lets it grow to 16 MB a half,
     // which a mostly idle runner keeps. With 2 MB a fresh runner's footprint
@@ -387,7 +441,7 @@ async function main() {
     // launch: v8.setFlagsFromString can't resize it once the heap exists.
     const proc = spawn(process.execPath, ['--max-semi-space-size=2', path.join(root, 'src', 'main.ts')], {
       cwd: root,
-      env: { ...process.env, THREADBEAR_SUPERVISED: '1' },
+      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1' },
       stdio: ['ignore', 'pipe', logFd === 2 ? 'inherit' : logFd, 'ipc'],
     });
     const boot = plan.state.boots.at(-1);
