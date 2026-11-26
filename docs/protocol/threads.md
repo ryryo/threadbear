@@ -52,6 +52,11 @@ for context. It ignores quoted text, fenced blocks and tool events. The review
 records the source conversation and event sequence range with its result. The
 owner must enable automatic review for each Bot, and reviews use that Bot's
 selected model and account. An unsupported binding leaves review unavailable.
+The cursor and corresponding outcome are one durable checkpoint. A failed
+read, model call or save can retry that range. A malformed reply advances the
+checkpoint with a diagnostic code and retains no raw answer. A result with
+proposed changes waits for the owner to decide. Its evidence includes the
+Thread, conversation, Bot settings revision, model and sequence range.
 
 Memory access uses the actor established by the Runner and current scope
 membership. A Bot's own scope, a team, a group and a project are distinct
