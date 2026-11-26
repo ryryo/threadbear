@@ -44,7 +44,7 @@ Feature: Web pages in a thread's panels
     Then the Browser panel shows the page "Panel home"
     And nothing was opened in another app
 
-  @panel.web @swift-pending @browser.external
+  @panel.web @swift-pending @rich.webmenu
   Scenario: An agent showing a pin respects the external default
     When I open the thread "Morning brief"
     And I'm looking at the app
