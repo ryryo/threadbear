@@ -50,3 +50,12 @@ test('explicit expiry limits recall and secret text is refused before recording 
   assert.throws(() => memory.add('password: Example4Secret987', {}, '2026-11-27T00:00:00.000Z'), /secret/i);
   assert.equal(memory.history().length, 1);
 });
+
+test('ported rankings match Japanese queries and filter expired notes', t => {
+  const memory = new PersonalMemory(fixture(t));
+  const now = '2026-11-27T00:00:00.000Z';
+  const current = memory.add('見出しは短くする', {}, now);
+  memory.add('見出しの色は青', { until: '2026-11-27' }, now);
+  memory.add('本文に日付を入れる', {}, now);
+  assert.deepEqual(memory.search('見出し', '2026-11-28'), [current]);
+});

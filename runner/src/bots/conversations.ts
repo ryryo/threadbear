@@ -30,8 +30,13 @@ export class BotConversations {
         botLink: { botId, conversationId: reserved.id },
       });
     }
-    return this.repo.confirmConversation(operationId, reserved.threadId);
+    const link = this.repo.confirmConversation(operationId, reserved.threadId);
+    const state = this.runner.threads.get(link.threadId);
+    if (state) this.runner.markDirty(state);
+    return link;
   }
+
+  summary(threadId: string) { return this.runner.get(threadId); }
 
   private memoryFor(botId: string, threadId: string): PersonalMemory {
     const saved = this.runner.store.load(threadId)?.botLink;
@@ -43,6 +48,10 @@ export class BotConversations {
 
   notes(botId: string, threadId: string): MemoryNote[] {
     return this.memoryFor(botId, threadId).list(this.runner.isoNow().slice(0, 10));
+  }
+
+  search(botId: string, threadId: string, query: string): MemoryNote[] {
+    return this.memoryFor(botId, threadId).search(query, this.runner.isoNow().slice(0, 10));
   }
 
   private writableMemory(botId: string, threadId: string): PersonalMemory {

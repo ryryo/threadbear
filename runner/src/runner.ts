@@ -2186,6 +2186,7 @@ export class Runner {
     }
     const turnId = opts.messageId ?? crypto.randomUUID();
     const msg: QueuedSend = { turnId, text, images: refs };
+    if (rec.botLink) msg.botInput = { id: crypto.randomUUID(), conversationId: rec.botLink.conversationId };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.wakeReason && opts.origin === 'runner') msg.wakeReason = opts.wakeReason;
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
@@ -5097,6 +5098,7 @@ export class Runner {
     const unfinished = running || (this.coordinators?.forThread(rec.id) ? afterJobs : agentsStillWorking(background, afterJobs));
     const s: ThreadSummary = {
       id: rec.id,
+      ...(rec.botLink ? { botLink: rec.botLink } : {}),
       title: rec.title,
       cwd: rec.cwd,
       accountId: rec.accountId,

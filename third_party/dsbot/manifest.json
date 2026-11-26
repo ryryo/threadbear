@@ -61,7 +61,9 @@
       "sha256": "b56241ed39670f9a7b950a90a773dd5d5af2543244140479dcb729b19735f6af",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-search.js",
       "phase": 1,
-      "portMode": "A"
+      "portMode": "A",
+      "portPath": "runner/src/bots/ported/memory-search.js",
+      "changes": "Implementation preserved byte-for-byte after the attribution header. The Runner settles visibility and expiry before ranking."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory.js",

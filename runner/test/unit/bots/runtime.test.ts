@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { BotRuntime } from '../../../src/bots/runtime.ts';
+import { neutraliseCopied } from '../../../src/real-copy.ts';
+import { makeHarness, tmpDir } from '../../helpers/fakes.ts';
+
+test('the feature defaults off, and an unguarded Runner cannot create Bot data', () => {
+  const h = makeHarness(tmpDir());
+  let enabled = false;
+  let guarded = false;
+  let owns = true;
+  const runtime = new BotRuntime({ home: h.home, runner: () => h.runner, owner: () => 'local', enabled: () => enabled, guarded: () => guarded, owns: () => owns });
+  const marker = join(h.home, 'bots-format.json');
+  const state = join(h.home, 'bots', 'state.json');
+  assert.equal(runtime.methods['bots.status']({}).available, false);
+  assert.throws(() => runtime.methods['bots.create']({ name: 'Editor' }), /turned off/);
+  enabled = true;
+  assert.throws(() => runtime.methods['bots.create']({ name: 'Editor' }), /supervisor/);
+  assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(state), false);
+  guarded = true;
+  assert.equal(runtime.methods['bots.status']({}).available, true);
+  assert.deepEqual(runtime.methods['bots.list']({}), { bots: [] });
+  assert.equal(existsSync(marker), false);
+  runtime.methods['bots.create']({ name: 'Editor' });
+  assert.equal(readFileSync(marker, 'utf8').trim(), '1');
+  assert.equal(existsSync(state), true);
+  owns = false;
+  assert.throws(() => runtime.methods['bots.list']({}), /owning Runner/);
+});
+
+test('Bot Threads cannot be packed for moving, and a copy retains its read-only link', async () => {
+  const home = tmpDir();
+  let runtime: BotRuntime;
+  const h = makeHarness(home, {}, { botContext: rec => runtime.context(rec) });
+  runtime = new BotRuntime({ home, runner: () => h.runner, owner: () => 'local', enabled: () => true, guarded: () => true, owns: () => true });
+  const { bot } = runtime.methods['bots.create']({ name: 'Editor' }) as { bot: { id: string } };
+  const { conversation } = runtime.methods['bots.conversations.create']({ botId: bot.id, operationId: 'a' }) as { conversation: { threadId: string } };
+  const id = conversation.threadId;
+  await assert.rejects(h.runner.describeForMove(id, 0), /owning Runner/);
+  await assert.rejects(h.runner.packForMove(id, {} as never), /owning Runner/);
+  const rec = h.store.load(id)!;
+  rec.botContextTold = 'old-snapshot';
+  const copied = neutraliseCopied(rec, tmpDir());
+  assert.equal(copied.copied, true);
+  assert.equal(copied.botLink?.botId, bot.id);
+  assert.equal(copied.botContextTold, undefined);
+  assert.throws(() => runtime.context(copied), /copy/i);
+});

@@ -888,6 +888,13 @@ the owning runner.
   for a week. One arriving is unpacked in `moves/` first, and may make a
   worktree for it, write its transcript into a login's Claude folder, and
   `git clone` its repo from `origin` if this machine has no copy.
+- **Bots** (`runner/src/bots/`, `nativeBots`): the owning Runner stores the
+  roster and conversation links in `<home>/bots/state.json` and each Bot's
+  notes, pending change and history under `<home>/bots/memory/`. Ordinary
+  thread records and transcripts keep the conversations. The first Bot data
+  write adds `<home>/bots-format.json` so a managed release without support
+  for that data cannot start. Bot notes go to the CLI of a linked conversation
+  as context. Bot controls and notes files stay on the owning Runner.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac. A runner that signs releases with a Touch ID key also reads

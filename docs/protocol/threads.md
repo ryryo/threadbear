@@ -11,19 +11,29 @@ Fresh sessions receive the Bot settings and current notes with their startup
 instructions. A live or resumed session receives changes before the next normal
 message. The Runner tracks the context it sent and retries it if sending fails
 or the turn fails to complete.
+Inputs queued on a Bot conversation carry `botInput` with an input `id` and
+`conversationId`. The same fields go into `user.message`, including when an
+input joins a turn already running. The Runner flushes that event before
+dispatching the input to the CLI. The turn ID still identifies the whole turn.
 
 On a Runner with the Bot experiment available, the local owner can call
 `bots.list`, `bots.get`, `bots.create`, `bots.update` and `bots.archive`.
 `bots.get` returns the Bot and its conversation links. Settings edits and archive
 require the revision the editor began with. An archived Bot's settings and
 history stay readable. `bots.conversations.create` takes `botId` and
-`operationId` and returns the persisted conversation link. `bots.memory.read`,
-`bots.memory.add`, `bots.memory.edit`, `bots.memory.remove`, `bots.memory.history`
+`operationId` and returns the persisted conversation link and its `thread`
+summary. A local `ThreadSummary` may carry `botLink` so the conversation header
+can open the Bot page. `bots.memory.read`,
+`bots.memory.search`, `bots.memory.add`, `bots.memory.edit`, `bots.memory.remove`, `bots.memory.history`
 and `bots.memory.restore` take `botId` and `threadId`; the thread must belong to
 that Bot. Edit and remove take `entryId`, restore takes the history `changeId`,
 and history returns up to 50 changes, newest first, with a `more` cursor.
 Bot RPCs require the owner's credential. A Thread key cannot use them at any
 permission level.
+
+`bots.status` reports whether the owner can open the local Bot workspace and,
+when unavailable, gives a reason. Bot conversations stay on the workspace's
+owning Runner. A local copy of real threads keeps them as a read-only transcript.
 
 ## Pictures in a message
 

@@ -101,9 +101,18 @@ test('a fresh Bot conversation hears the shared note and a resumed CLI hears onl
   const before = thread.rec.botContextTold;
   assert.throws(() => resumed.runner.sendWithInstructionsNews(thread, { id: 'failed-send', text: '再試行', images: [] }), /test send failure/);
   assert.equal(thread.rec.botContextTold, before);
-  session.send = send;
+  let committed = false;
+  session.send = input => {
+    const log = resumed.store.log(b.threadId);
+    const row = log.read(1, log.lastSeq).find(event => event.type === 'user.message' && event.text === '次の記事');
+    assert.equal(row?.type === 'user.message' && row.botInput?.conversationId, b.id);
+    assert.notEqual(row?.type === 'user.message' && row.botInput?.id, row?.turnId);
+    committed = true;
+    send(input);
+  };
   resumed.runner.send(b.threadId, '次の記事');
   await tick();
+  assert.equal(committed, true);
   assert.match(session.sent.at(-1)?.text ?? '', /敬体で書く[\s\S]*次の記事/);
 });
 
@@ -113,7 +122,7 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   const repo = new BotRepository(root, 'runner-1');
   const service = new BotConversations(h.runner, repo, root);
   const token = 'bot-test-owner-authentication';
-  const server = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: h.runner, log: nullLogger, gate: new CallerGate({ runner: h.runner }), methods: botMethods(repo, service) });
+  const server = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: h.runner, log: nullLogger, gate: new CallerGate({ runner: h.runner }), methods: botMethods(() => ({ repo, conversations: service })) });
   const { port } = await server.listen();
   const url = `ws://127.0.0.1:${port}/rpc`;
   const owner = await RunnerClient.connect(url, token);

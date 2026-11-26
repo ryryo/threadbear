@@ -216,6 +216,39 @@ async function nthListening(out: () => string, n: number, ms = PATIENCE_MS): Pro
   }
 }
 
+test('a managed Bot release writes the marker and reopens its workspace after restarting', async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ experiments: { nativeBots: true } }));
+  const marker = path.join(home, 'bots-format.json');
+  const r = startRunner(launch, home, { THREADBEAR_RESTART_MS: '50' });
+  try {
+    const { c } = await connect(home, await nthListening(r.out, 1));
+    try {
+      assert.equal((await c.call('bots.status')).available, true);
+      assert.deepEqual(await c.call('bots.list'), { bots: [] });
+      assert.equal(fs.existsSync(marker), false);
+      const { bot } = await c.call('bots.create', { name: '編集者' });
+      assert.equal(fs.readFileSync(marker, 'utf8').trim(), '1');
+      await c.call('runner.restart', { reason: 'Bot workspace verification' });
+      const { c: after } = await connect(home, await nthListening(r.out, 2));
+      try {
+        assert.deepEqual(await after.call('bots.list'), { bots: [bot] });
+      } finally {
+        after.close();
+      }
+    } finally {
+      c.close();
+    }
+    r.proc.kill('SIGTERM');
+    assert.equal(await r.exited, 0);
+  } finally {
+    if (r.proc.exitCode === null && r.proc.signalCode === null) r.proc.kill('SIGTERM');
+  }
+});
+
 test('planned restarts under launch.mjs are clean stops, so several in a row are not a crash loop', async () => {
   const home = tmpDir();
   const older = '20261025T101500Z-0000001';

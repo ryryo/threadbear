@@ -2,6 +2,7 @@ import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReplyButton, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, ArchivedBy, ArchiveVerdict, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef, LooseEnd, ContextUsage, LabReviewLedger, ReviewFinding } from './protocol.ts';
+import type { BotInputRef, ThreadSummary } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
@@ -15,7 +16,7 @@ export type LabLedger = LabReviewLedger & { delivered?: number; answered?: numbe
 // A reviewer's verdict: its findings, none when nothing holds up.
 export type ReviewVerdict = { findings: Pick<ReviewFinding, 'severity' | 'claim' | 'where' | 'case'>[] };
 
-export type QueuedSend = { beforeMessage?: true; retryAfterInterrupt?: true; preserveSchedule?: boolean; scheduledSince?: number; turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; ceiling?: PermissionMode; seq?: number };
+export type QueuedSend = { beforeMessage?: true; retryAfterInterrupt?: true; preserveSchedule?: boolean; scheduledSince?: number; turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; ceiling?: PermissionMode; seq?: number; botInput?: BotInputRef };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 // A report held for a thread from one it started (runner/nested.ts).
@@ -153,7 +154,7 @@ export function normaliseRecord(rec: Record<string, unknown>): boolean {
 
 export type ThreadRecord = {
   id: string;
-  botLink?: { botId: string; conversationId: string };
+  botLink?: ThreadSummary['botLink'];
   title: string;
   cwd: string;
   accountId: string;
@@ -561,7 +562,7 @@ export class EventLog {
     const line = Buffer.from(JSON.stringify(event) + '\n', 'utf8');
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     try {
-      fs.appendFileSync(this.file, line);
+      fs.appendFileSync(this.file, line, event.type === 'user.message' && event.botInput ? { flush: true } : undefined);
     } catch (e) {
       // A write that failed part way (disk full) would leave half a line
       // for the next append to run into; cut it off.

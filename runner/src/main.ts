@@ -82,7 +82,8 @@ import { RpcServer } from './rpc.ts';
 import { AppSeen } from './app-seen.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
-import { checkBotDataFormat } from './bots/format.ts';
+import { checkBotDataFormat, supervisorGuardsBotData } from './bots/format.ts';
+import { BOT_EXPERIMENT, BotRuntime } from './bots/runtime.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
@@ -520,6 +521,16 @@ async function main(): Promise<void> {
   // Set once Recipes is made, further down.
   let recipesHabits: (() => string) | undefined;
   const instructions = new InstructionsStore({ home: cfg.home, token, publish: (n) => runner.publish(n) });
+  // The mirror and the Bot workspace use the same Runner identity. A draining
+  // Runner can finish the inputs already in its CLIs, but the workspace moves
+  // to the primary along with the process lock.
+  const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
+  const bots = new BotRuntime({
+    home: cfg.home, runner: () => runner, owner: () => syncRunnerId,
+    enabled: () => experimentOn(cfg.home, BOT_EXPERIMENT),
+    guarded: () => supervisorGuardsBotData(cfg.home),
+    owns: () => !box && !draining,
+  });
   // Not in box mode: its spawn gate (spawn-gate.ts) holds processes on the
   // main thread only, and the look runs git.
   const trustWorker = box ? undefined : new TrustOffThread();
@@ -538,6 +549,7 @@ async function main(): Promise<void> {
     // His own, then the habits of the recipes that are on (recipes.ts): both
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
+    botContext: (rec) => bots.context(rec),
     projects,
     atMac: () => atMac,
     config: cfg,
@@ -634,9 +646,6 @@ async function main(): Promise<void> {
   bootStep('threads');
   // Answers to ask_secret go after a day (docs/protocol/threads.md, "Secrets").
   runner.secrets.startSweeping((e) => log.warn('secret sweep failed', { error: String(e) }));
-  // Its runner id and name are the mirror's (sync.ts), since that's how other
-  // runners and the backend know this one (step 6, docs/archive/step6-plan.md).
-  const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
   // When this process started: the heartbeat sends it, and runners.list
   // gives it for this runner too (the app's Runners panel says "up 3h").
   const startedAt = new Date().toISOString();
@@ -1347,6 +1356,7 @@ async function main(): Promise<void> {
     else if (n.method === 'thread.deleted') updates.threadChanged(n.params.threadId);
   });
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...coordinatorMethods(coordinators), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...recipeMethods(recipes), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }), ...archiveMethods(agentArchive) };
+  Object.assign(methods, bots.methods);
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {

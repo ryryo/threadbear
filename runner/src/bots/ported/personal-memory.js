@@ -13,6 +13,7 @@ import {
 } from './memory-entries.js';
 import { checkPath, MemoryJournal } from './memory-journal.js';
 import { record } from './memory-pending.js';
+import { rankEntries } from './memory-search.js';
 
 function read(root, path, empty) {
   checkPath(root, path);
@@ -69,6 +70,11 @@ export class PersonalMemory {
 
   list(today) {
     return this.load().entries.filter(entry => !isExpired(entry, today)).map(note);
+  }
+
+  search(query, today) {
+    const entries = this.load().entries.filter(entry => !isExpired(entry, today));
+    return rankEntries(entries, query).slice(0, 50).map(({ entry }) => note(entry));
   }
 
   publish(op, lines, time, extra) {

@@ -59,14 +59,17 @@ function load(file: string, ownerRunnerId: string): State {
 /** The owning Runner holds its normal data lock for this repository's lifetime. */
 export class BotRepository {
   private readonly file: string;
+  private readonly beforeSave?: () => void;
   private current: State;
 
-  constructor(root: string, ownerRunnerId: string) {
+  constructor(root: string, ownerRunnerId: string, beforeSave?: () => void) {
     this.file = join(root, 'state.json');
+    this.beforeSave = beforeSave;
     this.current = load(this.file, ownerRunnerId);
   }
 
   private save(next: State): void {
+    this.beforeSave?.();
     atomicWriteFileSync(this.file, JSON.stringify(next) + '\n', 0o600);
     this.current = next;
   }

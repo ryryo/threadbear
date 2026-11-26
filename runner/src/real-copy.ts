@@ -37,7 +37,7 @@ export const COPIED_REFUSAL = "This thread is a copy of one of your real threads
 export function neutraliseCopied(rec: ThreadRecord, work: string): ThreadRecord {
   const r = rec as Record<string, unknown>;
   for (const k of [
-    'nativeSessionId', 'sessionUsed', 'sessionCostTotal', 'contextUsage', 'turnId',
+    'nativeSessionId', 'sessionUsed', 'sessionCostTotal', 'contextUsage', 'botContextTold', 'turnId',
     'stoppedMidTurn', 'restartCarryOn', 'stoppedWork', 'stoppedWorkWakes',
     'waitingForRoom', 'limitHitTurn', 'autoCarryOn', 'waitingForNetwork', 'netCarryOn',
     'wakeWhen', 'lateChecks', 'wakeNews', 'waitingOn', 'hibernatedForApp', 'labReviewOwed', 'handoff', 'moved', 'resumeAt',

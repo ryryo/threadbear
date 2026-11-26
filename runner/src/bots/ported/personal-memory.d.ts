@@ -12,6 +12,7 @@ export type MemoryChange = {
 export class PersonalMemory {
   constructor(root: string);
   list(today: string): MemoryNote[];
+  search(query: string, today: string): MemoryNote[];
   history(): MemoryChange[];
   add(text: string, options: { until?: string; sourceThreadId?: string }, time: string): MemoryNote;
   replace(id: string, text: string, time: string): MemoryNote;

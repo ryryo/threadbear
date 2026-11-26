@@ -19,6 +19,9 @@ installations and rollback behavior unchanged.
 Bot data can be enabled only after the running supervisor advertises support
 for this guard on a managed install. The capability comes from the running supervisor,
 since a staged `launch.mjs` can still be waiting for the next system restart.
+The supervisor supplies the data directory the guard protects. The Runner
+checks that it matches the data directory actually in use. It writes the
+format marker before the first Bot state write while it holds the data lock.
 
 `hello` carries `updates?: RunnerUpdates`, and `runner.updates` sends it
 again whenever it changes, so a client can show that the runner is
