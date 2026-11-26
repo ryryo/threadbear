@@ -1,0 +1,103 @@
+{
+  "upstream": "https://github.com/Fei-Craft/DS-Bot",
+  "commit": "d104d9ca18d69a35460f14e15dff4d553181433a",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "upstreamPath": "ds-bot/src/host/roster.js",
+      "upstreamBlob": "b3dada3dcf0d3d5bd8fc06a8ec00646c11453dc7",
+      "sha256": "20461d2d4aeae6ca373e3431a5802317d1130468e1940d22032189134429f984",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/roster.js",
+      "phase": 1,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/test/roster.test.js",
+      "upstreamBlob": "4024c7061c1ba54df084c23b183986558ed02ae9",
+      "sha256": "8890d5e32297556047826a5c065e424a473126bec79dd4533ebf823b24fddf34",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/roster.test.js",
+      "phase": 1,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/threads.js",
+      "upstreamBlob": "70319ca0b0a15a72d3e423868e6199ce0f750d4e",
+      "sha256": "e93710eacf98a2e86c74bd768f55590f1ac9af98748e4dc74148e5bc5b6e90e0",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/threads.js",
+      "phase": 1,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/test/threads.test.js",
+      "upstreamBlob": "1046ddc3e8c38bbebd5ba8640393988a4eccde9a",
+      "sha256": "ba78471c34fe9d4ff6e849c2b68945d3060297429aa51c9a67390ea7c3991230",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/threads.test.js",
+      "phase": 1,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-entries.js",
+      "upstreamBlob": "607207b497d6b195f9c33577c0046bf136b57d9a",
+      "sha256": "64063b5a6f70bd547d7115673cbcdcedf017d61fa5cb9050525cd295df92caa9",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-entries.js",
+      "phase": 1,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-pending.js",
+      "upstreamBlob": "61b815214c6fd1a83256d51eb914e64f23f7b1ed",
+      "sha256": "6fc08524bceae6d9c85811244c1236b228cfe32ad2c9ac7cbca2e08cd143cdc7",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-pending.js",
+      "phase": 1,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-search.js",
+      "upstreamBlob": "21506d672c7ffcf7610ef4148ff18d857fbd580a",
+      "sha256": "b56241ed39670f9a7b950a90a773dd5d5af2543244140479dcb729b19735f6af",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-search.js",
+      "phase": 1,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory.js",
+      "upstreamBlob": "ff1e127958b904326dbeae5033495acfeee6af1f",
+      "sha256": "09ee25154d649445bc0fe67be968fe62551689484992b4da7ae06f00c37b3900",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory.js",
+      "phase": 1,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/test/memory.test.js",
+      "upstreamBlob": "60feff3e4de81cab91cde988a86f310ebad92701",
+      "sha256": "df4b23d5737d00d28379b419aadca7495b43db30bf8a224b78f2926c4aecc75e",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/memory.test.js",
+      "phase": 1,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/test/memory-pending.test.js",
+      "upstreamBlob": "6b17b46816bf5cc6a9f7b895ed277e36e2dd2474",
+      "sha256": "6b697f0c528590b0a35cc7e4d973f42ad353fbbe4384d0f548872e40de5e33a1",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/memory-pending.test.js",
+      "phase": 1,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/requests.js",
+      "upstreamBlob": "d153e4742d78d73de4122ed4ecdc76a50ded5e05",
+      "sha256": "492d785294aa3b08db336fcb508b1224dbf39365ba685b8beb42ce11a225cd95",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/requests.js",
+      "phase": 3,
+      "portMode": "A"
+    },
+    {
+      "upstreamPath": "ds-bot/test/request-id.test.js",
+      "upstreamBlob": "e386ddf34b8151215b1cf777864bb9c80e6db1ec",
+      "sha256": "a17d7aadf16b0eac2d434d199da7cc580c20d16c5cc35cc0b9472d5b1be9da43",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/request-id.test.js",
+      "phase": 3,
+      "portMode": "B"
+    }
+  ]
+}
