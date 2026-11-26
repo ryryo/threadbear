@@ -78,6 +78,48 @@
       "classification": "B",
       "target": "scripts/i18n-seed-from-t3code.ts",
       "reason": "Join on T3 Code message hashes and propose unambiguous text matches."
+    },
+    {
+      "path": "apps/web/src/i18n/runtime.ts",
+      "blob": "940a3a3f0b70c196447faf7c33b86483f154217a",
+      "classification": "B",
+      "target": "web/src/i18n/runtime.ts",
+      "reason": "Keep asynchronous catalog loading and rendered locale in sync with the browser setting."
+    },
+    {
+      "path": "apps/web/src/i18n/I18nProvider.tsx",
+      "blob": "5fbd532a86b480fb90eb496f1fa8774f23e40287",
+      "classification": "B",
+      "target": "web/src/i18n/I18nProvider.tsx",
+      "reason": "Use the external-store snapshot for React and route locale changes through Threadbear settings."
+    },
+    {
+      "path": "apps/web/src/i18n/initializeI18n.ts",
+      "blob": "dbcaec182690624032e5366693ad11ee613f509b",
+      "classification": "B",
+      "target": "web/src/i18n/initializeI18n.ts",
+      "reason": "Initialize local GT translations with an English source and a lazy Japanese catalog."
+    },
+    {
+      "path": "apps/web/src/i18n/messages.ts",
+      "blob": "db08ab4941ceb5233386c8afd29ecaea7b374bc2",
+      "classification": "B",
+      "target": "web/src/i18n/messages.ts",
+      "reason": "Keep the pinned GT message resolver and English fallback, with a module path Node can resolve in tests."
+    },
+    {
+      "path": "apps/web/src/i18n/locales.ts",
+      "blob": "a9c6e20eddedd5972c6233c0707619def2c55ce6",
+      "classification": "B",
+      "target": "web/src/i18n/locales.ts",
+      "reason": "Resolve only English and Japanese in the browser preference order."
+    },
+    {
+      "path": "apps/web/src/lib/pageTranslationGuard.ts",
+      "blob": "de8dbceb8e2bfa40557c3ed9b9345b56b0bae41c",
+      "classification": "A",
+      "target": "web/src/lib/pageTranslationGuard.ts",
+      "reason": "Keep React updates working if browser translation replaces text nodes."
     }
   ]
 }

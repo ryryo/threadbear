@@ -5,6 +5,7 @@
 // line and the answer, with an outline of the asks to jump between. When
 // this browser is signed in as Mike the page also has ShareControl, so he
 // can stop sharing it or share it again.
+import { msg, T, useMessages } from 'gt-react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useConvex, useMutation, useQuery } from 'convex/react';
 import { useLiveQuery } from './live';
@@ -74,13 +75,13 @@ export function SharePage({ slug, token }: { slug: string; token: string | null 
     document.title = title ? `${title} · Threadbear` : 'Threadbear';
   }, [title]);
 
-  if (!shown) return <div className="pad muted">Loading…</div>;
+  if (!shown) return <div className="pad muted"><T>Loading…</T></div>;
   if (shown.state === 'gone') {
     return (
       <main className="signin">
         <img src="/icon.png" alt="" width={72} height={72} />
-        <h1>This link doesn’t work</h1>
-        <p className="muted">It may not be shared any more, or it has a new link now.</p>
+        <h1><T>This link doesn’t work</T></h1>
+        <p className="muted"><T>It may not be shared any more, or it has a new link now.</T></p>
       </main>
     );
   }
@@ -93,6 +94,7 @@ type Pic = Shared['images'][number];
 type Shared = Extract<NonNullable<ReturnType<typeof useQuery<typeof api.share.view>>>, { state: 'ok' }>;
 
 function WriteUp({ slug, token, data, loading, onMore }: { slug: string; token: string | null; data: Shared; loading: boolean; onMore: () => void }) {
+  const translate = useMessages();
   const messages = data.messages as PageMessage[];
   const turns = useMemo(() => splitTurns(messages), [messages]);
   const asked = turns.filter((t) => t.starter);
@@ -122,10 +124,10 @@ function WriteUp({ slug, token, data, loading, onMore }: { slug: string; token: 
   }, [messages]);
 
   const started = data.createdAt ?? messages[0]?.at;
-  const byline = [started ? day(started) : null, asked.length ? `${asked.length} ${asked.length === 1 ? 'turn' : 'turns'}` : null, worked >= 60_000 ? `worked ${roughly(worked)}` : null].filter(Boolean);
+  const byline = [started ? day(started) : null, asked.length ? (asked.length === 1 ? translate(msg('1 turn')) : translate(msg('{count} turns'), { count: asked.length })) : null, worked >= 60_000 ? `worked ${roughly(worked)}` : null].filter(Boolean);
   const made = (
     <>
-      Made with <a href={SITE}>Threadbear</a>
+      <T>Made with</T> <a href={SITE}>Threadbear</a>
     </>
   );
 
@@ -137,14 +139,14 @@ function WriteUp({ slug, token, data, loading, onMore }: { slug: string; token: 
         {data.manage && token ? (
           <ShareControl token={token} threadId={data.manage.threadId} share={{ access: data.manage.shared ? 'link' : 'off', slug }} onSharePage preview={previewOf(data.title, messages, data.images)} />
         ) : null}
-        <CopyButton text={() => location.origin + location.pathname} label="Copy link" />
+        <CopyButton text={() => location.origin + location.pathname} label={translate(msg("Copy link"))} />
       </header>
       <div className="doc-grid">
-        <nav className="outline" aria-label="Turns">
+        <nav className="outline" aria-label={translate(msg("Turns"))}>
           {asked.length > 1 ? (
             <>
               <h2>
-                {asked.length} turns
+                {translate(msg('{count} turns'), { count: asked.length })}
               </h2>
               <ol>
                 {turns.map((t, i) =>
@@ -274,7 +276,7 @@ function TurnSection({ id, turn, busy, after, inText, rows }: { id: string; turn
       {fromWork.length ? <Pictures items={fromWork} /> : null}
       {busy ? (
         <div className="working">
-          <span className="spinner" /> Working…
+          <span className="spinner" /> <T>Working…</T>
         </div>
       ) : null}
     </section>
@@ -293,6 +295,7 @@ function askText(m: PageMessage): string {
 
 // The outline on a narrow screen: "3 turns" in the bar, opening to the asks.
 function TurnsMenu({ turns, active }: { turns: Turn<PageMessage>[]; active: number }) {
+  const translate = useMessages();
   const [open, setOpen] = useState(false);
   const asked = turns.filter((t) => t.starter);
   useEffect(() => {
@@ -312,7 +315,7 @@ function TurnsMenu({ turns, active }: { turns: Turn<PageMessage>[]; active: numb
         }}
         aria-expanded={open}
       >
-        {asked.length} turns <Icon.ChevronDown />
+        {translate(msg('{count} turns'), { count: asked.length })} <Icon.ChevronDown />
       </button>
       {open ? (
         <div className="turns-list">
@@ -321,7 +324,7 @@ function TurnsMenu({ turns, active }: { turns: Turn<PageMessage>[]; active: numb
               <a key={i} href={`#turn-${i + 1}`} className={i === active ? 'on' : ''}>
                 <span className="n">{asked.indexOf(t) + 1}</span>
                 <span>{askText(t.starter).slice(0, 120)}</span>
-                {t.ms && t.ms >= 1000 ? <span className="took">Worked for {duration(t.ms)}</span> : null}
+                {t.ms && t.ms >= 1000 ? <span className="took">{translate(msg('Worked for {duration}'), { duration: duration(t.ms) })}</span> : null}
               </a>
             ) : null,
           )}
@@ -389,6 +392,7 @@ export function previewOf(title: string, messages: PageMessage[], images: Pictur
 // asleep. No New link on the shared page itself: its own address would
 // stop working under him.
 export function ShareControl({ token, threadId, share, onSharePage, preview }: { token: string; threadId: string; share?: { access: string; slug: string }; onSharePage?: boolean; preview?: Unfurl }) {
+  const translate = useMessages();
   const send = useMutation(api.phone.share);
   const cmd = useCommand<'switch' | 'new'>(token);
   const shared = share?.access === 'link';
@@ -411,20 +415,20 @@ export function ShareControl({ token, threadId, share, onSharePage, preview }: {
       </summary>
       <div className="pop-panel share-panel">
         <div className="row-line">
-          <h3>Share with a link</h3>
-          <button className={`switch ${shared ? 'on' : ''}`} role="switch" aria-checked={shared} aria-label="Share with a link" aria-busy={cmd.spinning} disabled={cmd.busy} onClick={() => run(shared ? 'off' : 'link')} />
+          <h3><T>Share with a link</T></h3>
+          <button className={`switch ${shared ? 'on' : ''}`} role="switch" aria-checked={shared} aria-label={translate(msg("Share with a link"))} aria-busy={cmd.spinning} disabled={cmd.busy} onClick={() => run(shared ? 'off' : 'link')} />
         </div>
         <p>{shared ? 'Anyone with the link can read this thread, and new replies show up as they come in. No sign-in.' : 'Only you can see this thread.'}</p>
         {shared && link ? (
           <div className="share-link">
-            <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Link" />
-            <CopyButton text={() => link} label="Copy" className="btn primary" />
+            <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label={translate(msg("Link"))} />
+            <CopyButton text={() => link} label={translate(msg("Copy"))} className="btn primary" />
           </div>
         ) : null}
         {shared && preview ? (
           <>
             <div className="split" />
-            <span className="label">How the link shows up in Slack, X or Messages</span>
+            <span className="label"><T>How the link shows up in Slack, X or Messages</T></span>
             <div className="unfurl">
               <span className="site">
                 <img src="/icon.png" alt="" width={16} height={16} /> Threadbear
@@ -437,9 +441,9 @@ export function ShareControl({ token, threadId, share, onSharePage, preview }: {
         ) : null}
         {shared && !onSharePage ? (
           <div className="buttons">
-            <button className="btn" disabled={cmd.busy} onClick={() => run('link', true)} title="The old link stops working">
+            <button className="btn" disabled={cmd.busy} onClick={() => run('link', true)} title={translate(msg("The old link stops working"))}>
               {(cmd.state.kind === 'sending' || cmd.state.kind === 'waiting') && cmd.state.payload === 'new' ? <span className="spinner" /> : null}
-              New link
+              <T>New link</T>
             </button>
           </div>
         ) : null}

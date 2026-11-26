@@ -1,4 +1,6 @@
 // Small words for the pages: model names, dates, times since.
+import { msg } from 'gt-react';
+import { getActiveLocale, m as message } from './i18n/messages.ts';
 
 // "claude-opus-5-5" → "Claude Opus 5.5", "opus" → "Claude Opus",
 // "gpt-6-astra" → "GPT-6 Astra". With no model, the CLI's name.
@@ -23,17 +25,17 @@ function cap(w: string): string {
 
 // "3 Nov 2026"
 export function day(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString(getActiveLocale() === 'ja' ? 'ja' : undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // "now", "5m", "3h", "2d", then the date.
 export function ago(ms: number): string {
   const s = Math.max(0, (Date.now() - ms) / 1000);
-  if (s < 60) return 'now';
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)}d`;
-  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  if (s < 60) return message(msg('now'));
+  if (s < 3600) return message(msg('{count}m'), { count: Math.floor(s / 60) });
+  if (s < 86400) return message(msg('{count}h'), { count: Math.floor(s / 3600) });
+  if (s < 86400 * 7) return message(msg('{count}d'), { count: Math.floor(s / 86400) });
+  return new Date(ms).toLocaleDateString(getActiveLocale() === 'ja' ? 'ja' : undefined, { day: 'numeric', month: 'short' });
 }
 
 // The preview is the reply's first lines as Markdown; lists show it as
@@ -74,8 +76,8 @@ export function sender(m: { role: string; origin?: string; text: string }): { wh
   const nl = m.text.indexOf('\n');
   const first = (nl < 0 ? m.text : m.text.slice(0, nl)).trim();
   const body = nl < 0 ? '' : m.text.slice(nl + 1).replace(/^\n+/, '');
-  if (m.origin === 'schedule' && first.startsWith('[Scheduled: ') && first.endsWith(']')) return { who: 'Scheduled', body };
-  if (!m.origin && first.startsWith('[Sent by the agent in the thread "') && first.endsWith(')]')) return { who: 'From another thread', body };
-  if (!m.origin && first.startsWith('[Sent by the agent before moving to ') && first.endsWith(']')) return { who: 'The agent’s note before moving', body };
+  if (m.origin === 'schedule' && first.startsWith('[Scheduled: ') && first.endsWith(']')) return { who: message(msg('Scheduled')), body };
+  if (!m.origin && first.startsWith('[Sent by the agent in the thread "') && first.endsWith(')]')) return { who: message(msg('From another thread')), body };
+  if (!m.origin && first.startsWith('[Sent by the agent before moving to ') && first.endsWith(']')) return { who: message(msg('The agent’s note before moving')), body };
   return undefined;
 }

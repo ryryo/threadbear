@@ -1,12 +1,15 @@
 // Run with a checkout or a directory containing the catalog paths in the manifest.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { catalog, glossary, slots, writeCatalog } from "./i18n-extract-rust.ts";
+import { catalog, glossary, readCatalog, slots, writeCatalog } from "./i18n-extract-rust.ts";
 import manifest from "../third_party/t3code/manifest.json" with { type: "json" };
 
 const upstream = process.argv[2];
-if (!upstream) throw new Error("Usage: node scripts/i18n-seed-from-t3code.ts <pinned T3 Code directory>");
+const surface = process.argv[3] ?? "desktop";
+if (!upstream || (surface !== "desktop" && surface !== "web")) {
+  throw new Error("Usage: node scripts/i18n-seed-from-t3code.ts <pinned T3 Code directory> [desktop|web]");
+}
 
 function readPinned(path: string): Record<string, unknown> {
   const bytes = readFileSync(join(upstream, path));
@@ -36,20 +39,23 @@ for (const app of ["desktop", "web", "mobile"]) {
 if (!candidates.size) throw new Error("No pinned T3 Code message pairs found");
 
 const terms = glossary();
-const japanese = catalog("ja");
-for (const [key, message] of Object.entries(catalog("en"))) {
-  if (Object.hasOwn(japanese, key) && japanese[key].trim()) continue;
-  if (Object.hasOwn(terms, key)) {
-    japanese[key] = terms[key];
+const web = join(import.meta.dirname, "../web/src/i18n/translations");
+const english = surface === "desktop" ? catalog("en") : readCatalog(join(web, "en.json"));
+const japanese = surface === "desktop" ? catalog("ja") : readCatalog(join(web, "ja.json"));
+for (const [key, message] of Object.entries(english)) {
+  if (Object.hasOwn(japanese, key) && japanese[key].trim() && !(surface === "web" && japanese[key] === message)) continue;
+  if (Object.hasOwn(terms, surface === "web" ? message : key)) {
+    japanese[key] = terms[surface === "web" ? message : key];
     console.log(`${JSON.stringify(key)}: glossary`);
     continue;
   }
   // An explicit context requires human review before reusing a bare label.
   const matches = candidates.get(message);
-  if (key !== message || matches?.size !== 1) continue;
+  if ((surface === "desktop" && key !== message) || matches?.size !== 1) continue;
   for (const [translation, source] of matches) {
     japanese[key] = translation;
     console.log(`${JSON.stringify(key)}: ${source}`);
   }
 }
-writeCatalog("ja", japanese);
+if (surface === "desktop") writeCatalog("ja", japanese);
+else writeFileSync(join(web, "ja.json"), JSON.stringify(japanese, null, 2) + "\n");

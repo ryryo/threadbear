@@ -1,3 +1,4 @@
+import { msg, useMessages } from 'gt-react';
 // Another lab's review as a quiet row over its turn's reply, as the Mac draws
 // it (desktop/gpui/src/rows/lab_review.rs): who reviewed and how it came out,
 // which opens the review's thread, then each finding with what was done about
@@ -9,6 +10,7 @@ import { findingDetail, outcomeOf, reviewHeading, type LabReviewLedger } from '.
 const MARKS = { fixed: Icon.CircleCheck, disputed: Icon.BubbleWarning, left: Icon.CircleUser, none: Icon.Circle };
 
 export function ReviewRow({ review, threadPath }: { review: LabReviewLedger; threadPath: (id: string) => string }) {
+  const translate = useMessages();
   const heading = reviewHeading(review);
   const path = review.threadId ? threadPath(review.threadId) : undefined;
   return (
@@ -17,7 +19,7 @@ export function ReviewRow({ review, threadPath }: { review: LabReviewLedger; thr
         <a
           className="lab-review-head"
           href={path}
-          title="Open the review's thread"
+          title={translate(msg("Open the review's thread"))}
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey) return;
             e.preventDefault();

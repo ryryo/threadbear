@@ -4,6 +4,8 @@
 // Runners and Usage under More.
 import { useQuery } from 'convex/react';
 import type { ReactNode } from 'react';
+import { msg, T, useMessages } from 'gt-react';
+import { LanguageChoices } from './i18n/LanguageMenu';
 import { api } from '../../convex/_generated/api';
 import { useLiveQuery } from './live';
 import { useInbox } from './inbox';
@@ -21,6 +23,7 @@ import * as Icon from './icons';
 let lastThread: string | undefined;
 
 export function Rail({ token, route }: { token: string; route: Route }) {
+  const m = useMessages();
   const inbox = useInbox();
   // The small rows, not phone:schedules: this is on screen all the time.
   const wakes = useLiveQuery(api.phone.wakes, { token });
@@ -50,24 +53,24 @@ export function Rail({ token, route }: { token: string; route: Route }) {
   );
 
   return (
-    <nav className="rail" aria-label="Views">
+    <nav className="rail" aria-label={m(msg('Views'))}>
       <img className="brand-mark" src="/icon.png" alt="Threadbear" title="Threadbear" width={24} height={24} />
       <a
         className={`rail-btn ${threads ? 'on' : ''}`}
         href="/"
-        title="Threads"
-        aria-label="Threads"
+        title={m(msg('Threads'))}
+        aria-label={m(msg('Threads'))}
         onClick={(e) => {
           e.preventDefault();
           go(lastThread && !narrow() && !threads ? `/t/${encodeURIComponent(lastThread)}` : '/');
         }}
       >
         <Icon.Bubbles />
-        <span className="word">Threads</span>
+        <span className="word"><T>Threads</T></span>
         {waiting ? <b>{waiting}</b> : null}
       </a>
-      {view('scheduled', 'Scheduled', <Icon.Clock />, active)}
-      {view('projects', 'Projects', <Icon.Stack />)}
+      {view('scheduled', m(msg('Scheduled')), <Icon.Clock />, active)}
+      {view('projects', m(msg('Projects')), <Icon.Stack />)}
       <span className="grow" />
       {runnersShown(runners ?? [], now).map((r) => (
         <a
@@ -85,7 +88,7 @@ export function Rail({ token, route }: { token: string; route: Route }) {
         </a>
       ))}
       <span className="rail-sep" />
-      <span className="desk-only">{view('usage', 'Usage', <Icon.Bars />)}</span>
+      <span className="desk-only">{view('usage', m(msg('Usage')), <Icon.Bars />)}</span>
       <GearMenu token={token} />
     </nav>
   );
@@ -96,6 +99,7 @@ function tileWords(r: Parameters<typeof runnerState>[0] & { name: string; pressu
 }
 
 function GearMenu({ token }: { token: string }) {
+  const m = useMessages();
   const me = useQuery(api.phone.me, { token });
   const [theme, pick] = useTheme();
   const row = (close: () => void, label: string, icon: ReactNode, run: () => void, className = '') => (
@@ -112,21 +116,23 @@ function GearMenu({ token }: { token: string }) {
     </button>
   );
   return (
-    <Pop title="Settings" icon={<Icon.Gear />}>
+    <Pop title={m(msg('Settings'))} icon={<Icon.Gear />}>
       {(close) => (
         <>
-          {row(close, 'Runners', <Icon.Server />, () => go(viewPath('runners')), 'phone-only')}
-          {row(close, 'Usage', <Icon.Bars />, () => go(viewPath('usage')), 'phone-only')}
+          {row(close, m(msg('Runners')), <Icon.Server />, () => go(viewPath('runners')), 'phone-only')}
+          {row(close, m(msg('Usage')), <Icon.Bars />, () => go(viewPath('usage')), 'phone-only')}
           <hr className="phone-only" />
-          <MenuChoice icon={<Icon.Gear />} label="Follow the system" on={theme === 'system'} pick={() => pick('system')} />
-          <MenuChoice icon={<Icon.Sun />} label="Always light" on={theme === 'light'} pick={() => pick('light')} />
-          <MenuChoice icon={<Icon.Moon />} label="Always dark" on={theme === 'dark'} pick={() => pick('dark')} />
+          <MenuChoice icon={<Icon.Gear />} label={m(msg('Follow the system'))} on={theme === 'system'} pick={() => pick('system')} />
+          <MenuChoice icon={<Icon.Sun />} label={m(msg('Always light'))} on={theme === 'light'} pick={() => pick('light')} />
+          <MenuChoice icon={<Icon.Moon />} label={m(msg('Always dark'))} on={theme === 'dark'} pick={() => pick('dark')} />
           <hr />
-          <div className="note-line" title="How long this browser stays signed in">
+          <LanguageChoices />
+          <hr />
+          <div className="note-line" title={m(msg('How long this browser stays signed in'))}>
             <Icon.Globe />
-            {me ? `Signed in until ${day(me.expiresAt)}` : 'Signed in on this browser'}
+            {me ? m(msg('Signed in until {date}'), { date: day(me.expiresAt) }) : m(msg('Signed in on this browser'))}
           </div>
-          {row(close, 'Sign out', <Icon.SignOut />, signOut)}
+          {row(close, m(msg('Sign out')), <Icon.SignOut />, signOut)}
         </>
       )}
     </Pop>

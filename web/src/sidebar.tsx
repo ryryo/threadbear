@@ -4,6 +4,7 @@
 // rows. Which rows go where is sections.ts. On top of the Mac's: a filter
 // beside the search, and every heading shows its number, folded or not (Mike
 // asked for numbers on them, 5 Nov; the Mac only shows it folded).
+import { msg, T, useMessages } from 'gt-react';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useQuery } from 'convex/react';
 import { useLiveQuery } from './live';
@@ -24,19 +25,20 @@ const ORDER_KEY = 'threadbear.inboxOrder';
 const WIDTH_KEY = 'threadbear.sidebarWidth';
 
 const ORDERS: { order: InboxOrder; label: string; icon: ReactNode }[] = [
-  { order: 'needsYou', label: 'Needs you first', icon: <Icon.Hand /> },
-  { order: 'newest', label: 'Newest first', icon: <Icon.Down /> },
-  { order: 'oldest', label: 'Oldest first', icon: <Icon.ArrowUp /> },
+  { order: 'needsYou', label: msg('Needs you first'), icon: <Icon.Hand /> },
+  { order: 'newest', label: msg('Newest first'), icon: <Icon.Down /> },
+  { order: 'oldest', label: msg('Oldest first'), icon: <Icon.ArrowUp /> },
 ];
 
 const SHOWS: { show: Filter['show']; label: string; icon: ReactNode }[] = [
-  { show: 'all', label: 'All threads', icon: <Icon.Threads /> },
-  { show: 'needsYou', label: 'Needs you', icon: <Icon.Hand /> },
-  { show: 'unread', label: 'Unread', icon: <Icon.Unread /> },
-  { show: 'shared', label: 'Shared by link', icon: <Icon.Link /> },
+  { show: 'all', label: msg('All threads'), icon: <Icon.Threads /> },
+  { show: 'needsYou', label: msg('Needs you'), icon: <Icon.Hand /> },
+  { show: 'unread', label: msg('Unread'), icon: <Icon.Unread /> },
+  { show: 'shared', label: msg('Shared by link'), icon: <Icon.Link /> },
 ];
 
 export function Lists({ token, selected, isNew }: { token: string; selected?: string; isNew?: boolean }) {
+  const translate = useMessages();
   const inbox = useInbox();
   const counts = useLiveQuery(api.phone.counts, { token });
   const schedules = useLiveQuery(api.phone.wakes, { token });
@@ -138,8 +140,8 @@ export function Lists({ token, selected, isNew }: { token: string; selected?: st
         <a
           className={`icon-btn ${isNew ? 'lit-btn' : ''}`}
           href="/new"
-          title="Start a new thread"
-          aria-label="Start a new thread"
+          title={translate(msg("Start a new thread"))}
+          aria-label={translate(msg("Start a new thread"))}
           onClick={(e) => {
             e.preventDefault();
             go('/new');
@@ -149,34 +151,34 @@ export function Lists({ token, selected, isNew }: { token: string; selected?: st
         </a>
       </div>
       {!ready ? (
-        <div className="lists muted pad">Loading…</div>
+        <div className="lists muted pad"><T>Loading…</T></div>
       ) : (
         <nav className="lists" ref={nav} tabIndex={-1}>
-          {nothing ? <div className="list note">No threads match.</div> : null}
-          {count.starred > 0 ? section('starred', 'Starred', <Icon.Star />) : null}
-          {count.coordinators > 0 ? section('coordinators', 'Coordinators', <Icon.Folder />) : null}
-          {count.inbox > 0 || !narrowing ? section('inbox', 'Inbox', <Icon.Inbox />, <OrderMenu order={order} pick={pickOrder} />, count.inbox === 0 ? <div className="list note">Nothing waiting.</div> : null) : null}
-          {count.running > 0 ? section('running', 'Running', <Icon.Bolt />) : null}
-          {count.hibernating > 0 ? section('hibernating', 'Hibernating', <Icon.Moon />, undefined, !snoozed ? <div className="list note">Loading…</div> : null) : null}
+          {nothing ? <div className="list note"><T>No threads match.</T></div> : null}
+          {count.starred > 0 ? section('starred', translate(msg('Starred')), <Icon.Star />) : null}
+          {count.coordinators > 0 ? section('coordinators', translate(msg('Coordinators')), <Icon.Folder />) : null}
+          {count.inbox > 0 || !narrowing ? section('inbox', translate(msg('Inbox')), <Icon.Inbox />, <OrderMenu order={order} pick={pickOrder} />, count.inbox === 0 ? <div className="list note"><T>Nothing waiting.</T></div> : null) : null}
+          {count.running > 0 ? section('running', translate(msg('Running')), <Icon.Bolt />) : null}
+          {count.hibernating > 0 ? section('hibernating', translate(msg('Hibernating')), <Icon.Moon />, undefined, !snoozed ? <div className="list note"><T>Loading…</T></div> : null) : null}
           {count.archived > 0
             ? section(
                 'archived',
-                'Archived',
+                translate(msg('Archived')),
                 <Icon.Archive />,
                 undefined,
                 !den ? (
-                  <div className="list note">Loading…</div>
+                  <div className="list note"><T>Loading…</T></div>
                 ) : archive.more > 0 ? (
-                  <button className="more-row" title={`${archive.more} older archived ${archive.more === 1 ? 'thread' : 'threads'} not shown`} onClick={() => setArchiveLimit((n) => n + ARCHIVE_STEP)}>
+                  <button className="more-row" title={translate(msg('Show older archived threads'))} onClick={() => setArchiveLimit((n) => n + ARCHIVE_STEP)}>
                     <Icon.More />
-                    Show {Math.min(archive.more, ARCHIVE_STEP)} more
+                    {translate(msg('Show {count} more'), { count: Math.min(archive.more, ARCHIVE_STEP) })}
                   </button>
                 ) : !narrowing && (counts?.den ?? 0) > allArchived.length ? (
-                  <div className="list note">Search finds the older ones.</div>
+                  <div className="list note"><T>Search finds the older ones.</T></div>
                 ) : null,
               )
             : null}
-          {settling && drawn.length === 0 ? <div className="list note">Searching…</div> : null}
+          {settling && drawn.length === 0 ? <div className="list note"><T>Searching…</T></div> : null}
         </nav>
       )}
     </div>
@@ -208,14 +210,15 @@ function Heading({ icon, title, count, collapsed, toggle, accessory }: { icon: R
 }
 
 function SearchBox({ value, onChange }: { value: string; onChange: (text: string) => void }) {
+  const translate = useMessages();
   return (
     <div className="search">
       <Icon.Search />
       <input
         type="text"
         value={value}
-        placeholder="Search threads"
-        aria-label="Search threads"
+        placeholder={translate(msg("Search threads"))}
+        aria-label={translate(msg("Search threads"))}
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -223,7 +226,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (text: string
         }}
       />
       {value ? (
-        <button className="clear" title="Clear the search" aria-label="Clear the search" onClick={() => onChange('')}>
+        <button className="clear" title={translate(msg("Clear the search"))} aria-label={translate(msg("Clear the search"))} onClick={() => onChange('')}>
           <Icon.Close />
         </button>
       ) : null}
@@ -232,18 +235,20 @@ function SearchBox({ value, onChange }: { value: string; onChange: (text: string
 }
 
 function FilterMenu({ filter, setFilter, rows }: { filter: Filter; setFilter: (f: Filter) => void; rows: Row[] }) {
+  const translate = useMessages();
   const places = placeChoices(rows);
   const on = isFiltering(filter);
-  const words = [filter.show !== 'all' ? SHOWS.find((s) => s.show === filter.show)?.label : null, filter.placeLabel].filter(Boolean).join(', ');
+  const show = filter.show !== 'all' ? SHOWS.find((s) => s.show === filter.show) : undefined;
+  const words = [show && translate(show.label), filter.placeLabel].filter(Boolean).join(', ');
   return (
-    <Pop title={on ? `Filter: ${words}` : 'Filter threads'} icon={<Icon.Filter />} lit={on}>
+    <Pop title={on ? translate(msg('Filter: {filters}'), { filters: words }) : translate(msg('Filter threads'))} icon={<Icon.Filter />} lit={on}>
       {(close) => (
         <>
           {SHOWS.map((s) => (
             <MenuChoice
               key={s.show}
               icon={s.icon}
-              label={s.label}
+              label={translate(s.label)}
               on={filter.show === s.show}
               pick={() => {
                 setFilter({ ...filter, show: s.show });
@@ -254,7 +259,7 @@ function FilterMenu({ filter, setFilter, rows }: { filter: Filter; setFilter: (f
           <hr />
           <MenuChoice
             icon={<Icon.Folder />}
-            label="Every project"
+            label={translate(msg("Every project"))}
             on={filter.place === undefined}
             pick={() => {
               setFilter({ show: filter.show });
@@ -283,15 +288,16 @@ function FilterMenu({ filter, setFilter, rows }: { filter: Filter; setFilter: (f
 }
 
 function OrderMenu({ order, pick }: { order: InboxOrder; pick: (o: InboxOrder) => void }) {
+  const translate = useMessages();
   const current = ORDERS.find((o) => o.order === order)!;
   return (
-    <Pop title={`Sort: ${current.label}`} icon={<Icon.Sort />} lit={order !== 'needsYou'}>
+    <Pop title={translate(msg('Sort: {order}'), { order: translate(current.label) })} icon={<Icon.Sort />} lit={order !== 'needsYou'}>
       {(close) =>
         ORDERS.map((o) => (
           <MenuChoice
             key={o.order}
             icon={o.icon}
-            label={o.label}
+            label={translate(o.label)}
             on={order === o.order}
             pick={() => {
               pick(o.order);
@@ -305,6 +311,7 @@ function OrderMenu({ order, pick }: { order: InboxOrder; pick: (o: InboxOrder) =
 }
 
 function Rows({ rows, selected, focusList }: { rows: Row[]; selected?: string; focusList: () => void }) {
+  const translate = useMessages();
   return (
     <ul className="list">
       {rows.map((r) => (
@@ -321,10 +328,10 @@ function Rows({ rows, selected, focusList }: { rows: Row[]; selected?: string; f
             }}
           >
             <span className="row-top">
-              {r.needsYou ? <span className="mark needs" title="Needs you" /> : r.unread ? <span className="mark unread" title="Unread" /> : null}
+              {r.needsYou ? <span className="mark needs" title={translate(msg("Needs you"))} /> : r.unread ? <span className="mark unread" title={translate(msg("Unread"))} /> : null}
               <span className="title">{r.title || 'Untitled'}</span>
               {r.share?.access === 'link' ? (
-                <span className="shared" title="Shared by link">
+                <span className="shared" title={translate(msg("Shared by link"))}>
                   <Icon.Link />
                 </span>
               ) : null}
@@ -344,14 +351,15 @@ function Rows({ rows, selected, focusList }: { rows: Row[]; selected?: string; f
 
 // The time at the right of a row, or the status instead of it, as the Mac.
 function When({ row: r }: { row: Row }) {
+  const translate = useMessages();
   if (busy(r) && !r.needsYou) {
     return (
-      <span className="when running" title="Working">
+      <span className="when running" title={translate(msg("Working"))}>
         <span className="spinner" />
       </span>
     );
   }
-  if (r.status === 'error') return <span className="when failed">Failed</span>;
+  if (r.status === 'error') return <span className="when failed"><T>Failed</T></span>;
   return (
     <span className={`when ${r.needsYou ? 'waiting' : ''}`} title={r.needsYou ? 'Waiting for you' : undefined}>
       {ago(r.lastActivityMs)}
@@ -370,6 +378,7 @@ export function useSidebarWidth() {
 // on every pointer move made it lag behind the hand. The stylesheet clamps the
 // variable too, for a window made narrower later.
 export function ResizeHandle({ shell, width, setWidth }: { shell: RefObject<HTMLDivElement | null>; width: number; setWidth: (w: number) => void }) {
+  const translate = useMessages();
   const drag = useRef<{ x: number; from: number; to: number } | null>(null);
   // The width now, not as of the last render: a double-click's second press
   // can come before React has rendered the first's, and a drag starting from
@@ -388,10 +397,10 @@ export function ResizeHandle({ shell, width, setWidth }: { shell: RefObject<HTML
       className="resize-handle"
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize the sidebar"
+      aria-label={translate(msg("Resize the sidebar"))}
       aria-valuenow={clampWidth(width, window.innerWidth)}
       tabIndex={0}
-      title="Drag to resize, double-click to reset"
+      title={translate(msg("Drag to resize, double-click to reset"))}
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);

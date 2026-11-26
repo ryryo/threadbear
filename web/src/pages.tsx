@@ -3,6 +3,7 @@
 // showing. Most of what they say comes from the queries the phone reads, and
 // most of it is for reading: a schedule can be paused or run from here, and any
 // other change to one, or to a project, happens on the Mac or through an agent.
+import { msg, T, useMessages } from 'gt-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -99,9 +100,10 @@ function Heading({ icon, title, count, folded, toggle }: { icon: ReactNode; titl
 // A page's header: back to the view's list on a phone, its title, what goes at
 // the end.
 function PageHead({ view, title, children }: { view: RailView; title: string; children?: ReactNode }) {
+  const translate = useMessages();
   return (
     <header className="thread-head">
-      <button className="icon-btn back" onClick={() => go(viewPath(view))} aria-label="Back to the list" title="Back to the list">
+      <button className="icon-btn back" onClick={() => go(viewPath(view))} aria-label={translate(msg("Back to the list"))} title={translate(msg("Back to the list"))}>
         <Icon.Back />
       </button>
       <div className="crumbs">
@@ -112,7 +114,7 @@ function PageHead({ view, title, children }: { view: RailView; title: string; ch
   );
 }
 
-function Nothing({ children }: { children: string }) {
+function Nothing({ children }: { children: ReactNode }) {
   return <div className="list note">{children}</div>;
 }
 
@@ -156,11 +158,12 @@ const ThreadRows = ({ rows }: { rows: Row[] }) => (
 const FOLDED_DONE = 'threadbear.scheduledDoneOpen';
 
 export function ScheduledList({ token, selected }: { token: string; selected?: string }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.schedules, { token }) as Schedule[] | undefined;
   const [query, setQuery] = useState('');
   const [doneOpen, setDoneOpen] = useState(() => localStorage.getItem(FOLDED_DONE) === '1');
   const now = useClock();
-  if (!rows) return <div className="lists muted pad">Loading…</div>;
+  if (!rows) return <div className="lists muted pad"><T>Loading…</T></div>;
   const q = query.trim();
   const { active, paused, done } = scheduleSections(rows.filter((s) => matchesSchedule(s, q)));
   const open = doneOpen || !!q;
@@ -176,9 +179,9 @@ export function ScheduledList({ token, selected }: { token: string; selected?: s
       <div className="search-row">
         <div className="search">
           <Icon.Search />
-          <input type="text" value={query} placeholder="Search schedules" aria-label="Search schedules" spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery('')} />
+          <input type="text" value={query} placeholder={translate(msg("Search schedules"))} aria-label={translate(msg("Search schedules"))} spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery('')} />
           {query ? (
-            <button className="clear" title="Clear the search" aria-label="Clear the search" onClick={() => setQuery('')}>
+            <button className="clear" title={translate(msg("Clear the search"))} aria-label={translate(msg("Clear the search"))} onClick={() => setQuery('')}>
               <Icon.Close />
             </button>
           ) : null}
@@ -188,13 +191,13 @@ export function ScheduledList({ token, selected }: { token: string; selected?: s
         {active.length + paused.length + done.length === 0 ? <Nothing>{q ? 'No schedules match.' : 'Nothing scheduled.'}</Nothing> : null}
         {active.length ? (
           <>
-            <Heading icon={<Icon.Clock />} title="Active" count={active.length} />
+            <Heading icon={<Icon.Clock />} title={translate(msg("Active"))} count={active.length} />
             {list(active, (s) => untilWords(s.nextRunAt, now))}
           </>
         ) : null}
         {paused.length ? (
           <>
-            <Heading icon={<Icon.Moon />} title="Paused" count={paused.length} />
+            <Heading icon={<Icon.Moon />} title={translate(msg("Paused"))} count={paused.length} />
             {list(paused, () => 'Paused')}
           </>
         ) : null}
@@ -202,7 +205,7 @@ export function ScheduledList({ token, selected }: { token: string; selected?: s
           <>
             <Heading
               icon={<Icon.Archive />}
-              title="Done"
+              title={translate(msg("Done"))}
               count={done.length}
               folded={!open}
               toggle={
@@ -223,13 +226,14 @@ export function ScheduledList({ token, selected }: { token: string; selected?: s
 }
 
 export function SchedulePage({ token, id }: { token: string; id: string }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.schedules, { token }) as Schedule[] | undefined;
   const runners = useLiveQuery(api.phone.runners, { token });
   const command = useMutation(api.phone.schedule);
   // Pause, Resume and Run now: one at a time, the pressed one spinning.
   const cmd = useCommand<'pause' | 'resume' | 'run'>(token);
   const now = useClock();
-  if (!rows) return <div className="pad muted">Loading…</div>;
+  if (!rows) return <div className="pad muted"><T>Loading…</T></div>;
   const s = rows.find((x) => x.id === id);
   if (!s) return <PageGone view="scheduled" what="That schedule has gone." />;
   const runner = runners?.find((r) => r.runnerId === s.runnerId);
@@ -246,9 +250,9 @@ export function SchedulePage({ token, id }: { token: string; id: string }) {
               {spins(toggle) ? <span className="spinner" /> : s.paused ? <Icon.Play /> : <Icon.Pause />}
               {s.paused ? 'Resume' : 'Pause'}
             </button>
-            <button className="btn" title="Run it once now, whatever its next time is" disabled={cmd.busy} onClick={() => act('run')}>
+            <button className="btn" title={translate(msg("Run it once now, whatever its next time is"))} disabled={cmd.busy} onClick={() => act('run')}>
               {spins('run') ? <span className="spinner" /> : <Icon.Play />}
-              Run now
+              <T>Run now</T>
             </button>
           </>
         )}
@@ -257,13 +261,13 @@ export function SchedulePage({ token, id }: { token: string; id: string }) {
         <div className="page-col">
           <CommandNote command={cmd} />
           <dl className="facts">
-            <dt>When</dt>
+            <dt><T>When</T></dt>
             <dd>{s.whenText}</dd>
             <dt>{s.finishedAt || s.paused ? 'State' : 'Next'}</dt>
             <dd>{state}</dd>
             {s.lastRun ? (
               <>
-                <dt>Last</dt>
+                <dt><T>Last</T></dt>
                 <dd>
                   {s.lastRun.threadId ? (
                     <a
@@ -273,22 +277,22 @@ export function SchedulePage({ token, id }: { token: string; id: string }) {
                         go(threadPath(s.lastRun!.threadId!));
                       }}
                     >
-                      {sinceWords(Date.parse(s.lastRun.at), now)} ago
+                      {translate(msg('{duration} ago'), { duration: sinceWords(Date.parse(s.lastRun.at), now) })}
                     </a>
                   ) : (
-                    `${sinceWords(Date.parse(s.lastRun.at), now)} ago`
+                    `${translate(msg('{duration} ago'), { duration: sinceWords(Date.parse(s.lastRun.at), now) })}`
                   )}
                   {s.lastRun.note ? `, ${s.lastRun.note}` : ''}
                 </dd>
               </>
             ) : null}
-            <dt>Runs</dt>
+            <dt><T>Runs</T></dt>
             <dd>{s.runs}</dd>
-            <dt>Runner</dt>
+            <dt><T>Runner</T></dt>
             <dd>{runner?.name ?? s.runnerId}</dd>
             {s.threadId ? (
               <>
-                <dt>Sends to</dt>
+                <dt><T>Sends to</T></dt>
                 <dd>
                   <a
                     href={threadPath(s.threadId)}
@@ -297,19 +301,19 @@ export function SchedulePage({ token, id }: { token: string; id: string }) {
                       go(threadPath(s.threadId!));
                     }}
                   >
-                    Its thread
+                    <T>Its thread</T>
                   </a>
                 </dd>
               </>
             ) : s.cwd ? (
               <>
-                <dt>Folder</dt>
+                <dt><T>Folder</T></dt>
                 <dd>{folderName(s.cwd)}</dd>
               </>
             ) : null}
             {s.accountId || s.poolId ? (
               <>
-                <dt>Login</dt>
+                <dt><T>Login</T></dt>
                 <dd>{s.accountId ?? s.poolId}</dd>
               </>
             ) : null}
@@ -341,6 +345,7 @@ function PageGone({ view, what }: { view: RailView; what: string }) {
 const iconOf = (p: object) => (p as { icon?: { url?: string } }).icon?.url;
 
 export function ProjectsList({ token, selected }: { token: string; selected?: { runnerId: string; id: string } }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.projects, { token });
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
@@ -352,7 +357,7 @@ export function ProjectsList({ token, selected }: { token: string; selected?: { 
     return () => clearTimeout(t);
   }, [q]);
   const deep = useLiveQuery(api.phone.projectSearch, asked ? { token, text: asked } : 'skip');
-  if (!rows) return <div className="lists muted pad">Loading…</div>;
+  if (!rows) return <div className="lists muted pad"><T>Loading…</T></div>;
   const inDepth = new Set((deep ?? []).map((m) => `${m.runnerId}/${m.id}`));
   const shown = rows.filter((p) => !q || p.title.toLowerCase().includes(q) || inDepth.has(`${p.runnerId}/${p.id}`));
   return (
@@ -360,9 +365,9 @@ export function ProjectsList({ token, selected }: { token: string; selected?: { 
       <div className="search-row">
         <div className="search">
           <Icon.Search />
-          <input type="text" value={query} placeholder="Search projects" aria-label="Search projects" spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery('')} />
+          <input type="text" value={query} placeholder={translate(msg("Search projects"))} aria-label={translate(msg("Search projects"))} spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQuery('')} />
           {query ? (
-            <button className="clear" title="Clear the search" aria-label="Clear the search" onClick={() => setQuery('')}>
+            <button className="clear" title={translate(msg("Clear the search"))} aria-label={translate(msg("Clear the search"))} onClick={() => setQuery('')}>
               <Icon.Close />
             </button>
           ) : null}
@@ -398,6 +403,7 @@ const PROJECT_THREADS_FIRST = 50;
 const PROJECT_THREADS_MORE = 100;
 
 export function ProjectPage({ token, runnerId, id }: { token: string; runnerId?: string; id: string }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.projects, { token });
   // The address says which runner's project it is (route-path.ts); its goals,
   // state, notes and threads are read for that runner's project alone, as
@@ -410,9 +416,9 @@ export function ProjectPage({ token, runnerId, id }: { token: string; runnerId?:
   const threads = useLiveQuery(api.phone.projectThreads, head ? { token, runnerId: head.runnerId, projectId: id, limit } : 'skip');
   // A new project starts from the first page again.
   useEffect(() => setLimit(PROJECT_THREADS_FIRST), [id]);
-  if (!rows) return <div className="pad muted">Loading…</div>;
+  if (!rows) return <div className="pad muted"><T>Loading…</T></div>;
   if (!head || p === null) return <PageGone view="projects" what="That project has gone." />;
-  if (!p) return <div className="pad muted">Loading…</div>;
+  if (!p) return <div className="pad muted"><T>Loading…</T></div>;
   const live = (threads ?? []).filter((t) => t.view !== 'den');
   const archived = (threads ?? []).filter((t) => t.view === 'den');
   const more = (threads?.length ?? 0) >= limit;
@@ -432,25 +438,25 @@ export function ProjectPage({ token, runnerId, id }: { token: string; runnerId?:
           {block('Where it stands', p.state)}
           {live.length ? (
             <section className="block">
-              <h2>Live threads</h2>
+              <h2><T>Live threads</T></h2>
               <ThreadRows rows={live} />
             </section>
           ) : null}
           {archived.length ? (
             <section className="block">
-              <h2>Archived</h2>
+              <h2><T>Archived</T></h2>
               <ThreadRows rows={archived} />
             </section>
           ) : null}
           {more ? (
-            <button className="btn" title="Show older threads in this project" onClick={() => setLimit((n) => n + PROJECT_THREADS_MORE)}>
-              Show more
+            <button className="btn" title={translate(msg("Show older threads in this project"))} onClick={() => setLimit((n) => n + PROJECT_THREADS_MORE)}>
+              <T>Show more</T>
             </button>
           ) : null}
           {p.notes.trim() ? (
             <details className="worked">
               <summary>
-                Notes<span className="chev">›</span>
+                <T>Notes</T><span className="chev">›</span>
               </summary>
               <div className="worked-body">
                 <MessageText text={p.notes} />
@@ -459,7 +465,7 @@ export function ProjectPage({ token, runnerId, id }: { token: string; runnerId?:
           ) : null}
           {p.folders.length ? (
             <section className="block">
-              <h2>Folders</h2>
+              <h2><T>Folders</T></h2>
               <div className="page-note">{p.folders.map(folderName).join(', ')}</div>
             </section>
           ) : null}
@@ -501,12 +507,13 @@ function Mini({ label, value, low }: { label: string; value: number; low?: boole
 }
 
 export function RunnersList({ token, selected }: { token: string; selected?: string }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.runners, { token });
   const inbox = useInbox();
   const stats = useLiveQuery(api.phone.runnerStats, { token });
   useWatchRunners(token);
   const now = useClock();
-  if (!rows) return <div className="lists muted pad">Loading…</div>;
+  if (!rows) return <div className="lists muted pad"><T>Loading…</T></div>;
   const shown = runnersShown(rows, now);
   const online = shown.filter((r) => isOnline(r, now));
   const offline = shown.filter((r) => !isOnline(r, now));
@@ -519,7 +526,7 @@ export function RunnersList({ token, selected }: { token: string; selected?: str
           s && isOnline(r, now) && statsFresh(s, now) ? (
             <span className="minis">
               <Mini label="CPU" value={s.cpuPercent} />
-              <Mini label="Mem" value={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
+              <Mini label={translate(msg("Mem"))} value={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
             </span>
           ) : (
             runnerState(r, now)
@@ -533,29 +540,30 @@ export function RunnersList({ token, selected }: { token: string; selected?: str
       <nav className="lists">
         {online.length ? (
           <>
-            <Heading icon={<Icon.Bolt />} title="Online" count={online.length} />
+            <Heading icon={<Icon.Bolt />} title={translate(msg("Online"))} count={online.length} />
             {list(online)}
           </>
         ) : null}
         {offline.length ? (
           <>
-            <Heading icon={<Icon.Moon />} title="Offline" count={offline.length} />
+            <Heading icon={<Icon.Moon />} title={translate(msg("Offline"))} count={offline.length} />
             {list(offline)}
           </>
         ) : null}
-        {!shown.length ? <Nothing>No runners have reported in.</Nothing> : null}
+        {!shown.length ? <Nothing><T>No runners have reported in.</T></Nothing> : null}
       </nav>
     </div>
   );
 }
 
 export function RunnerPage({ token, id }: { token: string; id: string }) {
+  const translate = useMessages();
   const rows = useLiveQuery(api.phone.runners, { token });
   const inbox = useInbox();
   const accounts = useLiveQuery(api.phone.accounts, { token }) as Account[] | undefined;
   const stats = useLiveQuery(api.phone.runnerStats, { token });
   const now = useClock();
-  if (!rows) return <div className="pad muted">Loading…</div>;
+  if (!rows) return <div className="pad muted"><T>Loading…</T></div>;
   const r = rows.find((x) => x.runnerId === id);
   if (!r) return <PageGone view="runners" what="That runner has gone." />;
   const mine = (inbox ?? []).filter((t) => t.runnerId === id);
@@ -576,45 +584,45 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
           {s ? (
             <div className="meters">
               <Meter label="CPU" sub={`${s.cores} cores${s.load1 !== undefined ? `, load ${s.load1}` : ''}`} value={`${s.cpuPercent}%`} percent={s.cpuPercent} />
-              <Meter label="Memory" sub={r.pressure === 'memory' ? 'Running low' : undefined} value={`${bytesWords(s.memUsed)} of ${bytesWords(s.memTotal)}`} percent={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
-              <Meter label="Disk" sub={r.pressure === 'disk' ? 'Running low' : undefined} value={`${bytesWords(s.diskFree)} free of ${bytesWords(s.diskTotal)}`} percent={percent(s.diskTotal - s.diskFree, s.diskTotal)} low={r.pressure === 'disk'} />
-              {fresh ? null : <div className="page-note">From {sinceWords(Date.parse(s.at), now)} ago, when it last reported.</div>}
+              <Meter label={translate(msg("Memory"))} sub={r.pressure === 'memory' ? 'Running low' : undefined} value={`${bytesWords(s.memUsed)} of ${bytesWords(s.memTotal)}`} percent={percent(s.memUsed, s.memTotal)} low={r.pressure === 'memory'} />
+              <Meter label={translate(msg("Disk"))} sub={r.pressure === 'disk' ? 'Running low' : undefined} value={`${bytesWords(s.diskFree)} free of ${bytesWords(s.diskTotal)}`} percent={percent(s.diskTotal - s.diskFree, s.diskTotal)} low={r.pressure === 'disk'} />
+              {fresh ? null : <div className="page-note">{translate(msg('From {duration} ago, when it last reported.'), { duration: sinceWords(Date.parse(s.at), now) })}</div>}
             </div>
           ) : isOnline(r, now) ? (
-            <div className="page-note">Asking it for its figures…</div>
+            <div className="page-note"><T>Asking it for its figures…</T></div>
           ) : null}
           <dl className="facts">
             {s?.machine || s?.os ? (
               <>
-                <dt>Machine</dt>
+                <dt><T>Machine</T></dt>
                 <dd>{[s.machine, s.os].filter(Boolean).join(', ')}</dd>
               </>
             ) : null}
-            <dt>Version</dt>
+            <dt><T>Version</T></dt>
             <dd>{r.version}</dd>
             {r.startedAt && isOnline(r, now) ? (
               <>
-                <dt>Up for</dt>
+                <dt><T>Up for</T></dt>
                 <dd>
                   {sinceWords(Date.parse(r.startedAt), now)}
                   {s ? `, the machine ${sinceWords(now - s.uptimeSec * 1000, now)}` : ''}
                 </dd>
               </>
             ) : null}
-            <dt>Threads</dt>
+            <dt><T>Threads</T></dt>
             <dd>
-              {running.length} running, {mine.length} not put away
+              {translate(msg('{active} running, {total} not put away'), { active: running.length, total: mine.length })}
             </dd>
             {logins.length ? (
               <>
-                <dt>Logins</dt>
+                <dt><T>Logins</T></dt>
                 <dd>{logins.join(', ')}</dd>
               </>
             ) : null}
           </dl>
           {running.length ? (
             <section className="block">
-              <h2>Running here</h2>
+              <h2><T>Running here</T></h2>
               <ThreadRows rows={running} />
             </section>
           ) : null}
@@ -629,7 +637,7 @@ export function RunnerPage({ token, id }: { token: string; id: string }) {
 export function UsageList({ token, selected }: { token: string; selected?: string }) {
   const rows = useLiveQuery(api.phone.accounts, { token }) as Account[] | undefined;
   const runners = useLiveQuery(api.phone.runners, { token });
-  if (!rows) return <div className="lists muted pad">Loading…</div>;
+  if (!rows) return <div className="lists muted pad"><T>Loading…</T></div>;
   const name = (id: string) => runners?.find((r) => r.runnerId === id)?.name ?? '';
   const severalRunners = new Set(rows.map((a) => a.runnerId)).size > 1;
   return (
@@ -647,7 +655,7 @@ export function UsageList({ token, selected }: { token: string; selected?: strin
               })}
           </ul>
         ) : (
-          <Nothing>No logins have reported in.</Nothing>
+          <Nothing><T>No logins have reported in.</T></Nothing>
         )}
       </nav>
     </div>
@@ -658,7 +666,7 @@ export function UsagePage({ token, id }: { token: string; id: string }) {
   const rows = useLiveQuery(api.phone.accounts, { token }) as Account[] | undefined;
   const runners = useLiveQuery(api.phone.runners, { token });
   const now = useClock();
-  if (!rows) return <div className="pad muted">Loading…</div>;
+  if (!rows) return <div className="pad muted"><T>Loading…</T></div>;
   const a = rows.find((x) => `${x.runnerId}~${x.id}` === id);
   if (!a) return <PageGone view="usage" what="That login has gone." />;
   const windows = a.usage?.windows ?? [];
@@ -670,17 +678,17 @@ export function UsagePage({ token, id }: { token: string; id: string }) {
           <dl className="facts">
             {a.email ? (
               <>
-                <dt>Email</dt>
+                <dt><T>Email</T></dt>
                 <dd>{a.email}</dd>
               </>
             ) : null}
             {a.plan ? (
               <>
-                <dt>Plan</dt>
+                <dt><T>Plan</T></dt>
                 <dd>{a.plan}</dd>
               </>
             ) : null}
-            <dt>Runner</dt>
+            <dt><T>Runner</T></dt>
             <dd>{runners?.find((r) => r.runnerId === a.runnerId)?.name ?? a.runnerId}</dd>
           </dl>
           {windows.length ? (
@@ -690,7 +698,7 @@ export function UsagePage({ token, id }: { token: string; id: string }) {
               ))}
             </div>
           ) : (
-            <div className="page-note">This login hasn't said how much room it has yet.</div>
+            <div className="page-note"><T>This login hasn't said how much room it has yet.</T></div>
           )}
         </div>
       </div>
@@ -701,6 +709,7 @@ export function UsagePage({ token, id }: { token: string; id: string }) {
 // ------------------------------------------------------------ a new thread
 
 export function NewThread({ token }: { token: string }) {
+  const translate = useMessages();
   const create = useMutation(api.phone.create);
   const runners = useLiveQuery(api.phone.runners, { token });
   const [text, setText] = useState('');
@@ -779,11 +788,11 @@ export function NewThread({ token }: { token: string }) {
   return (
     <div className="page">
       <header className="thread-head">
-        <button className="icon-btn back" onClick={() => go('/')} aria-label="Back to the threads" title="Back to the threads">
+        <button className="icon-btn back" onClick={() => go('/')} aria-label={translate(msg("Back to the threads"))} title={translate(msg("Back to the threads"))}>
           <Icon.Back />
         </button>
         <div className="crumbs">
-          <h1>New thread</h1>
+          <h1><T>New thread</T></h1>
         </div>
       </header>
       <div className="new-thread">
@@ -801,8 +810,8 @@ export function NewThread({ token }: { token: string }) {
               value={text}
               readOnly={cmd.busy}
               rows={Math.min(10, Math.max(2, text.split('\n').length))}
-              placeholder="What should it do?"
-              aria-label="What should it do?"
+              placeholder={translate(msg("What should it do?"))}
+              aria-label={translate(msg("What should it do?"))}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !matchMedia('(pointer: coarse)').matches) {
@@ -814,8 +823,8 @@ export function NewThread({ token }: { token: string }) {
             <div className="tools-row">
               {/* Shown too while a picked runner is the only one up, so a send never names one unseen. */}
               {online.length > 1 || sentRunner ? (
-                <select value={sentRunner} disabled={cmd.busy} onChange={(e) => pickRunner(e.target.value)} aria-label="Runner" title="Which runner it starts on">
-                  <option value="">Main runner</option>
+                <select value={sentRunner} disabled={cmd.busy} onChange={(e) => pickRunner(e.target.value)} aria-label={translate(msg("Runner"))} title={translate(msg("Which runner it starts on"))}>
+                  <option value=""><T>Main runner</T></option>
                   {online.map((r) => (
                     <option key={r.runnerId} value={r.runnerId}>
                       {r.name}
@@ -825,8 +834,8 @@ export function NewThread({ token }: { token: string }) {
               ) : null}
               {models.length ? (
                 <>
-                  <select value={sentModel} disabled={cmd.busy} onChange={(e) => pickModel(e.target.value)} aria-label="Model" title="Which model it uses">
-                    <option value="">Default model</option>
+                  <select value={sentModel} disabled={cmd.busy} onChange={(e) => pickModel(e.target.value)} aria-label={translate(msg("Model"))} title={translate(msg("Which model it uses"))}>
+                    <option value=""><T>Default model</T></option>
                     {models.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.title}
@@ -838,8 +847,8 @@ export function NewThread({ token }: { token: string }) {
                         setRunnerId(sentRunner);
                         setModelId(sentModel);
                         setEffort(e.target.value);
-                      }} aria-label="Effort" title="How hard it thinks">
-                      <option value="">Default effort</option>
+                      }} aria-label={translate(msg("Effort"))} title={translate(msg("How hard it thinks"))}>
+                      <option value=""><T>Default effort</T></option>
                       {efforts(model).map((l) => (
                         <option key={l} value={l}>
                           {effortTitle(l)}
@@ -850,7 +859,7 @@ export function NewThread({ token }: { token: string }) {
                 </>
               ) : null}
               <span className="grow" />
-              <button className="send" disabled={!text.trim() || cmd.busy} aria-label="Start the thread" title="Start the thread">
+              <button className="send" disabled={!text.trim() || cmd.busy} aria-label={translate(msg("Start the thread"))} title={translate(msg("Start the thread"))}>
                 {cmd.spinning ? <span className="spinner" /> : <Icon.Up />}
               </button>
             </div>

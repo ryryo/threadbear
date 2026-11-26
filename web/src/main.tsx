@@ -8,6 +8,9 @@ import { startSignIn, takeSignInCodeFromHash } from './token';
 import { LinkConfirm } from './link-confirm';
 import { ReplaceSignIn } from './replace-sign-in';
 import { applyTheme } from './theme';
+import { I18nProvider } from './i18n/I18nProvider';
+import { startI18n } from './i18n/runtime';
+import { guardDomAgainstPageTranslation } from './lib/pageTranslationGuard';
 import './styles.css';
 
 // A sign-in link (the Mac's Open signed in, or `npm run web:sign-in`)
@@ -16,6 +19,8 @@ import './styles.css';
 // for this browser's token (token.ts says why it's never the token itself).
 const signInCode = takeSignInCodeFromHash();
 applyTheme();
+startI18n();
+guardDomAgainstPageTranslation();
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 // A browser that's already signed in asks before swapping (token.ts, startSignIn).
@@ -24,9 +29,11 @@ if (signInCode) startSignIn((code) => convex.mutation(api.tokens.claim, { code }
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ConvexProvider client={convex}>
-      <App />
-      <LinkConfirm />
-      <ReplaceSignIn />
+      <I18nProvider>
+        <App />
+        <LinkConfirm />
+        <ReplaceSignIn />
+      </I18nProvider>
     </ConvexProvider>
   </StrictMode>,
 );

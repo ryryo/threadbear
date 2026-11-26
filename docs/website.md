@@ -4,6 +4,10 @@ Threadbear in a browser, so a thread has a link you can paste anywhere:
 `https://opulent-moose-249.ap-southeast-2.convex.site/t/<threadId>`.
 Built 28 Oct 2026 (thread 66935d23).
 
+Choose the browser's language, English or 日本語 from the settings gear.
+The sign-in page also offers a language menu. The choice takes effect on
+the open page and this browser remembers it.
+
 ## What it is
 
 - `web/`: a small Vite + React app, looking like the Mac app (refreshed

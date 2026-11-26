@@ -1,6 +1,7 @@
 // How a thread's messages and tool lines are drawn, on Mike's own thread
 // page (App.tsx) and on a shared one (share.tsx).
 
+import { msg, T, useMessages } from 'gt-react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { go } from './route';
@@ -41,17 +42,18 @@ type Body = FunctionReturnType<typeof api.phone.eventBody>;
 
 // One picture a tool handed back: on the runner until it's asked for, then here for a day.
 function HeldPicture({ token, threadId, seq, index }: { token: string; threadId: string; seq: number; index: number }) {
+  const translate = useMessages();
   const request = useMutation(api.phone.requestPicture);
   const [asked, setAsked] = useState(false);
   const [failed, setFailed] = useState(false);
   const picture = useLiveQuery(api.phone.heldPicture, asked ? { token, threadId, seq, index } : 'skip');
   if (picture) return <img className="tool-picture" src={picture.url} alt={`Picture ${index + 1} from this tool`} />;
-  if (failed) return <span className="muted">Couldn't ask for that picture.</span>;
+  if (failed) return <span className="muted"><T>Couldn't ask for that picture.</T></span>;
   return (
     <button
       className="link"
       disabled={asked}
-      title="Asks the runner to upload this picture. It's kept here for a day."
+      title={translate(msg("Asks the runner to upload this picture. It's kept here for a day."))}
       onClick={() => {
         setAsked(true);
         request({ token, threadId, seq, index }).catch(() => setFailed(true));
@@ -78,7 +80,7 @@ function ToolBody({ token, threadId, seq, body }: { token: string; threadId: str
         </div>
       ))}
       {body.text ? <pre className={body.ok === false ? 'failed' : undefined}>{body.text}</pre> : null}
-      {body.truncated || body.cut ? <div className="muted">Output shortened. All of it is on the runner.</div> : null}
+      {body.truncated || body.cut ? <div className="muted"><T>Output shortened. All of it is on the runner.</T></div> : null}
       {Array.from({ length: pictureCount(body.images) }, (_, index) => (
         <HeldPicture key={index} token={token} threadId={threadId} seq={seq} index={index} />
       ))}
@@ -87,6 +89,7 @@ function ToolBody({ token, threadId, seq, body }: { token: string; threadId: str
 }
 
 function ToolLine({ m, source }: { m: PageMessage; source: { token: string; threadId: string } }) {
+  const translate = useMessages();
   const convex = useConvex();
   const [open, setOpen] = useState(false);
   // undefined: not asked yet. One query, not a subscription: tool output doesn't change.
@@ -103,13 +106,13 @@ function ToolLine({ m, source }: { m: PageMessage; source: { token: string; thre
   };
   return (
     <li id={stepId(m.seq)} title={new Date(m.at).toLocaleString()} className="tool-open">
-      <button className="tool-line" aria-expanded={open} title="Show what this tool did" onClick={toggle}>
+      <button className="tool-line" aria-expanded={open} title={translate(msg("Show what this tool did"))} onClick={toggle}>
         <span className="tool-glyph" aria-hidden="true">
           {toolGlyph(m.toolKind)}
         </span>
         <span>{m.text}</span>
       </button>
-      {open ? failed ? <div className="tool-body muted">Couldn't load that.</div> : body === undefined ? <div className="tool-body muted">Loading…</div> : <ToolBody {...source} seq={m.seq} body={body} /> : null}
+      {open ? failed ? <div className="tool-body muted"><T>Couldn't load that.</T></div> : body === undefined ? <div className="tool-body muted"><T>Loading…</T></div> : <ToolBody {...source} seq={m.seq} body={body} /> : null}
     </li>
   );
 }
@@ -138,7 +141,7 @@ export function ToolRun({ items, open, source }: { items: PageMessage[]; open?: 
   if (open || items.length <= 3) return <div className="tool-run">{lines}</div>;
   return (
     <details className="tool-run">
-      <summary>{items.length} tool calls</summary>
+      <summary>{items.length} <T>tool calls</T></summary>
       {lines}
     </details>
   );
@@ -207,6 +210,7 @@ export function MessageText({
   // page, whose readers mustn't press Mike's buttons), it's the title as text.
   button?: (id: string, title: ReactNode) => ReactNode;
 }) {
+  const translate = useMessages();
   // The exact text Markdown reads, so a block's position can be looked up in it.
   const markdown = escapeDestinations(text);
   return (
@@ -247,9 +251,9 @@ export function MessageText({
                 );
               }
               return (
-                <span className="picture-chip" title="This picture is only on your Mac: it was pasted before pictures went up, is over 10 MB, or pictures are turned off on that runner">
+                <span className="picture-chip" title={translate(msg("This picture is only on your Mac: it was pasted before pictures went up, is over 10 MB, or pictures are turned off on that runner"))}>
                   <Icon.Photo />
-                  Picture {picture}
+                  <T>Picture</T> {picture}
                 </span>
               );
             }
@@ -257,7 +261,7 @@ export function MessageText({
             // phones draw it (nightly parity run, 23 Nov).
             if (pictureChips && href && isNotionCard(href)) {
               return (
-                <OutLink className="card-chip" href={href} title="Open this card in Notion">
+                <OutLink className="card-chip" href={href} title={translate(msg("Open this card in Notion"))}>
                   <Icon.Card />
                   {children}
                 </OutLink>
@@ -269,7 +273,7 @@ export function MessageText({
             // it's a page on this site that isn't there.
             // `/` and `//` ones are this site's own pages and web addresses.
             if (!link && href && !/^[#/]/.test(href) && !/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-              return <span title="This file is on the Mac">{children}</span>;
+              return <span title={translate(msg("This file is on the Mac"))}>{children}</span>;
             }
             // A #… link (a footnote) is a place on this page, followed here.
             if (!link && href?.startsWith('#') && !/[\s\u0000-\u001f]/.test(href)) {
@@ -359,6 +363,7 @@ function fenceOf(node: unknown): { language?: string; code: string } | undefined
 // A draft for Mike to send elsewhere: every line where the agent put it,
 // with a Slack one's formatting drawn, and a Copy that keeps the links.
 function DraftBox({ draft }: { draft: Draft }) {
+  const translate = useMessages();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     const plain = draftPlainText(draft);
@@ -380,7 +385,7 @@ function DraftBox({ draft }: { draft: Draft }) {
     <div className="draft">
       <div className="draft-head">
         <span>{draftLabel(draft.kind)}</span>
-        <button className={copied ? 'btn plain copied' : 'btn plain'} onClick={() => void copy()} title="Copy the draft, with its links and formatting">
+        <button className={copied ? 'btn plain copied' : 'btn plain'} onClick={() => void copy()} title={translate(msg("Copy the draft, with its links and formatting"))}>
           {copied ? '✓ Copied' : 'Copy'}
         </button>
       </div>
@@ -454,7 +459,7 @@ export function PlanCard({ m, rows, pictures, threadPath, button }: { m: PageMes
     <section className="plan-card" aria-label={`Plan: ${planTitle(m.text)}`}>
       <div className="plan-card-head">
         <span className="plan-card-kind">
-          <Icon.Clipboard /> Plan
+          <Icon.Clipboard /> <T>Plan</T>
         </span>
         {decided ? <span className="plan-card-decided">{decided}</span> : null}
       </div>

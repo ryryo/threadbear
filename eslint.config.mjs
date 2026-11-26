@@ -3,6 +3,36 @@ import mikecannLint from "mikecann-lint";
 // This repo's TypeScript, for the rules below the pack's.
 const TS = ["{runner,relay,convex,web}/**/*.{ts,tsx,mts,cts}"];
 
+// Visible Web copy goes through GT. Product names and code examples are
+// rendered as written. Runtime data is passed through as JSX expressions.
+const visibleAttributes = new Set(["title", "aria-label", "aria-description", "placeholder", "label", "description", "heading"]);
+const originalWords = new Set(["Threadbear", "CPU", "OK", "English", "日本語"]);
+const webCopy = {
+  create(context) {
+    function check(node, value) {
+      const words = value.trim();
+      if (/[A-Za-z]/.test(words) && !originalWords.has(words)) {
+        context.report({ node, message: "Mark visible text for translation with T or msg." });
+      }
+    }
+    return {
+      JSXText(node) {
+        for (let parent = node.parent; parent; parent = parent.parent) {
+          if (parent.type !== "JSXElement") continue;
+          const name = parent.openingElement.name.name;
+          if (name === "T" || name === "code" || name === "pre" || name === "svg") return;
+        }
+        check(node, node.value);
+      },
+      JSXAttribute(node) {
+        if (visibleAttributes.has(node.name.name) && node.value?.type === "Literal" && typeof node.value.value === "string") {
+          check(node.value, node.value.value);
+        }
+      },
+    };
+  },
+};
+
 export default [
   // Lints the TypeScript in convex/, web/, relay/, runner/ and features/
   // (the GPUI specs' steps, typed by features/tsconfig.json). The rest is
@@ -29,6 +59,11 @@ export default [
     untyped: ["runner/scripts/**"],
     notReact: ["runner/**", "relay/**", "features/**"],
   })),
+  {
+    files: ["web/src/**/*.tsx"],
+    plugins: { "threadbear-i18n": { rules: { "no-untranslated-copy": webCopy } } },
+    rules: { "threadbear-i18n/no-untranslated-copy": "error" },
+  },
   {
     // No any: use unknown and narrow it. (Floating and misused promises,
     // exhaustive switches and unused names come from mikecann-lint 0.2.)

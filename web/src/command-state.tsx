@@ -3,6 +3,7 @@
 // and CommandNote says where it's got to. A control that sends one passes
 // `disabled={cmd.busy}` and shows a spinner while it's on its way, so it
 // can't be pressed twice (AGENTS.md, "Assume every action is slow to land").
+import { T } from 'gt-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -156,9 +157,9 @@ export function CommandNote({ command, className = '', sending = false }: { comm
     <>
       {command.late !== undefined ? (
         <div className={`command failed ${className}`} role="alert">
-          <span>An earlier message didn’t send: {command.late}</span>
+          <span><T>An earlier message didn’t send:</T> {command.late}</span>
           <button type="button" className="link" onClick={command.clearLate}>
-            Dismiss
+            <T>Dismiss</T>
           </button>
         </div>
       ) : null}

@@ -2,6 +2,8 @@
 // sidebar (sidebar.tsx) beside a thread with each finished turn folded to
 // "Worked for 4m 12s" and its reply, and the agent's card of asks joined to
 // the composer. A shared thread (/s/<slug>) is share.tsx.
+import { msg, T, useMessages } from 'gt-react';
+import { LanguageMenu } from './i18n/LanguageMenu';
 import { Component, Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation } from 'convex/react';
 import { useLiveQuery } from './live';
@@ -47,7 +49,7 @@ export function App() {
   if (route.page === 'machines')
     return (
       <Catch key={token}>
-        <Suspense fallback={<main className="signin"><p>Loading the machines…</p></main>}>
+        <Suspense fallback={<main className="signin"><p><T>Loading the machines…</T></p></main>}>
           <MachinesPage token={token} />
         </Suspense>
       </Catch>
@@ -72,7 +74,7 @@ function SignIn({ expired }: { expired?: boolean }) {
       <main className="signin">
         <img src="/icon.png" alt="" width={72} height={72} />
         <h1>Threadbear</h1>
-        <p>Signing in…</p>
+        <p><T>Signing in…</T></p>
       </main>
     );
   }
@@ -80,11 +82,12 @@ function SignIn({ expired }: { expired?: boolean }) {
     <main className="signin">
       <img src="/icon.png" alt="" width={72} height={72} />
       <h1>Threadbear</h1>
+      <LanguageMenu />
       {note ? <p>{note}</p> : null}
-      <p>{expired ? 'This browser’s sign-in has expired or been revoked.' : 'This browser isn’t signed in yet.'}</p>
-      <p>On the Mac, open Threadbear, then Settings › Phone &amp; browser › Open signed in.</p>
+      <p>{expired ? <T>This browser’s sign-in has expired or been revoked.</T> : <T>This browser isn’t signed in yet.</T>}</p>
+      <p><T>On the Mac, open Threadbear, then Settings › Phone & browser › Open signed in.</T></p>
       <p className="muted small">
-        It opens this site in your browser, signed in. From a terminal instead, in the repo: <code>npm run web:sign-in</code> (add <code>-- --qr</code> for a code to scan on another device).
+        <T>It opens this site in your browser, signed in. From a terminal instead, in the repo:</T> <code>npm run web:sign-in</code> <T>(add a flag for a code to scan on another device)</T> <code>-- --qr</code>
       </p>
     </main>
   );
@@ -104,8 +107,8 @@ class Catch extends Component<{ children: ReactNode }, { error: unknown }> {
     if (kind === 'auth') return <SignIn expired />;
     return (
       <main className="signin">
-        <h1>{kind === 'notFound' ? 'No such thread' : 'Something went wrong'}</h1>
-        <p className="muted">{kind === 'notFound' ? 'It may have been deleted, or the Mac hasn’t mirrored it yet.' : String(error)}</p>
+        <h1>{kind === 'notFound' ? <T>No such thread</T> : <T>Something went wrong</T>}</h1>
+        <p className="muted">{kind === 'notFound' ? <T>It may have been deleted, or the Mac hasn’t mirrored it yet.</T> : String(error)}</p>
         <p>
           <a
             href="/"
@@ -115,7 +118,7 @@ class Catch extends Component<{ children: ReactNode }, { error: unknown }> {
               go('/');
             }}
           >
-            Back to the threads
+            <T>Back to the threads</T>
           </a>
         </p>
       </main>
@@ -182,6 +185,7 @@ function Empty({ text }: { text: string }) {
 // ------------------------------------------------------------ thread
 
 function ThreadView({ token, threadId }: { token: string; threadId: string }) {
+  const translate = useMessages();
   const t = useLiveQuery(api.phone.threadRow, { token, threadId });
   const shown = useTranscript(token, threadId);
   // For thread: links, as agents may give only the start of an id.
@@ -214,7 +218,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   }, [t, token, threadId, update]);
 
   useEffect(() => {
-    if (t) document.title = `${t.title || 'Untitled'} · Threadbear`;
+    if (t) document.title = `${t.title || translate(msg('Untitled'))} · Threadbear`;
     return () => {
       document.title = 'Threadbear';
     };
@@ -226,7 +230,7 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   // here (links to steps, pictures, the review's place) is about what Mike
   // and the agent said and did.
   const messages = useMemo(() => rows.filter((m) => !isNote(m)), [rows]);
-  if (!shown || !t) return <div className="pad muted">Loading…</div>;
+  if (!shown || !t) return <div className="pad muted"><T>Loading…</T></div>;
 
   // A live page (API 95) runs only in the Mac and iPhone apps' sealed views:
   // here it's its title, never an <img> or a link to its file.
@@ -306,21 +310,21 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
   return (
     <article className="thread">
       <header className="thread-head">
-        <button className="icon-btn back" onClick={() => go('/')} aria-label="Back to the threads" title="Back to the threads">
+        <button className="icon-btn back" onClick={() => go('/')} aria-label={translate(msg("Back to the threads"))} title={translate(msg("Back to the threads"))}>
           <Icon.Back />
         </button>
         <div className="crumbs" title={t.cwd}>
           <span className="folder">{folderName(t.cwd)}</span>
           <span className="sep">/</span>
-          <h1>{t.title || 'Untitled'}</h1>
+          <h1>{t.title || translate(msg('Untitled'))}</h1>
         </div>
         <ShareControl token={token} threadId={threadId} share={t.share} preview={previewOf(t.title, messages, pictures.filter((p) => !p.src?.startsWith('picture:')))} />
         <MoreMenu
           items={[
-            { label: 'Copy link', icon: <Icon.Link />, run: () => void navigator.clipboard.writeText(location.origin + location.pathname) },
-            { label: t.starredAt ? 'Unstar' : 'Star', icon: t.starredAt ? <Icon.StarOff /> : <Icon.Star />, run: () => act({ star: !t.starredAt }), busy: change.busy },
-            t.view === 'hibernating' || t.snoozedUntil ? { label: 'Wake', icon: <Icon.Sun />, run: () => act({ wake: true }), busy: change.busy } : t.view === 'inbox' ? { label: 'Hibernate', icon: <Icon.Moon />, run: () => act({ snooze: { untilRestart: true } }), busy: change.busy } : null,
-            t.view === 'den' ? { label: 'Bring back', icon: <Icon.Inbox />, run: () => act({ unarchive: true }), busy: change.busy } : { label: 'Archive', icon: <Icon.Archive />, run: () => act({ archive: true }), busy: change.busy },
+            { label: translate(msg('Copy link')), icon: <Icon.Link />, run: () => void navigator.clipboard.writeText(location.origin + location.pathname) },
+            { label: t.starredAt ? translate(msg('Unstar')) : translate(msg('Star')), icon: t.starredAt ? <Icon.StarOff /> : <Icon.Star />, run: () => act({ star: !t.starredAt }), busy: change.busy },
+            t.view === 'hibernating' || t.snoozedUntil ? { label: translate(msg('Wake')), icon: <Icon.Sun />, run: () => act({ wake: true }), busy: change.busy } : t.view === 'inbox' ? { label: translate(msg('Hibernate')), icon: <Icon.Moon />, run: () => act({ snooze: { untilRestart: true } }), busy: change.busy } : null,
+            t.view === 'den' ? { label: translate(msg('Bring back')), icon: <Icon.Inbox />, run: () => act({ unarchive: true }), busy: change.busy } : { label: translate(msg('Archive')), icon: <Icon.Archive />, run: () => act({ archive: true }), busy: change.busy },
           ]}
         />
       </header>
@@ -336,17 +340,17 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
               shown.loadMore();
             }}
           >
-            {shown.loadingMore ? 'Loading…' : 'Load earlier messages'}
+            {shown.loadingMore ? translate(msg('Loading…')) : translate(msg('Load earlier messages'))}
           </button>
         ) : null}
         {items.map(renderItem)}
         {meta ? <div className="meta">{meta}</div> : null}
         {busy(t) ? (
           <div className="working">
-            <span className="spinner" /> {t.working || 'Working…'}
+            <span className="spinner" /> {t.working || translate(msg('Working…'))}
           </div>
         ) : t.status === 'error' ? (
-          <div className="failed-note">The last turn failed. Send a message to try again.</div>
+          <div className="failed-note"><T>The last turn failed. Send a message to try again.</T></div>
         ) : null}
         <div ref={bottom} />
       </div>
@@ -361,8 +365,9 @@ function ThreadView({ token, threadId }: { token: string; threadId: string }) {
 
 // busy: the item sends a command and one is still on its way.
 function MoreMenu({ items }: { items: ({ label: string; icon: ReactNode; run: () => void; busy?: boolean } | null)[] }) {
+  const translate = useMessages();
   return (
-    <Pop title="More" icon={<Icon.More />}>
+    <Pop title={translate(msg("More"))} icon={<Icon.More />}>
       {(close) =>
         items.map((i) =>
           i ? (
@@ -400,6 +405,7 @@ function bookedWhen(at: string): string {
 type Draft = { text: string; picks: { card?: number; by: Record<number, number> }; ticked: { seq?: number; set: Set<number> } };
 
 function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { token: string; thread: Row; lastSeq?: number; onArchive: () => void; archiving: boolean; linkTo: (id: string) => string }) {
+  const translate = useMessages();
   const send = useMutation(api.phone.send);
   const interrupt = useMutation(api.phone.interrupt);
   const [text, setText] = useState('');
@@ -516,8 +522,8 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
                   </a>
                 ) : /^review:/i.test(l.url) ? (
                   // A show_options review in this thread: its window is on the Mac.
-                  <span key={l.url} className="btn inert-link" title="This review opens in Threadbear on your Mac or iPhone">
-                    {l.title} (on your Mac or iPhone)
+                  <span key={l.url} className="btn inert-link" title={translate(msg("This review opens in Threadbear on your Mac or iPhone"))}>
+                    {l.title} <T>(on your Mac or iPhone)</T>
                   </span>
                 ) : (
                   <OutLink key={l.url} className="btn primary" href={l.url}>
@@ -534,7 +540,7 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
                   <span className="radio" />
                   <span>
                     {c}
-                    {a.suggested === n ? <span className="pick"><span className="star" aria-hidden>★</span> Recommended</span> : null}
+                    {a.suggested === n ? <span className="pick"><span className="star" aria-hidden>★</span> <T>Recommended</T></span> : null}
                     {/* What the answer does, under it as on the Mac and the phone. The
                         parity run's first look at the website found it missing (9 Nov). */}
                     {a.options?.length && a.optionNotes?.[n]?.trim() ? <span className="desc">{a.optionNotes[n]}</span> : null}
@@ -549,9 +555,9 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
   ) : next.length || ends.length ? (
     <section className="card">
       <h2>
-        Done
+        <T>Done</T>
         <button className="btn plain" style={{ marginLeft: 'auto' }} disabled={archiving} onClick={onArchive}>
-          Archive
+          <T>Archive</T>
         </button>
       </h2>
       {ends.length ? (
@@ -603,7 +609,7 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
                   <span className={pickOne ? 'radio' : 'radio check'} />
                   <span>
                     {n}
-                    {suggested ? <span className="pick"><span className="star" aria-hidden>★</span> Recommended</span> : null}
+                    {suggested ? <span className="pick"><span className="star" aria-hidden>★</span> <T>Recommended</T></span> : null}
                   </span>
                 </button>
               );
@@ -633,7 +639,7 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
           value={text}
           readOnly={holding}
           rows={Math.min(10, Math.max(1, text.split('\n').length))}
-          placeholder={busy(t) ? 'Steer the agent' : asks.length ? 'Reply, or pick above' : 'Reply'}
+          placeholder={busy(t) ? translate(msg('Steer the agent')) : asks.length ? translate(msg('Reply, or pick above')) : translate(msg('Reply'))}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // Return sends, Shift-Return is a new line, as on the Mac. On a
@@ -649,11 +655,11 @@ function Dock({ token, thread: t, lastSeq, onArchive, archiving, linkTo }: { tok
           {busy(t) && !ready ? (
             // Stop only while nothing's typed, as on the Mac: a message
             // typed during a turn goes into it.
-            <button type="button" className="send" disabled={stopLocked} onClick={stop} aria-label={stopLocked ? 'Stopping' : 'Stop'} title={stopLocked ? 'Stopping' : 'Stop'}>
+            <button type="button" className="send" disabled={stopLocked} onClick={stop} aria-label={stopLocked ? translate(msg('Stopping')) : translate(msg('Stop'))} title={stopLocked ? translate(msg('Stopping')) : translate(msg('Stop'))}>
               {stopping ? <span className="spinner" /> : <Icon.Stop />}
             </button>
           ) : (
-            <button className="send" disabled={!ready || holding} aria-label={holding ? 'Sending' : 'Send'} title={holding ? 'Sending' : 'Send'}>
+            <button className="send" disabled={!ready || holding} aria-label={holding ? translate(msg('Sending')) : translate(msg('Send'))} title={holding ? translate(msg('Sending')) : translate(msg('Send'))}>
               {sending.state.kind === 'sending' ? <span className="spinner" /> : <Icon.Up />}
             </button>
           )}
@@ -691,6 +697,7 @@ function followUpMessage(follow: string[], extra: string): string {
 // runner takes the answer the card goes; until then the pressed button
 // spins and none take clicks, and a failure says why on the card.
 function ApprovalCard({ token, threadId, approval }: { token: string; threadId: string; approval: Approval }) {
+  const translate = useMessages();
   const respond = useMutation(api.phone.respond);
   const answer = useMutation(api.phone.answer);
   const secret = useMutation(api.phone.secret);
@@ -700,7 +707,7 @@ function ApprovalCard({ token, threadId, approval }: { token: string; threadId: 
   const pressed = (b: string) => (reply.state.kind === 'sending' || reply.state.kind === 'waiting') && reply.state.payload === b;
 
   if (approval.kind === 'approval') {
-    const label = { allow: 'Allow', allowAlways: 'Always allow', deny: 'Deny' } as Record<string, string>;
+    const label = { allow: translate(msg('Allow')), allowAlways: translate(msg('Always allow')), deny: translate(msg('Deny')) } as Record<string, string>;
     return (
       <section className="card">
         <h2>{approval.title || approval.name}</h2>
@@ -725,11 +732,11 @@ function ApprovalCard({ token, threadId, approval }: { token: string; threadId: 
       <section className="card">
         <h2>{approval.label}</h2>
         <p>{approval.reason}</p>
-        <p className="desc">Answer this in Threadbear on your Mac or iPhone.</p>
+        <p className="desc"><T>Answer this in Threadbear on your Mac or iPhone.</T></p>
         <div className="ask-links">
           <button className="btn" disabled={reply.busy} onClick={() => void reply.run(() => secret({ token, threadId, approvalId: approval.approvalId, decline: true }), 'decline')}>
             {pressed('decline') ? <span className="spinner" /> : null}
-            Decline
+            <T>Decline</T>
           </button>
         </div>
         <CommandNote command={reply} className="in-card" />
@@ -781,7 +788,7 @@ function ApprovalCard({ token, threadId, approval }: { token: string; threadId: 
           }}
         >
           {pressed('answer') ? <span className="spinner" /> : null}
-          Answer
+          <T>Answer</T>
         </button>
       </div>
       <CommandNote command={reply} className="in-card" />

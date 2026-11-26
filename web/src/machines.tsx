@@ -4,6 +4,7 @@
 // counts in each state and any row's state and history. Read-only.
 // convex/viewer.ts answers only this browser's token, which the viewer's
 // queries don't know to send: the client below adds it to each one.
+import { T } from 'gt-react';
 import { useMemo } from 'react';
 import { useConvex } from 'convex/react';
 import type { ConvexReactClient } from 'convex/react';
@@ -31,8 +32,8 @@ export default function MachinesPage({ token }: { token: string }) {
   return (
     <div className="machines-page">
       <header className="machines-bar">
-        <a href="/" onClick={(e) => { e.preventDefault(); go('/'); }}>Threads</a>
-        <span>Machines</span>
+        <a href="/" onClick={(e) => { e.preventDefault(); go('/'); }}><T>Threads</T></a>
+        <span><T>Machines</T></span>
       </header>
       <MachinesViewer client={client} functions={api.viewer} config={{ settings: { theme: readTheme() } }} />
     </div>
