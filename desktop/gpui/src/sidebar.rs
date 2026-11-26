@@ -19,6 +19,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::{tr, trf};
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use serde_json::{json, Value};
@@ -1468,40 +1469,40 @@ impl Threadbear {
             // So several threads can be open at once (thread_panels.rs).
             if self.has_thread_panel(&t.id, cx) {
                 MenuRow::item(
-                    "Move to Main Panel",
+                    tr!("Move to Main Panel"),
                     "rectangle.portrait.and.arrow.forward",
                     MenuAction::MoveToMainPanel,
                 )
             } else {
                 MenuRow::item(
-                    "Open in New Panel",
+                    tr!("Open in New Panel"),
                     "rectangle.split.2x1",
                     MenuAction::OpenInPanel,
                 )
             },
             MenuRow::separator(),
-            MenuRow::item("Rename", "pencil", MenuAction::Rename),
+            MenuRow::item(tr!("Rename"), "pencil", MenuAction::Rename),
             if t.is_starred() {
-                MenuRow::item("Remove Star", "star.slash", MenuAction::Star(false))
+                MenuRow::item(tr!("Remove Star"), "star.slash", MenuAction::Star(false))
             } else {
-                MenuRow::item("Star", "star", MenuAction::Star(true))
+                MenuRow::item(tr!("Star"), "star", MenuAction::Star(true))
             },
-            MenuRow::submenu("Hibernate", "moon.zzz", self.snooze_menu_rows()),
+            MenuRow::submenu(tr!("Hibernate"), "moon.zzz", self.snooze_menu_rows()),
         ];
         if t.snoozed_until.is_some() {
-            rows.push(MenuRow::item("Wake", "sun.max", MenuAction::Wake));
+            rows.push(MenuRow::item(tr!("Wake"), "sun.max", MenuAction::Wake));
         }
         if t.is_archived() {
             // One the quiet inbox hid (quiet_inbox.rs) can say so as it comes back.
             if t.quietly_archived.is_some() {
                 rows.push(MenuRow::item(
-                    "Should Have Shown Me",
+                    tr!("Should Have Shown Me"),
                     "eye",
                     MenuAction::ShouldHaveShown,
                 ));
             }
             rows.push(MenuRow::item(
-                "Unarchive",
+                tr!("Unarchive"),
                 "tray.and.arrow.up",
                 MenuAction::Unarchive,
             ));
@@ -1510,16 +1511,20 @@ impl Threadbear {
             match t.runner_id.as_deref() {
                 Some(runner) => rows.push(
                     MenuRow::item(
-                        format!("Delete on {}", self.runner_name_of(runner)),
+                        trf!("Delete on {runner}", runner = self.runner_name_of(runner)),
                         "trash",
                         MenuAction::Delete,
                     )
                     .disabled(),
                 ),
-                None => rows.push(MenuRow::item("Delete…", "trash", MenuAction::Delete)),
+                None => rows.push(MenuRow::item(tr!("Delete…"), "trash", MenuAction::Delete)),
             }
         } else {
-            rows.push(MenuRow::item("Archive", "archivebox", MenuAction::Archive));
+            rows.push(MenuRow::item(
+                tr!("Archive"),
+                "archivebox",
+                MenuAction::Archive,
+            ));
         }
         // Move Out From Under, or Put Back Under, the thread that started it
         // (nested threads). Dragging it in or out is planned, once Mike has
@@ -1548,7 +1553,7 @@ impl Threadbear {
             .filter(|m| !matches!(m["state"].as_str(), Some("cancelled") | Some("failed")));
         if moving.is_some() {
             rows.push(MenuRow::item(
-                "Cancel Move",
+                tr!("Cancel Move"),
                 "xmark.circle",
                 MenuAction::CancelMove,
             ));
@@ -1572,13 +1577,17 @@ impl Threadbear {
                         row
                     })
                     .collect();
-                rows.push(MenuRow::submenu("Move to", "arrow.right.square", children));
+                rows.push(MenuRow::submenu(
+                    tr!("Move to"),
+                    "arrow.right.square",
+                    children,
+                ));
             }
         }
         // "Copy thread id" comes after a divider, as `.iconContextMenu` adds it.
         rows.push(MenuRow::separator());
         rows.push(MenuRow::item(
-            "Copy thread id",
+            tr!("Copy thread id"),
             "number",
             MenuAction::CopyId,
         ));
@@ -1596,7 +1605,7 @@ impl Threadbear {
         // away now and come back after (`app.restartPending`).
         if self.client.restart().is_pending() {
             items.push(MenuRow::item(
-                rows::SNOOZE_UNTIL_RESTART,
+                rows::snooze_until_restart(),
                 "arrow.clockwise",
                 MenuAction::HibernateUntilRestart,
             ));
@@ -1608,7 +1617,7 @@ impl Threadbear {
             MenuAction::PickTime,
         ));
         items.push(MenuRow::item(
-            rows::WAKE_MENU_TITLE,
+            rows::wake_menu_title(),
             "text.bubble",
             MenuAction::WakeWhen,
         ));
@@ -1863,7 +1872,7 @@ impl Threadbear {
         window.open_alert_dialog(cx, move |dialog, _, _| {
             let (entity, field_read, id) = (entity.clone(), field.clone(), id.clone());
             dialog
-                .title("Hibernate until")
+                .title(tr!("Hibernate until"))
                 .width(px(460.))
                 .child(Input::new(&field))
                 .button_props(
@@ -1933,7 +1942,7 @@ impl Threadbear {
                 already_gone.clone(),
             );
             dialog
-                .title("Hibernate until")
+                .title(tr!("Hibernate until"))
                 .width(px(360.))
                 .child(
                     v_flex()
@@ -1942,14 +1951,14 @@ impl Threadbear {
                         .child(
                             div()
                                 .id("snooze-day")
-                                .tip("Day to wake it")
+                                .tip(tr!("Day to wake it"))
                                 .child(Calendar::new(&calendar)),
                         )
                         .child(
                             div()
                                 .id("snooze-time")
                                 .w(px(125.))
-                                .tip("Time to wake it")
+                                .tip(tr!("Time to wake it"))
                                 .child(TimeField::new(&time)),
                         ),
                 )
@@ -1957,7 +1966,7 @@ impl Threadbear {
                     dialog.description(
                         div()
                             .text_color(style::failed_text(cx))
-                            .child("That time has already gone. Pick a later one."),
+                            .child(tr!("That time has already gone. Pick a later one.")),
                     )
                 })
                 .button_props(
@@ -2082,7 +2091,7 @@ impl Threadbear {
                     .pt(px(10.))
                     .text_size(px(style::size::SIDEBAR_PREVIEW))
                     .text_color(p.secondary)
-                    .child("No threads match."),
+                    .child(tr!("No threads match.")),
             );
         } else {
             let visible_count = sections
@@ -2218,7 +2227,7 @@ impl Threadbear {
                     // Confetti pops from here when the last thread leaves (confetti.rs).
                     let note = div()
                         .relative()
-                        .child("Nothing in the inbox.")
+                        .child(tr!("Nothing in the inbox."))
                         .child(crate::confetti::anchor("inbox-empty"));
                     let empty = div()
                         .pl(px(LEADING))
@@ -2398,7 +2407,7 @@ impl Threadbear {
         // icon and title, so the Input's own padding is dropped.
         h_flex()
             .id("search-field")
-            .tip("Search threads")
+            .tip(tr!("Search threads"))
             .flex_1()
             .min_w_0()
             // 29 tall as the Swift field is (6 over and under a 14 pt line):
@@ -2782,7 +2791,7 @@ impl Threadbear {
                 .text_color(color)
                 .hover(move |s| s.text_color(fg)),
             "sort-inbox",
-            format!("Sort: {}", order.title())
+            trf!("Sort: {order}", order = order.title())
         )
         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
             let menu_rows = this.sort_menu_rows();
@@ -3975,7 +3984,7 @@ fn render_tile(
         Some(
             div()
                 .id(SharedString::from(format!("failed-{}", t.id)))
-                .tip("The last turn failed")
+                .tip(tr!("The last turn failed"))
                 .absolute()
                 .left(px(-(LEADING + 10.) / 2. - 1.))
                 .top_0()
@@ -4002,7 +4011,7 @@ fn render_tile(
         Some(
             div()
                 .id(SharedString::from(format!("needs-you-{}", t.id)))
-                .tip("Needs you")
+                .tip(tr!("Needs you"))
                 .absolute()
                 .left(px(-(LEADING + 7.) / 2. - 1.))
                 .top_0()

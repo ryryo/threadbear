@@ -17,6 +17,7 @@ use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
 use std::ops::Range;
 use threadbear_core::spelling::{self, Transform};
+use threadbear_core::tr;
 
 actions!(
     text_services,
@@ -434,7 +435,7 @@ pub(crate) fn context_menu(
         let text = input.read(cx).value().to_string();
         let guesses = text_services::guesses(&text, range.clone());
         if guesses.is_empty() {
-            menu = menu.menu_with_disabled("No Guesses Found", true, Box::new(IgnoreSpelling));
+            menu = menu.menu_with_disabled(tr!("No Guesses Found"), true, Box::new(IgnoreSpelling));
         }
         for word in guesses.into_iter().take(8) {
             menu = menu.menu(
@@ -449,41 +450,41 @@ pub(crate) fn context_menu(
         }
         menu = menu
             .separator()
-            .menu("Ignore Spelling", Box::new(IgnoreSpelling))
-            .menu("Learn Spelling", Box::new(LearnSpelling))
+            .menu(tr!("Ignore Spelling"), Box::new(IgnoreSpelling))
+            .menu(tr!("Learn Spelling"), Box::new(LearnSpelling))
             .separator();
     }
     menu = menu
         .menu_with_disabled("Cut", !(editable && has_selection), Box::new(Cut))
-        .menu_with_disabled("Copy", !has_selection, Box::new(Copy))
-        .menu_with_disabled("Paste", !editable, Box::new(Paste))
+        .menu_with_disabled(tr!("Copy"), !has_selection, Box::new(Copy))
+        .menu_with_disabled(tr!("Paste"), !editable, Box::new(Paste))
         .separator()
-        .menu("Select All", Box::new(SelectAll));
+        .menu(tr!("Select All"), Box::new(SelectAll));
     if !text_services::AVAILABLE {
         return menu;
     }
     menu = menu
         .separator()
         .menu_with_disabled(
-            "Look Up",
+            tr!("Look Up"),
             !crate::native_text::has_lookup(window, cx),
             Box::new(crate::native_text::LookUp),
         )
         .menu_with_disabled(
-            "Services…",
+            tr!("Services…"),
             !crate::native_text::has_selection(window, cx),
             Box::new(crate::native_text::Services),
         );
     if crate::native_text::translate_available() {
         menu = menu.menu_with_disabled(
-            "Translate",
+            tr!("Translate"),
             !has_selection,
             Box::new(crate::native_text::Translate),
         );
     }
     if crate::native_text::writing_tools_available() {
         menu = menu.menu_with_disabled(
-            "Writing Tools",
+            tr!("Writing Tools"),
             !has_selection,
             Box::new(crate::native_text::WritingTools),
         );
@@ -495,47 +496,55 @@ pub(crate) fn context_menu(
     // "Show Spelling and Grammar" and "Show Substitutions" are AppKit's
     // panels, which only an NSTextView can answer; they're left out.
     let spelling = NativeMenu::new()
-        .menu("Check Document Now", Box::new(CheckDocumentNow))
+        .menu(tr!("Check Document Now"), Box::new(CheckDocumentNow))
         .separator()
         .menu_with_check(
-            "Check Spelling While Typing",
+            tr!("Check Spelling While Typing"),
             checks.spelling,
             Box::new(ToggleSpellingWhileTyping),
         )
         .menu_with_check(
-            "Check Grammar With Spelling",
+            tr!("Check Grammar With Spelling"),
             checks.grammar,
             Box::new(ToggleGrammar),
         )
         .menu_with_check(
-            "Correct Spelling Automatically",
+            tr!("Correct Spelling Automatically"),
             checks.correct(),
             Box::new(ToggleCorrectSpelling),
         );
     let substitutions = NativeMenu::new()
-        .menu_with_check("Smart Quotes", checks.quotes, Box::new(ToggleSmartQuotes))
-        .menu_with_check("Smart Dashes", checks.dashes, Box::new(ToggleSmartDashes))
         .menu_with_check(
-            "Text Replacement",
+            tr!("Smart Quotes"),
+            checks.quotes,
+            Box::new(ToggleSmartQuotes),
+        )
+        .menu_with_check(
+            tr!("Smart Dashes"),
+            checks.dashes,
+            Box::new(ToggleSmartDashes),
+        )
+        .menu_with_check(
+            tr!("Text Replacement"),
             checks.replace(),
             Box::new(ToggleTextReplacement),
         );
     let transformations = NativeMenu::new()
-        .menu_with_disabled("Make Upper Case", !editable, Box::new(MakeUpperCase))
-        .menu_with_disabled("Make Lower Case", !editable, Box::new(MakeLowerCase))
-        .menu_with_disabled("Capitalize", !editable, Box::new(Capitalize));
+        .menu_with_disabled(tr!("Make Upper Case"), !editable, Box::new(MakeUpperCase))
+        .menu_with_disabled(tr!("Make Lower Case"), !editable, Box::new(MakeLowerCase))
+        .menu_with_disabled(tr!("Capitalize"), !editable, Box::new(Capitalize));
     let speech = NativeMenu::new()
-        .menu("Start Speaking", Box::new(StartSpeaking))
+        .menu(tr!("Start Speaking"), Box::new(StartSpeaking))
         .menu_with_disabled(
-            "Stop Speaking",
+            tr!("Stop Speaking"),
             !text_services::speaking(),
             Box::new(StopSpeaking),
         );
     menu.separator()
-        .submenu("Spelling and Grammar", spelling)
-        .submenu("Substitutions", substitutions)
-        .submenu("Transformations", transformations)
-        .submenu("Speech", speech)
+        .submenu(tr!("Spelling and Grammar"), spelling)
+        .submenu(tr!("Substitutions"), substitutions)
+        .submenu(tr!("Transformations"), transformations)
+        .submenu(tr!("Speech"), speech)
 }
 
 /// `composer-spelling`: the words marked now, each with "spelling" or

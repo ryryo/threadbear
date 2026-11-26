@@ -16,3 +16,21 @@ Feature: Desktop language
     When I choose English as the desktop language
     Then the Settings title is "General" in "en"
     And the "File" menu lists "Close"
+
+  @settings.language @swift-pending
+  Scenario: A Japanese menu and approval keep their original actions
+    When I choose Japanese as the desktop language
+    Then the "ファイル" menu lists "新しいスレッド | 閉じる"
+    When I open the thread "Make uploads resume after a crash"
+    Then an approval card asks to run "rm -rf .build DerivedData"
+    When I press "拒否"
+    Then the transcript shows a reply starting "OK, I left it alone"
+
+  @settings.language @swift-pending
+  Scenario: Starting a thread in Japanese keeps the message as typed
+    When I choose Japanese as the desktop language
+    And I start a new thread
+    Then the new-thread page asks "何から始めましょうか？"
+    When I type "バックアップを確認してください" in the composer
+    And I press Return
+    Then the transcript shows my message "バックアップを確認してください"

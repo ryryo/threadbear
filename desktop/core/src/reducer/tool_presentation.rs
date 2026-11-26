@@ -68,13 +68,13 @@ impl ToolPresentation {
         let verb = match tool.tool_kind() {
             ToolKind::Read => {
                 if tool.name() == "view_image" {
-                    "View"
+                    crate::tr!("View")
                 } else {
-                    "Read"
+                    crate::tr!("Read")
                 }
             }
-            ToolKind::Edit => "Edit",
-            ToolKind::Write => "Write",
+            ToolKind::Edit => crate::tr!("Edit"),
+            ToolKind::Write => crate::tr!("Write"),
             _ => return None,
         };
         let input = &tool.call.as_ref()?.input;
@@ -129,7 +129,7 @@ impl ToolPresentation {
         if tool.tool_kind() == ToolKind::Command {
             if let Some(command) = tool.call.as_ref().and_then(|c| field(&c.input, "command")) {
                 if Self::short_title(command, 80) == title {
-                    return format!("Running {title}");
+                    return crate::trf!("Running {title}", title = title);
                 }
             }
         }

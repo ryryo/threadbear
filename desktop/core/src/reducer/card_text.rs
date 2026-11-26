@@ -13,16 +13,16 @@ impl ApprovalText {
     pub fn title(request: &ApprovalRequest) -> String {
         let file = Self::file_path(request).map(|p| Self::shown(text::last_path_component(&p)));
         match request.name.as_str() {
-            "Bash" => "Run this command?".to_owned(),
+            "Bash" => crate::tr!("Run this command?").to_owned(),
             "Edit" | "MultiEdit" | "NotebookEdit" => file
-                .map(|f| format!("Edit {f}?"))
-                .unwrap_or_else(|| "Edit this file?".to_owned()),
+                .map(|f| crate::trf!("Edit {f}?", f = f))
+                .unwrap_or_else(|| crate::tr!("Edit this file?").to_owned()),
             "Write" => file
-                .map(|f| format!("Write {f}?"))
-                .unwrap_or_else(|| "Write this file?".to_owned()),
-            "WebFetch" => "Fetch this page?".to_owned(),
-            "WebSearch" => "Search the web?".to_owned(),
-            _ => format!("Use {}?", Self::tool_name(&request.name)),
+                .map(|f| crate::trf!("Write {f}?", f = f))
+                .unwrap_or_else(|| crate::tr!("Write this file?").to_owned()),
+            "WebFetch" => crate::tr!("Fetch this page?").to_owned(),
+            "WebSearch" => crate::tr!("Search the web?").to_owned(),
+            _ => crate::trf!("Use {tool}?", tool = Self::tool_name(&request.name)),
         }
     }
 
@@ -48,7 +48,7 @@ impl ApprovalText {
                     .and_then(Value::as_str)
                     .filter(|u| !u.is_empty())
                 {
-                    return format!("Fetch {}", Self::shown(url));
+                    return crate::trf!("Fetch {url}", url = Self::shown(url));
                 }
             }
             "WebSearch" => {
@@ -57,13 +57,15 @@ impl ApprovalText {
                     .and_then(Value::as_str)
                     .filter(|q| !q.is_empty())
                 {
-                    return format!("Search for {}", Self::shown(query));
+                    return crate::trf!("Search for {query}", query = Self::shown(query));
                 }
             }
             _ => {}
         }
         let mut title = Self::title(request);
-        if title.ends_with('?') {
+        if let Some(summary) = title.strip_suffix("しますか？") {
+            title.truncate(summary.len());
+        } else if title.ends_with(['?', '？']) {
             title.pop();
         }
         title
@@ -84,11 +86,11 @@ impl ApprovalText {
     /// The decision in a word or two.
     pub fn decision(decision: ApprovalDecision) -> &'static str {
         match decision {
-            ApprovalDecision::Allow => "Allowed",
-            ApprovalDecision::AllowAlways => "Always allowed",
-            ApprovalDecision::Deny => "Denied",
-            ApprovalDecision::Answered => "Answered",
-            ApprovalDecision::Expired => "Expired when the runner restarted",
+            ApprovalDecision::Allow => crate::tr!("Allowed"),
+            ApprovalDecision::AllowAlways => crate::tr!("Always allowed"),
+            ApprovalDecision::Deny => crate::tr!("Denied"),
+            ApprovalDecision::Answered => crate::tr!("Answered"),
+            ApprovalDecision::Expired => crate::tr!("Expired when the runner restarted"),
         }
     }
 

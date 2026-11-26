@@ -941,7 +941,7 @@ impl Threadbear {
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(cx.theme().foreground)
                 .text_center()
-                .child(draft_rules::HEADING),
+                .child(draft_rules::heading()),
         );
         let note_text = div()
             .id("new-thread-note")
@@ -1463,7 +1463,7 @@ pub(crate) fn page_dump(t: &Threadbear, _cx: &App) -> Value {
         .and_then(|id| t.sidebar.projects.iter().find(|p| &p.id == id))
         .map(|p| format!("In {}", p.title));
     json!({
-        "heading": draft_rules::HEADING,
+        "heading": draft_rules::heading(),
         "note": note,
         "project": project,
         "rooms": rooms.iter().map(|r| json!({ "label": r.label, "line": r.line, "selected": r.selected, "note": r.note })).collect::<Vec<_>>(),

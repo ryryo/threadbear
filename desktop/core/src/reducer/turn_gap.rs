@@ -32,7 +32,7 @@ impl TurnGap {
             .runner_wake
             .as_deref()
             .map(|why| match text::trim_ws_nl(why) {
-                "" => "Threadbear woke it".to_owned(),
+                "" => crate::tr!("Threadbear woke it").to_owned(),
                 why => why.to_owned(),
             });
         match runner.or_else(|| Self::cause(&self.woke_by)) {
@@ -63,29 +63,29 @@ impl TurnGap {
         let seconds = int_saturating((milliseconds / 1000.0).round()).max(0);
         if seconds < 60 {
             return if seconds < 2 {
-                "Moments later".to_owned()
+                crate::tr!("Moments later").to_owned()
             } else {
-                format!("{seconds}s later")
+                crate::trf!("{seconds}s later", seconds = seconds)
             };
         }
         let minutes = (seconds as f64 / 60.0).round() as i64;
         if minutes < 60 {
-            return format!("{minutes} min later");
+            return crate::trf!("{minutes} min later", minutes = minutes);
         }
         let hours = minutes / 60;
         let rest = minutes % 60;
         if hours < 24 {
             return if rest == 0 {
-                format!("{hours} h later")
+                crate::trf!("{hours} h later", hours = hours)
             } else {
-                format!("{hours} h {rest} min later")
+                crate::trf!("{hours} h {rest} min later", hours = hours, rest = rest)
             };
         }
         let days = hours / 24;
         if days == 1 {
-            "A day later".to_owned()
+            crate::tr!("A day later").to_owned()
         } else {
-            format!("{days} days later")
+            crate::trf!("{days} days later", days = days)
         }
     }
 
@@ -118,10 +118,22 @@ impl TurnGap {
         Some(match (names.len(), shown.len()) {
             (0, 1) => format!("A {noun} finished"),
             (0, n) => format!("{n} {noun}s finished"),
-            (1, 1) => format!("{} finished", names[0]),
-            (1, n) => format!("{} and {} more finished", names[0], n - 1),
-            (2, 2) => format!("{} and {} finished", names[0], names[1]),
-            (_, n) => format!("{} and {} more finished", names[0], n - 1),
+            (1, 1) => crate::trf!("{name} finished", name = names[0]),
+            (1, n) => crate::trf!(
+                "{name} and {count} more finished",
+                name = names[0],
+                count = n - 1
+            ),
+            (2, 2) => crate::trf!(
+                "{first} and {second} finished",
+                first = names[0],
+                second = names[1]
+            ),
+            (_, n) => crate::trf!(
+                "{name} and {count} more finished",
+                name = names[0],
+                count = n - 1
+            ),
         })
     }
 }

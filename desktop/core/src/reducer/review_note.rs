@@ -108,12 +108,12 @@ impl ReviewNote {
     /// from the second on.
     pub fn heading(&self) -> String {
         let count = match self.findings.len() {
-            0 => "nothing found".to_owned(),
-            1 => "1 finding".to_owned(),
-            n => format!("{n} findings"),
+            0 => crate::tr!("nothing found").to_owned(),
+            1 => crate::tr!("1 finding").to_owned(),
+            n => crate::trf!("{n} findings", n = n),
         };
         let round = if self.round > 1 {
-            format!(" · round {}", self.round)
+            crate::trf!(" · round {round}", round = self.round)
         } else {
             String::new()
         };

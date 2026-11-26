@@ -65,9 +65,9 @@ pub fn count_label(query: &str, current: Option<usize>, total: usize) -> String 
         return String::new();
     }
     match current {
-        _ if total == 0 => "Not found".to_owned(),
-        Some(index) => format!("{} of {total}", index + 1),
-        None => format!("{total} found"),
+        _ if total == 0 => crate::tr!("Not found").to_owned(),
+        Some(index) => crate::trf!("{index} of {total}", index = index + 1, total = total),
+        None => crate::trf!("{total} found", total = total),
     }
 }
 

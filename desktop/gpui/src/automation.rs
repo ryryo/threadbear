@@ -635,7 +635,9 @@ fn step(
             if let Some(lines) = crate::about_window::dump(cx) {
                 return Ok(json!(format!("ok {}", lines.join(" | "))));
             }
-            app.update(cx, |t, cx| t.run_menu_item("About Threadbear", window, cx))?;
+            app.update(cx, |t, cx| {
+                t.run_menu_item(threadbear_core::tr!("About Threadbear"), window, cx)
+            })?;
             Ok(json!("ok opening"))
         }
         // The Settings window, as the Swift command: opened (on `tab`), or

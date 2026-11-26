@@ -23,6 +23,7 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -251,7 +252,7 @@ impl Composer {
         // Two lines at least, ten at most, then it scrolls (ComposerChips.boxHeight).
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Message")
+                .placeholder(tr!("Message"))
                 .auto_grow(BOX_MIN_LINES, BOX_MAX_LINES)
                 .submit_on_enter(true)
         });
@@ -315,7 +316,7 @@ impl Composer {
             strip_opening: None,
             pictures_dropped: 0,
             card_style: None,
-            shown_placeholder: "Message".into(),
+            shown_placeholder: tr!("Message").into(),
             editing: None,
             pending_box: None,
             pending_saved: None,
@@ -492,7 +493,7 @@ impl Composer {
                         .aria_label(tip)
                         .child(
                             Button::new("limit-switch-button")
-                                .label("Continue now on")
+                                .label(tr!("Continue now on"))
                                 .small()
                                 .secondary()
                                 .tooltip(tip)
@@ -546,7 +547,7 @@ impl Composer {
                         .aria_label(tip.clone())
                         .child(
                             Button::new("limit-reset-button")
-                                .label("Use a reset")
+                                .label(tr!("Use a reset"))
                                 .small()
                                 .secondary()
                                 .loading(busy)
@@ -594,7 +595,7 @@ impl Composer {
                     h_flex()
                         .gap(px(6.))
                         .items_center()
-                        .child(div().text_color(secondary).child("Carry on by itself"))
+                        .child(div().text_color(secondary).child(tr!("Carry on by itself")))
                         .child(
                             div()
                                 .id("limit-carry-on")
@@ -776,7 +777,7 @@ impl Composer {
                     .child(
                         crate::push_button::PushButton::new(
                             SharedString::from(format!("remove-page-comment-{index}")),
-                            "Remove",
+                            tr!("Remove"),
                             "Remove page comment",
                         )
                         .small()
@@ -1240,7 +1241,7 @@ impl Composer {
                     Err(e) if e.code == -32050 && !stop_background => {
                         // An upload was lost that way (4 Nov): asked first.
                         let detail = format!("{}\n\nCancel keeps it running; you can send your change as a new message instead.", e.message);
-                        if crate::alert::confirm("Stop the background work?", &detail, "Stop It and Go Back", "Cancel") {
+                        if crate::alert::confirm("Stop the background work?", &detail, "Stop It and Go Back", tr!("Cancel")) {
                             stop_background = true;
                             continue;
                         }
@@ -1300,7 +1301,7 @@ impl Composer {
             .on_click(
                 cx.listener(|this, _: &ClickEvent, window, cx| this.cancel_editing(window, cx)),
             )
-            .child("Cancel")
+            .child(tr!("Cancel"))
             .into_any_element()
         };
         Some(
@@ -2334,14 +2335,14 @@ impl Composer {
                 .id("composer-loading-picture")
                 .test_support()
                 .role(Role::ProgressIndicator)
-                .aria_label("Loading picture")
+                .aria_label(tr!("Loading picture"))
                 .bg(style::send_faint_fill(cx))
                 .child(
                     Spinner::new()
                         .color(style::quiet_text(cx))
                         .with_size(px(14.)),
                 )
-                .tip("Loading picture")
+                .tip(tr!("Loading picture"))
                 .into_any_element();
         }
         // The runner is making the thread: a spinner in the button's place
@@ -2351,14 +2352,14 @@ impl Composer {
                 .id("composer-starting")
                 .test_support()
                 .role(Role::ProgressIndicator)
-                .aria_label("Starting the thread")
+                .aria_label(tr!("Starting the thread"))
                 .bg(style::send_faint_fill(cx))
                 .child(
                     Spinner::new()
                         .color(style::quiet_text(cx))
                         .with_size(px(14.)),
                 )
-                .tip("Starting the thread")
+                .tip(tr!("Starting the thread"))
                 .into_any_element();
         }
         if running && !can_send && self.stopping.is_some() {
@@ -2366,14 +2367,14 @@ impl Composer {
                 .id("composer-stopping")
                 .test_support()
                 .role(Role::ProgressIndicator)
-                .aria_label("Stopping")
+                .aria_label(tr!("Stopping"))
                 .bg(style::send_faint_fill(cx))
                 .child(
                     Spinner::new()
                         .color(style::quiet_text(cx))
                         .with_size(px(14.)),
                 )
-                .tip("Stopping")
+                .tip(tr!("Stopping"))
                 .into_any_element();
         }
         if running && !can_send {
@@ -2382,7 +2383,7 @@ impl Composer {
                 .id("composer-stop")
                 .test_support()
                 .role(Role::Button)
-                .aria_label("Stop")
+                .aria_label(tr!("Stop"))
                 .cursor_pointer()
                 .bg(bg)
                 // A filled square, as the Swift app's `stop.fill` at 9 pt bold:
@@ -2391,9 +2392,9 @@ impl Composer {
                 .child(div().size(px(9.)).rounded(px(2.)).bg(fg))
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.stop(cx)))
                 .tip(if cfg!(target_os = "macos") {
-                    "Stop (⌘.)"
+                    tr!("Stop (⌘.)")
                 } else {
-                    "Stop (Ctrl+.)"
+                    tr!("Stop (Ctrl+.)")
                 })
                 // Its key to the left while ⌘ is held (key_hints.rs).
                 .relative()
@@ -2407,9 +2408,9 @@ impl Composer {
                 .into_any_element();
         }
         let tip = if running {
-            "Send (into this turn)"
+            tr!("Send (into this turn)")
         } else {
-            "Send (Return)"
+            tr!("Send (Return)")
         };
         let (fg, bg) = if can_send {
             (cx.theme().background, cx.theme().foreground)
@@ -2420,7 +2421,7 @@ impl Composer {
             .id("composer-send")
             .test_support()
             .role(Role::Button)
-            .aria_label("Send")
+            .aria_label(tr!("Send"))
             .when(can_send, |s| s.cursor_pointer())
             .bg(bg)
             .child(
@@ -2672,7 +2673,7 @@ impl Render for Composer {
         let moving = self.moving_line(cx);
         let placeholder: SharedString = match &moving {
             Some(line) => line.clone().into(),
-            None if self.editing.is_some() => "Your message…".into(),
+            None if self.editing.is_some() => tr!("Your message…").into(),
             None => self.card_placeholder(cx).into(),
         };
         if self.shown_placeholder != placeholder {
@@ -2936,7 +2937,7 @@ pub(crate) fn remove_badge(
                 .with_size(px(9.))
                 .text_color(gpui_kit::white()),
         )
-        .tip("Remove")
+        .tip(tr!("Remove"))
 }
 
 /// A picture's chip among the words, here and in the review window's reply

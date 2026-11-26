@@ -1043,7 +1043,7 @@ impl Draft<'_> {
     /// What the note names after "on": the pool, or the login.
     fn on(&self) -> String {
         match self.pool() {
-            Some(pool) => format!("the {} pool", pool.title),
+            Some(pool) => crate::trf!("the {pool} pool", pool = pool.title),
             None => {
                 let account = self.account_id();
                 if self.uses_pools() {
@@ -1060,13 +1060,18 @@ impl Draft<'_> {
     /// runner whose hello hasn't come says only "Starts on bruce".
     pub fn note(&self, runner_name: Option<&str>, logins_known: bool) -> String {
         match runner_name {
-            Some(name) if !logins_known => format!("Starts on {name}"),
-            Some(name) => format!(
-                "Starts in {} on {name}, with {}",
-                short_folder(&self.cwd()),
-                self.on()
+            Some(name) if !logins_known => crate::trf!("Starts on {name}", name = name),
+            Some(name) => crate::trf!(
+                "Starts in {folder} on {name}, with {account}",
+                folder = short_folder(&self.cwd()),
+                name = name,
+                account = self.on()
             ),
-            None => format!("Starts in {} on {}", short_folder(&self.cwd()), self.on()),
+            None => crate::trf!(
+                "Starts in {folder} on {account}",
+                folder = short_folder(&self.cwd()),
+                account = self.on()
+            ),
         }
     }
 
@@ -1074,15 +1079,24 @@ impl Draft<'_> {
     pub fn note_tip(&self, runner_name: Option<&str>) -> String {
         let cwd = self.cwd();
         let what = match self.pool() {
-            Some(pool) => format!("the {} pool, which picks the login", pool.title),
+            Some(pool) => crate::trf!("the {pool} pool, which picks the login", pool = pool.title),
             None => {
                 let account = self.account_id();
                 self.logins.account(&account).map_or(account, Account::name)
             }
         };
         match runner_name {
-            Some(name) => format!("{cwd} on {name}, with {what}"),
-            None => format!("{} on {what}", abbreviate_home(&cwd, self.home)),
+            Some(name) => crate::trf!(
+                "{cwd} on {name}, with {what}",
+                cwd = cwd,
+                name = name,
+                what = what
+            ),
+            None => crate::trf!(
+                "{folder} on {what}",
+                folder = abbreviate_home(&cwd, self.home),
+                what = what
+            ),
         }
     }
 
@@ -1234,7 +1248,9 @@ pub fn abbreviate_home(path: &str, home: &str) -> String {
 }
 
 /// The page's heading (`NewThreadHeading`).
-pub const HEADING: &str = "What should we work on?";
+pub fn heading() -> &'static str {
+    crate::tr!("What should we work on?")
+}
 
 /// The title `provider_title` gives, kept here for the page's tooltips.
 pub fn provider_name(provider: &str) -> String {

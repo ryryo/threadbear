@@ -12,6 +12,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::{tr, trf};
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -510,34 +511,38 @@ impl ThreadPane {
             let (title, decision, prominent, tip_text, n): (&str, &str, bool, &str, usize) =
                 match option {
                     ApprovalOption::Allow if start => (
-                        "Start it",
+                        tr!("Start it"),
                         "allow",
                         true,
-                        "Start this thread with this brief",
+                        tr!("Start this thread with this brief"),
                         0,
                     ),
-                    ApprovalOption::Allow => {
-                        ("Allow", "allow", true, "Let it do this once (Return)", 0)
-                    }
+                    ApprovalOption::Allow => (
+                        tr!("Allow"),
+                        "allow",
+                        true,
+                        tr!("Let it do this once (Return)"),
+                        0,
+                    ),
                     ApprovalOption::AllowAlways => (
-                        "Always allow",
+                        tr!("Always allow"),
                         "allowAlways",
                         false,
-                        "Allow this, and anything like it for the rest of this thread",
+                        tr!("Allow this, and anything like it for the rest of this thread"),
                         1,
                     ),
                     ApprovalOption::Deny if start => (
-                        "Don't",
+                        tr!("Don't"),
                         "deny",
                         false,
-                        "Don't start it; the asking thread is told no",
+                        tr!("Don't start it; the asking thread is told no"),
                         2,
                     ),
                     ApprovalOption::Deny => (
-                        "Deny",
+                        tr!("Deny"),
                         "deny",
                         false,
-                        "Don't let it do this; the agent is told no",
+                        tr!("Don't let it do this; the agent is told no"),
                         2,
                     ),
                 };
@@ -647,9 +652,9 @@ impl ThreadPane {
                 "Edit" | "MultiEdit" | "Write" | "NotebookEdit"
             )
         }) {
-            format!("Make these {} changes?", calls.len())
+            trf!("Make these {count} changes?", count = calls.len())
         } else {
-            format!("Allow these {} steps?", calls.len())
+            trf!("Allow these {count} steps?", count = calls.len())
         };
         let mut content = v_flex().child(
             div()
@@ -671,13 +676,13 @@ impl ThreadPane {
                 .w(px(stacked::TOGGLE_WIDTH))
                 .h(px(stacked::TOGGLE_HEIGHT))
                 .px(px(0.))
-                .tip("Allow this one");
+                .tip(tr!("Allow this one"));
             let mut cross = pill(("cross", ix * 100 + i), "✕", !ticked, !busy, None, cx)
                 .min_w(px(stacked::TOGGLE_WIDTH))
                 .w(px(stacked::TOGGLE_WIDTH))
                 .h(px(stacked::TOGGLE_HEIGHT))
                 .px(px(0.))
-                .tip("Don't allow this one; the agent is told no");
+                .tip(tr!("Don't allow this one; the agent is told no"));
             if !busy {
                 tick = tick.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.set_ticked(&aid, &tick_id, true, cx)
@@ -723,11 +728,11 @@ impl ThreadPane {
                 .child(head)
                 .child(body);
         }
-        let allow_words = format!("Allow {count}");
+        let allow_words = trf!("Allow {count}", count = count);
         let allow_tip = if count == ids.len() {
-            "Let it do all of these (Return)"
+            tr!("Let it do all of these (Return)")
         } else {
-            "Let it do the ticked ones; the rest are refused (Return)"
+            tr!("Let it do the ticked ones; the rest are refused (Return)")
         };
         let id_for_allow = approval_id.clone();
         let mut allow = pill(
@@ -745,8 +750,8 @@ impl ThreadPane {
             }));
         }
         let id_for_deny = approval_id;
-        let mut deny = pill(("stack-deny", ix), "Deny all", false, !busy, None, cx)
-            .tip("Don't let it do any of these; the agent is told no");
+        let mut deny = pill(("stack-deny", ix), tr!("Deny all"), false, !busy, None, cx)
+            .tip(tr!("Don't let it do any of these; the agent is told no"));
         if !busy {
             deny = deny.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.respond_queued(&id_for_deny, "deny", cx)
@@ -1091,9 +1096,16 @@ impl ThreadPane {
             let answers = question_answers(&item.request, &chosen, &typed);
             let ready = !busy && !answers.is_empty();
             let (id, request) = (approval_id.clone(), item.request.clone());
-            let mut send = pill(("send-answer", ix), "Send answer", true, ready, None, cx)
-                .min_w(px(110.))
-                .tip("Send your answers to the agent");
+            let mut send = pill(
+                ("send-answer", ix),
+                tr!("Send answer"),
+                true,
+                ready,
+                None,
+                cx,
+            )
+            .min_w(px(110.))
+            .tip(tr!("Send your answers to the agent"));
             if ready {
                 send = send.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.send_question_answer(&id, &request, cx)
@@ -1135,7 +1147,7 @@ impl ThreadPane {
                 .unwrap_or_default();
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Something else")
+                .placeholder(tr!("Something else"))
                 .default_value(saved)
         });
         let id = approval_id.to_owned();
@@ -1342,14 +1354,14 @@ impl ThreadPane {
         let (id, for_save) = (approval_id.clone(), field.clone());
         let mut save = pill(
             ("secret-save", ix),
-            "Save securely",
+            tr!("Save securely"),
             true,
             can_save,
             None,
             cx,
         )
         .min_w(px(110.))
-        .tip("Save it to a private file for the agent (Return)");
+        .tip(tr!("Save it to a private file for the agent (Return)"));
         if can_save {
             save = save.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 let value = for_save.read(cx).value().to_string();
@@ -1388,13 +1400,13 @@ impl ThreadPane {
         let mut decline = div()
             .id(("decline", ix))
             .role(Role::Button)
-            .aria_label(SharedString::from("Decline"))
+            .aria_label(SharedString::from(tr!("Decline")))
             .flex_none()
             .ml(px(6.))
             .text_size(px(size::LABEL))
             .text_color(quiet)
-            .tip("Don't give it; the agent is told you declined")
-            .child("Decline");
+            .tip(tr!("Don't give it; the agent is told you declined"))
+            .child(tr!("Decline"));
         if !busy {
             decline = decline.cursor_pointer().on_click(cx.listener(
                 move |this, _: &ClickEvent, window, cx| this.answer_secret(&id, None, window, cx),
@@ -1443,7 +1455,7 @@ impl ThreadPane {
         if let Some(input) = self.rows.secrets.get(approval_id) {
             return input.clone();
         }
-        let hint = placeholder.unwrap_or("Paste the secret").to_owned();
+        let hint = placeholder.unwrap_or(tr!("Paste the secret")).to_owned();
         let input = cx.new(|cx| {
             let mut state = InputState::new(window, cx).placeholder(hint);
             state.set_masked(true, window, cx);
@@ -1554,9 +1566,9 @@ impl ThreadPane {
             PlanSummary::title(&plan.entries)
         };
         let status = match plan.state {
-            PlanCardState::Waiting => "Waiting for you",
-            PlanCardState::SentBack => "Sent back",
-            PlanCardState::Approved if plan.entries.is_empty() => "Approved",
+            PlanCardState::Waiting => tr!("Waiting for you"),
+            PlanCardState::SentBack => tr!("Sent back"),
+            PlanCardState::Approved if plan.entries.is_empty() => tr!("Approved"),
             PlanCardState::Approved => "",
         };
         let heading = h_flex()
@@ -1630,8 +1642,8 @@ impl ThreadPane {
             if waiting {
                 let go = (!remote).then(|| {
                     let (item_id_a, thread_a) = (plan.item_id.clone(), self.summary.id.clone());
-                    let mut go = pill(("plan-go", ix), "Go ahead", true, !busy, None, cx)
-                        .tip("Approve the plan and let it start");
+                    let mut go = pill(("plan-go", ix), tr!("Go ahead"), true, !busy, None, cx)
+                        .tip(tr!("Approve the plan and let it start"));
                     if !busy {
                         go = go.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.rows.answering.insert(item_id_a.clone());
@@ -1654,8 +1666,8 @@ impl ThreadPane {
                     }
                     go.test_support()
                 });
-                let mut back = pill(("plan-back", ix), "Send back…", false, !busy, None, cx)
-                    .tip("Tell it what to change; it plans again");
+                let mut back = pill(("plan-back", ix), tr!("Send back…"), false, !busy, None, cx)
+                    .tip(tr!("Tell it what to change; it plans again"));
                 if !busy {
                     back = back.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.focus_composer(window, cx)
@@ -1670,9 +1682,9 @@ impl ThreadPane {
                 Some(if expanded { "Hide plan" } else { "Show plan" })
             } else if clipped {
                 Some(if expanded {
-                    "Show less"
+                    tr!("Show less")
                 } else {
-                    "Show full plan"
+                    tr!("Show full plan")
                 })
             } else {
                 None
@@ -1688,9 +1700,9 @@ impl ThreadPane {
                         .text_size(px(size::LABEL))
                         .text_color(secondary)
                         .tip(if expanded {
-                            "Show less of it"
+                            tr!("Show less of it")
                         } else {
-                            "Show the whole plan"
+                            tr!("Show the whole plan")
                         })
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.toggle_row(&row_for_toggle, cx)
@@ -1723,26 +1735,26 @@ impl ThreadPane {
             .and_then(|r| r.picked_ids.first())
             .and_then(|id| review.options.iter().find(|o| &o.id == id));
         let state = if review.is_pending() {
-            "Waiting for your review".to_owned()
+            tr!("Waiting for your review").to_owned()
         } else if review.status == "answered" {
             picked
                 .map(|o| format!("Picked {}. {}", o.id, o.title))
                 .unwrap_or_else(|| "Notes sent".to_owned())
         } else if review.status == "superseded" {
-            "Answered in the thread".to_owned()
+            tr!("Answered in the thread").to_owned()
         } else {
-            "Review closed".to_owned()
+            tr!("Review closed").to_owned()
         };
         let detail = format!("{} images · {state}", review.options.len());
         let open_title = if review.is_pending() {
             format!("Compare {} images", review.options.len())
         } else {
-            "Open review".to_owned()
+            tr!("Open review").to_owned()
         };
         let open_tip = if review.is_pending() {
-            "Open the images side by side to pick and reply"
+            tr!("Open the images side by side to pick and reply")
         } else {
-            "Open the review to look at the images and what was sent"
+            tr!("Open the review to look at the images and what was sent")
         };
         let opened = review.clone();
         let head = v_flex().child(

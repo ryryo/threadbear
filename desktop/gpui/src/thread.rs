@@ -10,6 +10,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::{v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use serde_json::{json, Value};
@@ -536,7 +537,7 @@ impl ThreadPane {
                 .gap(px(4.))
                 .text_size(px(12.))
                 .text_color(secondary)
-                .child(div().flex_none().child("Started by"))
+                .child(div().flex_none().child(tr!("Started by")))
                 .child(title)
                 .when_some(line.why, |s, why| {
                     s.child(div().min_w_0().truncate().child(format!("\u{b7} {why}")))
@@ -1134,9 +1135,9 @@ impl ThreadPane {
                             .line_height(px(crate::style::natural_line(13.)))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(if self.subagent_id.is_some() {
-                                "Couldn't load this sub-agent."
+                                tr!("Couldn't load this sub-agent.")
                             } else {
-                                "Couldn't load this thread."
+                                tr!("Couldn't load this thread.")
                             }),
                     )
                     .child(
@@ -1151,11 +1152,11 @@ impl ThreadPane {
                     .child(
                         crate::push_button::PushButton::new(
                             "load-retry",
-                            "Try again",
+                            tr!("Try again"),
                             if self.subagent_id.is_some() {
-                                "Load the sub-agent's transcript again"
+                                tr!("Load the sub-agent's transcript again")
                             } else {
-                                "Load the thread again"
+                                tr!("Load the thread again")
                             },
                         )
                         .render(cx, {
@@ -1716,13 +1717,13 @@ impl ThreadPane {
                         .text_color(muted)
                         .hover(|s| s.underline()),
                     "thread-error-dismiss",
-                    "Hide this message"
+                    tr!("Hide this message")
                 )
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.error = None;
                     cx.notify();
                 }))
-                .child("Dismiss"),
+                .child(tr!("Dismiss")),
             )
             .into_any_element()
     }
@@ -2758,7 +2759,7 @@ impl Render for ThreadPane {
                             .justify_center()
                             .text_size(px(13.))
                             .text_color(muted)
-                            .child("Nothing yet."),
+                            .child(tr!("Nothing yet.")),
                     )
                 }
                 View::Spinner | View::Transcript => s.child(crate::open_motion::transcript_frame(

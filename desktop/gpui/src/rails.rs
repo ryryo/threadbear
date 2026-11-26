@@ -712,8 +712,13 @@ impl Threadbear {
             |this, _, cx| this.toggle_under_threads(shell::USAGE, cx),
             cx,
         );
-        let mut button = RailButton::new("rail-settings", "gearshape", "Settings", false);
-        button.tip = self.shortcut_tip("Settings", ShortcutCommand::Settings);
+        let mut button = RailButton::new(
+            "rail-settings",
+            "gearshape",
+            threadbear_core::tr!("Settings"),
+            false,
+        );
+        button.tip = self.shortcut_tip(threadbear_core::tr!("Settings"), ShortcutCommand::Settings);
         button.hint = self.shortcut_display(ShortcutCommand::Settings);
         let settings = rail_button(
             button,

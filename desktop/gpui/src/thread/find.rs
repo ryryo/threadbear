@@ -27,6 +27,7 @@ use std::time::Duration;
 use threadbear_core::find::find_all;
 use threadbear_core::reducer::RowContent;
 use threadbear_core::thread_find::{Hit, ThreadFinder};
+use threadbear_core::tr;
 
 /// The key context of a thread's pane, which ⌘G and ⇧⌘G work in.
 pub(crate) const CONTEXT: &str = "ThreadPane";
@@ -36,7 +37,6 @@ pub(crate) const CONTEXT: &str = "ThreadPane";
 const REFRESH_AFTER: Duration = Duration::from_millis(150);
 
 /// What the bar says while the page before is on its way.
-const LOOKING_BACK: &str = "Looking further back…";
 
 /// The words last looked for in any thread: ⌘G with the bar down finds them
 /// again, as AppKit's find pasteboard does.
@@ -499,7 +499,7 @@ impl ThreadPane {
     pub(crate) fn render_find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let find = self.find.as_ref()?;
         let label = if find.looking_back && self.older.fetching() {
-            LOOKING_BACK.to_owned()
+            tr!("Looking further back…").to_owned()
         } else {
             find.finder.label()
         };

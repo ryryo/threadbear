@@ -19,6 +19,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 use threadbear_core::find::{self as core_find, Finder};
+use threadbear_core::tr;
 
 actions!(file_preview, [FindNext, FindPrevious]);
 
@@ -426,14 +427,14 @@ pub(crate) fn find_bar(
         .child(step(
             "find-previous",
             "chevron.left",
-            "Find the match before (⇧⌘G)",
+            tr!("Find the match before (⇧⌘G)"),
             true,
         ))
         .child(div().w(gpui_kit::px(1.)).h(px(12.)).bg(p.hairline))
         .child(step(
             "find-next",
             "chevron.right",
-            "Find the match after (⌘G)",
+            tr!("Find the match after (⌘G)"),
             false,
         ));
     let done_click = on_done.clone();
@@ -451,8 +452,8 @@ pub(crate) fn find_bar(
             .active(|s| s.opacity(0.7))
             .text_size(px(style::size::LABEL))
             .text_color(p.fg)
-            .child("Done"),
-        "Close the find bar (Escape)",
+            .child(tr!("Done")),
+        tr!("Close the find bar (Escape)"),
     )
     .on_click(move |_: &ClickEvent, window, cx| done_click(window, cx));
     h_flex()

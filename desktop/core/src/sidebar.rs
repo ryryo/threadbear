@@ -154,14 +154,14 @@ impl RowAction {
     /// The hover button's tooltip, as `RowActions` in SidebarView has them.
     pub fn tip(self, t: &ThreadSummary) -> &'static str {
         match self {
-            RowAction::Star if t.is_starred() => "Remove star",
-            RowAction::Star => "Star: keep at the top",
-            RowAction::Snooze => "Hibernate",
-            RowAction::Archive => "Archive",
-            RowAction::Unsnooze => "Wake",
-            RowAction::Unarchive => "Unarchive",
-            RowAction::Delete if !self.enabled(t) => "Delete it on the Mac it runs on",
-            RowAction::Delete => "Delete chat…",
+            RowAction::Star if t.is_starred() => crate::tr!("Remove star"),
+            RowAction::Star => crate::tr!("Star: keep at the top"),
+            RowAction::Snooze => crate::tr!("Hibernate"),
+            RowAction::Archive => crate::tr!("Archive"),
+            RowAction::Unsnooze => crate::tr!("Wake"),
+            RowAction::Unarchive => crate::tr!("Unarchive"),
+            RowAction::Delete if !self.enabled(t) => crate::tr!("Delete it on the Mac it runs on"),
+            RowAction::Delete => crate::tr!("Delete chat…"),
         }
     }
 
@@ -238,7 +238,7 @@ pub fn tile_help(t: &ThreadSummary) -> String {
 /// (`ProjectMark.lineTip`).
 pub fn place_tip(t: &ThreadSummary) -> String {
     match t.asked.as_deref().filter(|a| !a.is_empty()) {
-        Some(asked) => format!("You: {asked}"),
+        Some(asked) => crate::trf!("You: {asked}", asked = asked),
         None => t.place(),
     }
 }
@@ -304,7 +304,6 @@ pub fn byline(t: &ThreadSummary) -> Option<Byline> {
     Some(Byline { symbol, tip })
 }
 
-const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
@@ -316,7 +315,15 @@ fn local<Tz: TimeZone>(ms: i64, tz: &Tz) -> DateTime<Tz> {
 }
 
 fn weekday_name<Tz: TimeZone>(d: &DateTime<Tz>) -> &'static str {
-    WEEKDAYS[d.weekday().num_days_from_monday() as usize]
+    match d.weekday() {
+        chrono::Weekday::Mon => crate::tr!("Mon"),
+        chrono::Weekday::Tue => crate::tr!("Tue"),
+        chrono::Weekday::Wed => crate::tr!("Wed"),
+        chrono::Weekday::Thu => crate::tr!("Thu"),
+        chrono::Weekday::Fri => crate::tr!("Fri"),
+        chrono::Weekday::Sat => crate::tr!("Sat"),
+        chrono::Weekday::Sun => crate::tr!("Sun"),
+    }
 }
 
 fn same_day<Tz: TimeZone>(a: &DateTime<Tz>, b: &DateTime<Tz>) -> bool {
@@ -326,6 +333,9 @@ fn same_day<Tz: TimeZone>(a: &DateTime<Tz>, b: &DateTime<Tz>) -> bool {
 /// "5:00 am", with its minutes always (`Pools.waitingParts`' clock).
 fn clock<Tz: TimeZone>(d: &DateTime<Tz>) -> String {
     let hour = d.hour();
+    if crate::i18n::active_locale() == crate::i18n::Locale::Japanese {
+        return format!("{hour}:{:02}", d.minute());
+    }
     let twelve = if hour.is_multiple_of(12) {
         12
     } else {
@@ -349,17 +359,24 @@ fn time_short<Tz: TimeZone>(d: &DateTime<Tz>) -> String {
 pub fn relative_short<Tz: TimeZone>(at_ms: i64, now: &DateTime<Tz>) -> String {
     let seconds = (now.timestamp_millis() - at_ms) / 1000;
     if seconds < 60 {
-        return "now".into();
+        return crate::tr!("now").into();
     }
     if seconds < 3600 {
-        return format!("{}m", seconds / 60);
+        return crate::trf!("{minutes}m", minutes = seconds / 60);
     }
     if seconds < 86_400 {
-        return format!("{}h", seconds / 3600);
+        return crate::trf!("{hours}h", hours = seconds / 3600);
     }
     let date = local(at_ms, &now.timezone());
     if seconds < 6 * 86_400 {
         return weekday_name(&date).to_string();
+    }
+    if crate::i18n::active_locale() == crate::i18n::Locale::Japanese {
+        return if date.year() == now.year() {
+            format!("{}月{}日", date.month(), date.day())
+        } else {
+            format!("{}年{}月{}日", date.year(), date.month(), date.day())
+        };
     }
     let day_month = format!("{} {}", date.day(), MONTHS[date.month0() as usize]);
     if date.year() == now.year() {
@@ -382,12 +399,15 @@ pub fn until_words<Tz: TimeZone>(at_ms: i64, now: &DateTime<Tz>) -> String {
 
 /// "Waiting for room · 5:00 am", "… · tomorrow 5:00 am" (`Pools.waitingLine`).
 pub fn waiting_line<Tz: TimeZone>(until_ms: i64, now: &DateTime<Tz>) -> String {
-    format!("Waiting for room · {}", waiting_time(until_ms, now))
+    crate::trf!(
+        "Waiting for room · {time}",
+        time = waiting_time(until_ms, now)
+    )
 }
 
 fn waiting_time<Tz: TimeZone>(until_ms: i64, now: &DateTime<Tz>) -> String {
     if until_ms <= now.timestamp_millis() {
-        return "any moment now".into();
+        return crate::tr!("any moment now").into();
     }
     match waiting_parts(until_ms, now) {
         (Some(day), clock_text) => format!("{day} {clock_text}"),
@@ -401,7 +421,7 @@ fn waiting_time<Tz: TimeZone>(until_ms: i64, now: &DateTime<Tz>) -> String {
 pub fn carries_on_when<Tz: TimeZone>(until_ms: i64, now: &DateTime<Tz>) -> String {
     let time = waiting_time(until_ms, now);
     if time.starts_with(|c: char| c.is_ascii_digit()) {
-        format!("at {time}")
+        crate::trf!("at {time}", time = time)
     } else {
         time
     }
@@ -461,7 +481,7 @@ fn waiting_parts<Tz: TimeZone>(
 pub fn background_short(tasks: &[BackgroundTask]) -> String {
     let running: Vec<&BackgroundTask> = tasks.iter().filter(|t| !t.finished).collect();
     if running.is_empty() {
-        return "Finishing".into();
+        return crate::tr!("Finishing").into();
     }
     let first_kind = kind_of(running[0]);
     if running.iter().all(|t| kind_of(t) == first_kind) {
@@ -513,7 +533,9 @@ fn count(n: usize, kind: &str) -> String {
 }
 
 /// How a thread hibernated in Mike's words says when it wakes (`WakeWords`).
-pub const WAKE_MENU_TITLE: &str = "Wake when…";
+pub fn wake_menu_title() -> &'static str {
+    crate::tr!("Wake when…")
+}
 pub const WAKE_PLACEHOLDER: &str =
     "at the weekend, in a few weeks, next time I talk about woodworking";
 
@@ -689,7 +711,7 @@ pub fn woke_tip(t: &ThreadSummary) -> String {
             "Woke up after hibernating for {}",
             away((at - since) / 1000)
         ),
-        _ => "Woke up from hibernating".into(),
+        _ => crate::tr!("Woke up from hibernating").into(),
     }
 }
 
@@ -773,7 +795,7 @@ pub fn trailing<Tz: TimeZone>(
                 tip: None,
             },
             _ => Trailing {
-                text: format!("Moving to {name}"),
+                text: crate::trf!("Moving to {name}", name = name),
                 kind: TrailingKind::Background,
                 tip: None,
             },
@@ -827,7 +849,7 @@ pub fn trailing<Tz: TimeZone>(
                 } else if t.snoozed_until_restart == Some(true) {
                     "Back on restart".to_string()
                 } else if let Some(until) = t.snoozed_until_ms() {
-                    format!("Back {}", until_words(until, now))
+                    crate::trf!("Back {time}", time = until_words(until, now))
                 } else {
                     String::new()
                 };
@@ -849,7 +871,7 @@ pub fn trailing<Tz: TimeZone>(
                 return Trailing {
                     text: until_words(wake.at_ms, now),
                     kind: TrailingKind::Quiet,
-                    tip: Some(format!("Scheduled: {}", wake.when_text)),
+                    tip: Some(crate::trf!("Scheduled: {time}", time = wake.when_text)),
                 };
             }
             Trailing {
@@ -861,7 +883,7 @@ pub fn trailing<Tz: TimeZone>(
         RowStatus::Working => {
             let elapsed = working_label(t.activity_ms(), now_ms);
             let text = if look.labelled {
-                format!("Working {elapsed}")
+                crate::trf!("Working {elapsed}", elapsed = elapsed)
             } else {
                 elapsed
             };
@@ -967,7 +989,9 @@ impl SnoozePreset {
 }
 
 /// `Snooze.untilRestartTitle`, shown only while a runner restart is waiting.
-pub const SNOOZE_UNTIL_RESTART: &str = "Until the runner restarts";
+pub fn snooze_until_restart() -> &'static str {
+    crate::tr!("Until the runner restarts")
+}
 pub const SNOOZE_PICK_TITLE: &str = "Pick a time…";
 
 /// The snooze menu: 1 hour, this evening 6 pm, tomorrow 9 am, next Monday
@@ -982,14 +1006,14 @@ pub fn snooze_presets<Tz: TimeZone>(now: &DateTime<Tz>) -> Vec<SnoozePreset> {
     };
     let mut presets = vec![SnoozePreset {
         id: "hour",
-        title: "1 hour",
+        title: crate::tr!("1 hour"),
         until_ms: now_ms + 3_600_000,
     }];
     if let Some(evening) = at(now, 18).filter(|&e| e - now_ms > 3_600_000) {
-        // Hidden within the hour before 6 pm, where it would duplicate "1 hour".
+        // Hidden within the hour before 6 pm, where it would duplicate crate::tr!("1 hour").
         presets.push(SnoozePreset {
             id: "evening",
-            title: "This evening, 6 pm",
+            title: crate::tr!("This evening, 6 pm"),
             until_ms: evening,
         });
     }
@@ -997,14 +1021,14 @@ pub fn snooze_presets<Tz: TimeZone>(now: &DateTime<Tz>) -> Vec<SnoozePreset> {
     if let Some(nine) = at(&tomorrow, 9) {
         presets.push(SnoozePreset {
             id: "tomorrow",
-            title: "Tomorrow, 9 am",
+            title: crate::tr!("Tomorrow, 9 am"),
             until_ms: nine,
         });
     }
     if let Some(monday) = next_monday(now).and_then(|m| at(&m, 9)) {
         presets.push(SnoozePreset {
             id: "monday",
-            title: "Next Monday, 9 am",
+            title: crate::tr!("Next Monday, 9 am"),
             until_ms: monday,
         });
     }
@@ -1218,7 +1242,7 @@ pub fn subagent_detail(s: &Subagent) -> String {
             if summary.is_empty() {
                 "Failed".into()
             } else {
-                format!("Failed: {summary}")
+                crate::trf!("Failed: {summary}", summary = summary)
             }
         }
         _ => "Stopped".into(),

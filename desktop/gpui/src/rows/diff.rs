@@ -10,6 +10,7 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::{tr, trf};
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -296,9 +297,9 @@ pub(crate) fn diff_with_note(
     }
     if hidden > 0 && !matches!(note, DiffNote::None) {
         let lines = if hidden == 1 {
-            "1 more line".to_owned()
+            tr!("1 more line").to_owned()
         } else {
-            format!("{hidden} more lines")
+            trf!("{hidden} more lines", hidden = hidden)
         };
         col = col.child(match note {
             DiffNote::ShowMore(on_click) => div()
@@ -311,11 +312,11 @@ pub(crate) fn diff_with_note(
                 .text_color(quiet)
                 .cursor_pointer()
                 .hover(|s| s.underline())
-                .tip("Show the whole diff")
-                .aria_label(SharedString::from(format!("Show {lines}")))
+                .tip(tr!("Show the whole diff"))
+                .aria_label(SharedString::from(trf!("Show {lines}", lines = lines)))
                 .role(Role::Button)
                 .on_click(move |e, window, cx| on_click(e, window, cx))
-                .child(format!("Show {lines}"))
+                .child(trf!("Show {lines}", lines = lines))
                 .test_support()
                 .into_any_element(),
             _ => div()
@@ -325,7 +326,7 @@ pub(crate) fn diff_with_note(
                 .items_center()
                 .text_size(px(size::SMALL))
                 .text_color(faint)
-                .child(format!("{lines} not shown"))
+                .child(trf!("{lines} not shown", lines = lines))
                 .into_any_element(),
         });
     }

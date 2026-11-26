@@ -2,7 +2,9 @@
 // Swift menu after GPUI has rebuilt it, including nested menu items.
 #import <AppKit/AppKit.h>
 
-static void tb_menu_images(NSMenu *menu) {
+typedef bool (*TBMenuMatches)(const char *title, const char *source);
+
+static void tb_menu_images(NSMenu *menu, TBMenuMatches matches) {
   static NSDictionary<NSString *, NSString *> *symbols;
   static dispatch_once_t once;
   dispatch_once(&once, ^{ symbols = @{
@@ -32,18 +34,27 @@ static void tb_menu_images(NSMenu *menu) {
   }; });
   for (NSMenuItem *item in menu.itemArray) {
     NSString *symbol = symbols[item.title];
-    if ([item.title hasPrefix:@"Restart to Update"]) symbol = @"arrow.clockwise";
+    if (!symbol) {
+      const char *title = item.title.UTF8String;
+      for (NSString *source in symbols) {
+        if (matches(title, source.UTF8String)) {
+          symbol = symbols[source];
+          break;
+        }
+      }
+      if (matches(title, "Restart to Update to {version}")) symbol = @"arrow.clockwise";
+    }
     if (symbol) {
       NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
       image.size = NSMakeSize(16, 16);
       item.image = image;
     }
-    if (item.submenu) tb_menu_images(item.submenu);
+    if (item.submenu) tb_menu_images(item.submenu, matches);
   }
 }
 
-void tb_menu_icons(void) {
-  tb_menu_images(NSApp.mainMenu);
+void tb_menu_icons(TBMenuMatches matches) {
+  tb_menu_images(NSApp.mainMenu, matches);
 }
 
 // GPUI finds this system menu by its English title. Rename the registered

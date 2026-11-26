@@ -120,25 +120,28 @@ impl TurnTokens {
     /// what a subscription charges."
     pub fn tip(self, cost_usd: Option<f64>) -> String {
         let parts: Vec<String> = [
-            (self.cache_read, "cache reads"),
-            (self.cache_write, "cache writes"),
-            (self.input, "uncached"),
+            (self.cache_read, crate::tr!("cache reads")),
+            (self.cache_write, crate::tr!("cache writes")),
+            (self.input, crate::tr!("uncached")),
         ]
         .into_iter()
         .filter(|(n, _)| *n > 0)
         .map(|(n, what)| format!("{} {what}", short_tokens(n)))
         .collect();
-        let mut text = format!(
-            "{} tokens out, {} in",
-            short_tokens(self.output),
-            short_tokens(self.read())
+        let mut text = crate::trf!(
+            "{output} tokens out, {input} in",
+            output = short_tokens(self.output),
+            input = short_tokens(self.read())
         );
         if parts.len() > 1 {
             text += &format!(" ({})", parts.join(", "));
         }
         text.push('.');
         if let Some(cost) = cost_text(cost_usd) {
-            text += &format!(" {cost} at API prices, not what a subscription charges.");
+            text += &crate::trf!(
+                " {cost} at API prices, not what a subscription charges.",
+                cost = cost
+            );
         }
         text
     }

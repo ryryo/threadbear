@@ -995,24 +995,24 @@ impl Threadbear {
             return;
         };
         let mut rows = self.thread_menu_rows(&thread, cx);
-        // Swift's menu has "Copy thread id" last and Copy transcript above it;
+        // Swift's menu has threadbear_core::tr!("Copy thread id") last and Copy transcript above it;
         // the row's menu ends with that divider and item.
         rows.truncate(rows.len().saturating_sub(2));
         rows.push(MenuRow::separator());
         rows.push(MenuRow::item(
-            "Copy transcript as Markdown",
+            threadbear_core::tr!("Copy transcript as Markdown"),
             "doc.plaintext",
             MenuAction::CopyTranscript,
         ));
         rows.push(MenuRow::item(
-            "Copy thread id",
+            threadbear_core::tr!("Copy thread id"),
             "number",
             MenuAction::CopyId,
         ));
         // Only while there's a website to go to, as with the share button.
         if self.website_url.is_some() {
             rows.push(MenuRow::item(
-                "Open on the web",
+                threadbear_core::tr!("Open on the web"),
                 "safari",
                 MenuAction::OpenOnWeb,
             ));

@@ -7,6 +7,7 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::Selectable;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 
 const WORDS: &str = "Sent from the phone app";
 
@@ -30,7 +31,7 @@ pub(super) fn mark(index: usize, cx: &App) -> AnyElement {
                 .text_color(text)
                 .test_support()
                 .a11y_role(Role::GenericContainer)
-                .aria_label("Phone message origin")
+                .aria_label(tr!("Phone message origin"))
                 .child(WORDS)
         })
         .into_any_element()

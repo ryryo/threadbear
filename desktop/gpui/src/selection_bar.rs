@@ -16,6 +16,7 @@ use gpui_kit::base::{SelectionFormat, TextSelection};
 use gpui_kit::component::{h_flex, ActiveTheme as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use std::cell::RefCell;
@@ -471,27 +472,27 @@ pub(crate) fn overlay(
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(item(
             "selection-explain",
-            "Explain",
+            tr!("Explain"),
             "sparkle.magnifyingglass",
-            "Explain this beside the thread, without adding to it",
+            tr!("Explain this beside the thread, without adding to it"),
             Action::Explain,
             cx,
         ))
         .child(divider(cx))
         .child(item(
             "selection-quote",
-            "Quote",
+            tr!("Quote"),
             "text.quote",
-            "Quote this in your reply",
+            tr!("Quote this in your reply"),
             Action::Quote,
             cx,
         ))
         .child(divider(cx))
         .child(item(
             "selection-copy",
-            "Copy",
+            tr!("Copy"),
             "doc.on.doc",
-            "Copy",
+            tr!("Copy"),
             Action::Copy,
             cx,
         ))

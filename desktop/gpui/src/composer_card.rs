@@ -11,6 +11,7 @@ use gpui_kit::component::input::{Enter, InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -689,11 +690,11 @@ impl Composer {
             || !self.card.next_picks.is_empty()
             || !self.card.explain.is_empty()
         {
-            "Add anything else…"
+            tr!("Add anything else…")
         } else if needs_you {
-            "Or say something else…"
+            tr!("Or say something else…")
         } else {
-            "Message"
+            tr!("Message")
         }
     }
 

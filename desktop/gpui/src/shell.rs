@@ -14,8 +14,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use threadbear_core::shortcuts::{ShortcutBindings, ShortcutCommand};
-use threadbear_core::tr;
 use threadbear_core::zoom;
+use threadbear_core::{tr, trf};
 use threadbear_dock::{
     DockContent, DockDrop, DockEdge, DockGroup, DockLayout, DockNode, DockOptions, DockSplit,
     SplitAxis,
@@ -644,18 +644,18 @@ impl Threadbear {
             return title;
         }
         match panel {
-            THREADS => "Threads".into(),
+            THREADS => tr!("Threads").into(),
             MAIN => self.main_panel_title(),
-            USAGE => "Usage".into(),
-            UPDATES => "Updates".into(),
-            CONNECTORS => "Connectors".into(),
-            RUNNERS => "Runners".into(),
-            SETUP => "Finish setting up".into(),
-            TERMINAL => "Terminal".into(),
-            HIGHLIGHTS => "Highlights".into(),
-            FILES => "Files".into(),
-            BROWSER => "Browser".into(),
-            PATCHES => "Patches".into(),
+            USAGE => tr!("Usage").into(),
+            UPDATES => tr!("Updates").into(),
+            CONNECTORS => tr!("Connectors").into(),
+            RUNNERS => tr!("Runners").into(),
+            SETUP => tr!("Finish setting up").into(),
+            TERMINAL => tr!("Terminal").into(),
+            HIGHLIGHTS => tr!("Highlights").into(),
+            FILES => tr!("Files").into(),
+            BROWSER => tr!("Browser").into(),
+            PATCHES => tr!("Patches").into(),
             _ => self
                 .pane_thread()
                 .and_then(|t| {
@@ -841,9 +841,9 @@ impl Threadbear {
     fn sidebar_panels_item(&self, cx: &App) -> MenuEntry {
         let shown = !self.open_sidebar_panels(cx).is_empty();
         let title = if shown {
-            "Hide Sidebar Panels"
+            tr!("Hide Sidebar Panels")
         } else {
-            "Show Sidebar Panels"
+            tr!("Show Sidebar Panels")
         };
         MenuEntry::item(title, Command::ToggleSidebarPanels)
             .enabled(shown || !self.hidden_sidebar_panels.is_empty())
@@ -1739,15 +1739,20 @@ impl Threadbear {
             self.menu_signature = signature;
             cx.set_menus(gpui_menus(&menus));
             #[cfg(target_os = "macos")]
-            // SAFETY: tb_menu_icons (native/menu_icons.m) takes nothing and only
-            // sets images on NSApp.mainMenu's items; we're on the main thread
+            // SAFETY: tb_menu_icons (native/menu_icons.m) uses the callback
+            // synchronously and sets images on NSApp.mainMenu's items; we're on the main thread
             // in a GPUI update, just after set_menus built that menu.
             unsafe {
                 extern "C" {
-                    fn tb_menu_icons();
+                    fn tb_menu_icons(
+                        matches: extern "C" fn(
+                            *const std::ffi::c_char,
+                            *const std::ffi::c_char,
+                        ) -> bool,
+                    );
                     fn tb_set_window_menu_title(title: *const std::os::raw::c_char);
                 }
-                tb_menu_icons();
+                tb_menu_icons(menu_title_matches);
                 if let Ok(title) = std::ffi::CString::new(window_menu_title()) {
                     tb_set_window_menu_title(title.as_ptr());
                 }
@@ -1786,17 +1791,21 @@ impl Threadbear {
         // (app_update.rs), under About, as the Swift app has it.
         let restart = self.updater.staged.as_ref().map(|s| {
             item(
-                &format!("Restart to Update to {}", s.short),
+                &trf!("Restart to Update to {version}", version = s.short),
                 Command::RestartToUpdate,
             )
         });
         vec![
             TopMenu::new(
                 "Threadbear",
-                [item("About Threadbear", Command::About)]
+                [item(tr!("About Threadbear"), Command::About)]
                     .into_iter()
                     .chain(restart)
-                    .chain([Separator, item("Settings…", Command::Settings), Separator])
+                    .chain([
+                        Separator,
+                        item(tr!("Settings…"), Command::Settings),
+                        Separator,
+                    ])
                     // The system's Services, for the words selected in a
                     // text box (a Mac's own; the Swift app has it).
                     .chain(
@@ -1806,18 +1815,18 @@ impl Threadbear {
                             .flatten(),
                     )
                     .chain([
-                        item("Hide Threadbear", Command::Hide),
-                        item("Hide Others", Command::HideOthers),
-                        item("Show All", Command::ShowAll),
+                        item(tr!("Hide Threadbear"), Command::Hide),
+                        item(tr!("Hide Others"), Command::HideOthers),
+                        item(tr!("Show All"), Command::ShowAll),
                         Separator,
-                        item("Quit Threadbear", Command::Quit),
+                        item(tr!("Quit Threadbear"), Command::Quit),
                     ])
                     .collect(),
             ),
             TopMenu::new(
                 tr!(context "menu bar", "File"),
                 vec![
-                    item("New Thread", Command::NewThread),
+                    item(tr!("New Thread"), Command::NewThread),
                     Separator,
                     item(tr!(context "closes a window", "Close"), Command::Close),
                 ],
@@ -1839,52 +1848,52 @@ impl Threadbear {
                     edit(E::Delete),
                     edit(E::SelectAll),
                     Separator,
-                    item("Find in Thread…", Command::FindInThread).enabled(has_thread),
+                    item(tr!("Find in Thread…"), Command::FindInThread).enabled(has_thread),
                 ]
             }),
             TopMenu::new(
                 tr!(context "menu bar", "View"),
                 vec![
-                    item("Zoom In", Command::ZoomIn).enabled(zoom::can_zoom_in(zoom_now)),
-                    item("Zoom Out", Command::ZoomOut).enabled(zoom::can_zoom_out(zoom_now)),
-                    item("Actual Size", Command::ActualSize)
+                    item(tr!("Zoom In"), Command::ZoomIn).enabled(zoom::can_zoom_in(zoom_now)),
+                    item(tr!("Zoom Out"), Command::ZoomOut).enabled(zoom::can_zoom_out(zoom_now)),
+                    item(tr!("Actual Size"), Command::ActualSize)
                         .enabled(zoom_now != zoom::DEFAULT_PERCENT),
                     Separator,
                     item(
                         if threads_showing {
-                            "Hide Threads"
+                            tr!("Hide Threads")
                         } else {
-                            "Show Threads"
+                            tr!("Show Threads")
                         },
                         Command::ToggleThreads,
                     ),
                     // Folds the panel away and back as it was; the activity bar stays.
                     item(
                         if threads_showing {
-                            "Collapse Threads"
+                            tr!("Collapse Threads")
                         } else {
-                            "Expand Threads"
+                            tr!("Expand Threads")
                         },
                         Command::CollapseThreads,
                     ),
                     item(
                         if panels_shown {
-                            "Hide Panels"
+                            tr!("Hide Panels")
                         } else {
-                            "Show Panels"
+                            tr!("Show Panels")
                         },
                         Command::TogglePanels,
                     ),
                     self.sidebar_panels_item(cx),
                     item(
                         if terminal_shown {
-                            "Hide Terminal"
+                            tr!("Hide Terminal")
                         } else {
-                            "Show Terminal"
+                            tr!("Show Terminal")
                         },
                         Command::ToggleTerminal,
                     ),
-                    item("Reset Panel Layout", Command::ResetPanelLayout),
+                    item(tr!("Reset Panel Layout"), Command::ResetPanelLayout),
                 ]
                 .into_iter()
                 .chain(self.frame_rate_items())
@@ -1893,42 +1902,48 @@ impl Threadbear {
             TopMenu::new(
                 tr!(context "menu bar", "Go"),
                 vec![
-                    item("Back", Command::Back).enabled(self.can_go_back()),
-                    item("Forward", Command::Forward).enabled(self.can_go_forward()),
+                    item(tr!("Back"), Command::Back).enabled(self.can_go_back()),
+                    item(tr!("Forward"), Command::Forward).enabled(self.can_go_forward()),
                     Separator,
-                    item("Next Inbox Thread", Command::NextInboxThread),
+                    item(tr!("Next Inbox Thread"), Command::NextInboxThread),
                     Separator,
-                    item("Open Anything…", Command::OpenAnything),
-                    item("Go to Message Box", Command::FocusMessageBox),
+                    item(tr!("Open Anything…"), Command::OpenAnything),
+                    item(tr!("Go to Message Box"), Command::FocusMessageBox),
                 ],
             ),
             TopMenu::new(
                 tr!(context "menu bar", "Thread"),
                 vec![
                     item(
-                        if archived { "Unarchive" } else { "Archive" },
+                        if archived {
+                            tr!("Unarchive")
+                        } else {
+                            tr!("Archive")
+                        },
                         Command::Archive,
                     )
                     .enabled(has_thread),
                     Submenu {
-                        title: "Hibernate".into(),
+                        title: tr!("Hibernate").into(),
                         items: self.hibernate_menu_items(),
                     },
-                    item("Stop", Command::Stop).enabled(busy),
-                    item("Attach Images or Markdown…", Command::AttachFiles)
+                    item(tr!("Stop"), Command::Stop).enabled(busy),
+                    item(tr!("Attach Images or Markdown…"), Command::AttachFiles)
                         .enabled(self.composer(cx).is_some()),
                     Separator,
-                    item("Copy Transcript as Markdown", Command::CopyTranscript)
+                    item(tr!("Copy Transcript as Markdown"), Command::CopyTranscript)
                         .enabled(has_thread),
                     Separator,
-                    item("Show Inbox", Command::ShowInbox),
-                    item("Show Scheduled", Command::ShowScheduled)
+                    item(tr!("Show Inbox"), Command::ShowInbox),
+                    item(tr!("Show Scheduled"), Command::ShowScheduled)
                         .enabled(self.schedules_supported),
-                    item("Show Projects", Command::ShowProjects).enabled(self.projects_supported),
-                    item("Show Librarian", Command::ShowLibrarian).enabled(self.projects_supported),
+                    item(tr!("Show Projects"), Command::ShowProjects)
+                        .enabled(self.projects_supported),
+                    item(tr!("Show Librarian"), Command::ShowLibrarian)
+                        .enabled(self.projects_supported),
                     Separator,
-                    item("Show Hibernating", Command::ShowHibernating),
-                    item("Show Archived", Command::ShowArchived),
+                    item(tr!("Show Hibernating"), Command::ShowHibernating),
+                    item(tr!("Show Archived"), Command::ShowArchived),
                 ],
             ),
             // AppKit adds Fill, Center, Move & Resize and the list of open
@@ -1936,18 +1951,18 @@ impl Threadbear {
             TopMenu::new(
                 window_menu_title(),
                 vec![
-                    item("Minimize", Command::Minimize),
-                    item("Zoom", Command::Zoom),
+                    item(tr!("Minimize"), Command::Minimize),
+                    item(tr!("Zoom"), Command::Zoom),
                     Separator,
-                    item("Bring All to Front", Command::BringAllToFront),
+                    item(tr!("Bring All to Front"), Command::BringAllToFront),
                 ],
             ),
             TopMenu::new(
                 tr!(context "menu bar", "Help"),
                 vec![
-                    item("Set Up Threadbear", Command::SetUpThreadbear),
-                    item("Take the Tour", Command::TakeTheTour),
-                    item("Finish Setting Up", Command::FinishSettingUp),
+                    item(tr!("Set Up Threadbear"), Command::SetUpThreadbear),
+                    item(tr!("Take the Tour"), Command::TakeTheTour),
+                    item(tr!("Finish Setting Up"), Command::FinishSettingUp),
                 ],
             ),
         ]
@@ -1958,9 +1973,9 @@ impl Threadbear {
         #[cfg(feature = "frame-stats")]
         {
             let title = if self.frame_rate.is_some() {
-                "Hide Frame Rate"
+                tr!("Hide Frame Rate")
             } else {
-                "Show Frame Rate"
+                tr!("Show Frame Rate")
             };
             vec![
                 MenuEntry::Separator,
@@ -2002,14 +2017,14 @@ impl Threadbear {
         // Only while a runner restart is waiting, as the Swift menu has it.
         if self.client.restart().is_pending() {
             items.push(MenuEntry::item(
-                threadbear_core::sidebar::SNOOZE_UNTIL_RESTART,
+                threadbear_core::sidebar::snooze_until_restart(),
                 Command::HibernateRestart,
             ));
         }
         items.push(MenuEntry::Separator);
-        items.push(MenuEntry::item("Pick a time…", Command::Hibernate));
+        items.push(MenuEntry::item(tr!("Pick a time…"), Command::Hibernate));
         items.push(MenuEntry::item(
-            threadbear_core::sidebar::WAKE_MENU_TITLE,
+            threadbear_core::sidebar::wake_menu_title(),
             Command::WakeWhen,
         ));
         items
@@ -2599,9 +2614,9 @@ fn menus_json(menus: &[TopMenu], shortcuts: &ShortcutBindings) -> Value {
                     }
                     Some(out)
                 }
-                MenuEntry::Services => {
-                    Some(serde_json::json!({ "title": "Services", "enabled": true, "items": [] }))
-                }
+                MenuEntry::Services => Some(
+                    serde_json::json!({ "title": tr!("Services"), "enabled": true, "items": [] }),
+                ),
                 MenuEntry::Separator => None,
             })
             .collect()
@@ -2612,6 +2627,32 @@ fn menus_json(menus: &[TopMenu], shortcuts: &ShortcutBindings) -> Value {
             .map(|m| serde_json::json!({ "title": m.title, "items": entries(&m.items, shortcuts) }))
             .collect(),
     )
+}
+
+#[cfg(target_os = "macos")]
+extern "C" fn menu_title_matches(
+    title: *const std::ffi::c_char,
+    source: *const std::ffi::c_char,
+) -> bool {
+    use std::ffi::CStr;
+    if title.is_null() || source.is_null() {
+        return false;
+    }
+    // SAFETY: AppKit supplies both UTF-8 pointers synchronously, with a NUL terminator.
+    let (Ok(title), Ok(source)) = (
+        unsafe { CStr::from_ptr(title) }.to_str(),
+        unsafe { CStr::from_ptr(source) }.to_str(),
+    ) else {
+        return false;
+    };
+    let label = threadbear_core::i18n::active_locale().message(source, source);
+    if let Some((prefix, suffix)) = label.split_once("{version}") {
+        return title
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(suffix))
+            .is_some_and(|version| !version.is_empty());
+    }
+    title == label
 }
 
 fn window_menu_title() -> &'static str {
@@ -2644,7 +2685,9 @@ fn gpui_menus(menus: &[TopMenu]) -> Vec<Menu> {
                     checked: false,
                     disabled: false,
                 },
-                MenuEntry::Services => MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuEntry::Services => {
+                    MenuItem::os_submenu(tr!("Services"), SystemMenuType::Services)
+                }
                 MenuEntry::Separator => MenuItem::Separator,
             })
             .collect()

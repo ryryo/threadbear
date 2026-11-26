@@ -10,6 +10,7 @@ use gpui_kit::base::SelectableText;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
@@ -236,7 +237,10 @@ impl ThreadPane {
         };
         let file = ToolPresentation::file_title(tool);
         let runs: Runs = match &file {
-            Some(f) => vec![(format!("{} {}", f.verb, f.name), quiet)],
+            Some(f) => vec![(
+                threadbear_core::trf!("{verb} {file}", verb = f.verb, file = f.name),
+                quiet,
+            )],
             None => vec![(ToolPresentation::short_title(&tool.title(), 160), quiet)],
         };
         let diffs: Vec<_> = tool
@@ -797,21 +801,21 @@ fn tool_body(ix: usize, tool: &ToolItem, remote: bool, cx: &App) -> AnyElement {
                     crate::open_gate::Origin::ThisMac
                 };
                 note.child(
-                    h_flex().child("Output shortened · ").child(
+                    h_flex().child(tr!("Output shortened · ")).child(
                         div()
                             .id(("show-all", ix))
                             .role(Role::Button)
                             .cursor_pointer()
                             .text_color(style::link_text(cx))
-                            .tip("The whole output, in a file")
+                            .tip(tr!("The whole output, in a file"))
                             .on_click(move |_, _, cx| {
                                 crate::open_gate::open_file(&path, origin, cx)
                             })
-                            .child("Show all"),
+                            .child(tr!("Show all")),
                     ),
                 )
             }
-            None => note.child("Output shortened"),
+            None => note.child(tr!("Output shortened")),
         });
     } else if !has_output {
         col = col.child(mono_text(
