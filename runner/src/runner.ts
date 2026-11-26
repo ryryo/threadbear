@@ -164,7 +164,7 @@ import type { Coordinators, CoordinatorView } from './coordinators.ts';
 export type Notification =
   | { method: 'thread.updated'; params: { thread: ThreadSummary } }
   | { method: 'thread.event'; params: { threadId: string; event: AnyEvent } }
-  | { method: 'thread.deleted'; params: { threadId: string } }
+  | { method: 'thread.deleted'; params: { threadId: string; privateBotId?: string } }
   | { method: 'accounts.updated'; params: { accounts: Account[] } }
   | { method: 'pools.updated'; params: { pools: Pool[] } }
   | { method: 'runner.notice'; params: { level: 'info' | 'warning' | 'error'; message: string } }
@@ -1811,11 +1811,11 @@ export class Runner {
     return placeBucket(placeOf(rec), this.clock.now());
   }
 
-  search(query: string, limit = 50): ThreadSummary[] {
+  search(query: string, limit = 50, visible: (record: ThreadRecord) => boolean = () => true): ThreadSummary[] {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     const out: ThreadSummary[] = [];
     for (const st of this.threads.values()) {
-      if (st.rec.coordinatorHelperFor) continue;
+      if (st.rec.coordinatorHelperFor || !visible(st.rec)) continue;
       const hay = `${st.rec.title}\n${st.rec.preview}\n${st.rec.keywords ?? ''}`.toLowerCase();
       if (words.every((w) => hay.includes(w))) out.push(this.summary(st));
     }
@@ -1907,6 +1907,10 @@ export class Runner {
 
   get(threadId: string): ThreadSummary {
     return this.summary(this.mustGet(threadId));
+  }
+
+  privateBotOf(threadId: string): string | undefined {
+    return this.threads.get(threadId)?.rec.privateBotId;
   }
 
   // What a sub-agent has done so far, from the CLI's transcript of it or from
@@ -4489,7 +4493,7 @@ export class Runner {
     this.store.trash(threadId, this.clock.now());
     this.log.info('thread deleted', { threadId, title: rec.title });
     this.armSnoozeTimer();
-    if (!rec.coordinatorHelperFor) this.notify({ method: 'thread.deleted', params: { threadId } });
+    if (!rec.coordinatorHelperFor) this.notify({ method: 'thread.deleted', params: { threadId, ...(rec.privateBotId ? { privateBotId: rec.privateBotId } : {}) } });
     return {};
   }
 
@@ -5099,6 +5103,7 @@ export class Runner {
     const s: ThreadSummary = {
       id: rec.id,
       ...(rec.botLink ? { botLink: rec.botLink } : {}),
+      ...(rec.privateBotId ? { privateBotId: rec.privateBotId } : {}),
       title: rec.title,
       cwd: rec.cwd,
       accountId: rec.accountId,
@@ -5230,6 +5235,7 @@ export class Runner {
   share(threadId: string, args: { access: ShareAccess; newLink?: boolean }): { thread: ThreadSummary } {
     const st = this.mustGet(threadId);
     if (args.access !== 'off' && args.access !== 'link') throw new RpcError(ErrorCode.badParams, 'access is "off" or "link"');
+    if (st.rec.privateBotId && args.access === 'link') throw new RpcError(ErrorCode.notAllowed, 'A private Bot conversation cannot have a shared link.');
     const slug = !st.rec.share || args.newLink ? crypto.randomBytes(16).toString('base64url') : st.rec.share.slug;
     st.rec.share = { access: args.access, slug, updatedAt: this.isoNow() };
     this.markDirty(st);

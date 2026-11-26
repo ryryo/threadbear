@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkBotDataFormat } from '../../../src/bots/format.ts';
+import { checkBotDataFormat, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -76,4 +76,27 @@ test('a supervisor exits before running a child or recording a boot for an incom
   assert.match(result.stdout + result.stderr, /no release that can open the required Bot data format/);
   assert.equal(existsSync(join(dir, 'state.json')), false);
   assert.equal(launch.readCurrentLink(dir), 'old');
+});
+
+test('private data needs the new supervisor and private-capable releases cannot roll back to P1', t => {
+  const { home, dir, marker } = fixture(t);
+  const privateRelease = join(dir, 'releases', 'private', 'src');
+  mkdirSync(join(privateRelease, 'bots'), { recursive: true });
+  writeFileSync(join(privateRelease, 'main.ts'), '');
+  writeFileSync(join(privateRelease, 'bots', 'format.json'), '1\n');
+  writeFileSync(join(privateRelease, 'bots', 'format-compatible.json'), '[1,2]\n');
+  writeFileSync(marker, '1\n');
+  // The legacy launcher's check was just a read of format.json and integer equality.
+  assert.equal(JSON.parse(readFileSync(join(privateRelease, 'bots', 'format.json'), 'utf8')), 1);
+  assert.equal(launch.releaseCanUseBotData(dir, 'private'), true);
+  assert.throws(() => protectBotData(home, PRIVATE_BOT_FORMAT), /updated Bot supervisor/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '1');
+
+  writeFileSync(marker, '2\n');
+  assert.equal(launch.releaseCanUseBotData(dir, 'new'), false);
+  assert.throws(() => launch.pointCurrent(dir, 'new'), /Bot data format/);
+  assert.equal(launch.releaseCanUseBotData(dir, 'private'), true);
+  assert.equal(checkBotDataFormat(home), true);
+  protectBotData(home, 1);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '2');
 });

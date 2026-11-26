@@ -57,13 +57,14 @@ export const GATED_READS: ReadonlySet<string> = new Set([
   'media.import',
 ]);
 
-type ThreadLike = { permissionMode?: PermissionMode; title: string; status?: string };
+type ThreadLike = { permissionMode?: PermissionMode; title: string; status?: string; privateBotId?: string };
 
 export type CallerGateDeps = {
   runner: {
     has(threadId: string): boolean;
     get(threadId: string): ThreadLike;
     accessOf(threadId: string): PermissionMode;
+    privateBotOf?(threadId: string): string | undefined;
     coordinators?: { rpcRefusal(threadId: string, method: string, p: Params): string | undefined };
   };
   // Threads a draining runner still has (rpc.ts's RemoteThreads).
@@ -119,6 +120,16 @@ export class CallerGate {
     return t ? `"${t.title}"` : threadId.slice(0, 8);
   }
 
+  private privateBotOf(threadId: string): string | undefined {
+    const { runner, remote } = this.deps;
+    if (runner.has(threadId)) return runner.privateBotOf?.(threadId);
+    return remote?.owns(threadId) ? remote.summaries([...ALL]).find(thread => thread.id === threadId)?.privateBotId : undefined;
+  }
+
+  canReadThread(caller: string, threadId: string, privateBotId = this.privateBotOf(threadId)): boolean {
+    return privateBotId === undefined || this.privateBotOf(caller) === privateBotId;
+  }
+
   // After a call that took a limited thread's pictures (check), whichever
   // way it ended: take's copies go.
   releaseHeld(images: unknown): void {
@@ -134,6 +145,17 @@ export class CallerGate {
   // mode filled in, what only a client with the token may say taken out).
   check(threadId: string, method: string, p: Params): Params {
     if (method.startsWith('bots.')) throw new RpcError(ErrorCode.notAllowed, 'Only the owner can use the Bot controls.');
+    const target = str(p, 'threadId');
+    if (target !== undefined && !this.canReadThread(threadId, target)) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${target}`);
+    const privateBotId = this.privateBotOf(threadId);
+    if (method === 'threads.send' && privateBotId && (target === undefined || this.privateBotOf(target) !== privateBotId)) {
+      throw new RpcError(ErrorCode.notAllowed, 'Sending from a private Bot to another thread needs the owner.');
+    }
+    if (method === 'threads.create' && privateBotId) {
+      if (p.runnerId !== undefined || p.serviceId !== undefined) throw new RpcError(ErrorCode.notAllowed, 'A private Bot starts threads only on its own Runner.');
+      if (p.projectIds !== undefined) throw new RpcError(ErrorCode.notAllowed, 'A private Bot cannot start a thread in a shared project.');
+      p = { ...p, startedBy: { kind: 'thread', threadId, label: 'Agent' }, worktree: false };
+    }
     // Pausing a coordinator and answering its helpers' questions are the
     // user's, from the project home. Starting one and handing it a charter
     // and to-dos is open to an ordinary thread on Full access (below it,

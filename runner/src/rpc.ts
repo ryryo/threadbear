@@ -548,6 +548,12 @@ export class RpcServer {
       // Not while the process lookup runs, nor after it refused (Gemini's
       // review of finding 175): it hasn't been placed yet.
       if (!c.authed || c.identifying || c.dropped || c.ws.readyState !== WebSocket.OPEN) continue;
+      if (c.caller !== undefined) {
+        const thread = n.method === 'thread.updated' ? n.params.thread : undefined;
+        if (thread && !this.opts.gate?.canReadThread(c.caller, thread.id, thread.privateBotId)) continue;
+        if (n.method === 'thread.event' && !this.opts.gate?.canReadThread(c.caller, n.params.threadId)) continue;
+        if (n.method === 'thread.deleted' && !this.opts.gate?.canReadThread(c.caller, n.params.threadId, n.params.privateBotId)) continue;
+      }
       if (n.method === 'thread.event' && !c.subs.has(n.params.threadId)) continue;
       this.write(c, msg, transient);
     }
@@ -792,18 +798,21 @@ export class RpcServer {
         // here (docs/protocol.md, both sides tolerate unknown values).
         const include = p.include === undefined ? undefined : stringArray(p, 'include').filter((x) => x === 'inbox' || x === 'snoozed' || x === 'archived');
         const ids = p.ids === undefined ? undefined : stringArray(p, 'ids');
-        const local = r.list(include as Bucket[] | undefined, ids);
+        const visible = (t: ThreadSummary) => conn.caller === undefined || this.opts.gate?.canReadThread(conn.caller, t.id, t.privateBotId);
+        const local = r.list(include as Bucket[] | undefined, ids).filter(visible);
         const only = ids && new Set(ids);
-        const remote = this.opts.remote?.summaries((include as Bucket[] | undefined) ?? ['inbox']).filter((t) => !only || only.has(t.id));
+        const remote = this.opts.remote?.summaries((include as Bucket[] | undefined) ?? ['inbox']).filter((t) => (!only || only.has(t.id)) && visible(t));
         return { threads: remote?.length ? mergeSummaries(local, remote) : local };
       }
       case 'threads.search': {
         const query = reqString(p, 'query');
         const limit = optInt(p, 'limit');
-        const local = r.search(query, limit);
+        const caller = conn.caller;
+        const gate = this.opts.gate;
+        const local = r.search(query, limit, t => caller === undefined || gate?.canReadThread(caller, t.id, t.privateBotId) === true);
         const remote = this.opts.remote;
         if (!remote) return { threads: local };
-        return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more).slice(0, limit ?? 50) }));
+        return remote.search(query, limit ?? 50).then((more) => ({ threads: mergeSummaries(local, more.filter(t => caller === undefined || gate?.canReadThread(caller, t.id, t.privateBotId))).slice(0, limit ?? 50) }));
       }
       case 'threads.create': {
         // On a virtual runner (docs/protocol/keys.md, Virtual runners, "Starting from the Mac").

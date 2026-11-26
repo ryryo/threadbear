@@ -244,6 +244,7 @@ export type BotInputRef = { id: string; conversationId: string; source: BotInput
 export type ThreadSummary = {
   id: string;
   botLink?: { botId: string; conversationId: string };
+  privateBotId?: string;
   title: string;
   cwd: string;
   accountId: string;

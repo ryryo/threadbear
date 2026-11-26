@@ -117,7 +117,13 @@ export function releaseCanUseBotData(dir, id, required = requiredBotDataFormat(d
   if (required === null) return true;
   if (typeof id !== 'string' || !id || /[\\/]/.test(id) || id === '.' || id === '..') return false;
   try {
-    return JSON.parse(fs.readFileSync(path.join(dir, 'releases', id, 'src', 'bots', 'format.json'), 'utf8')) === required;
+    const root = path.join(dir, 'releases', id, 'src', 'bots');
+    const baseline = JSON.parse(fs.readFileSync(path.join(root, 'format.json'), 'utf8'));
+    if (baseline === required) return true;
+    const compatible = JSON.parse(fs.readFileSync(path.join(root, 'format-compatible.json'), 'utf8'));
+    return Number.isSafeInteger(baseline) && baseline > 0 &&
+      Array.isArray(compatible) && compatible.every(version => Number.isSafeInteger(version) && version >= baseline) &&
+      compatible.includes(baseline) && compatible.includes(required);
   } catch {
     return false;
   }
@@ -441,7 +447,7 @@ async function main() {
     // launch: v8.setFlagsFromString can't resize it once the heap exists.
     const proc = spawn(process.execPath, ['--max-semi-space-size=2', path.join(root, 'src', 'main.ts')], {
       cwd: root,
-      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1', THREADBEAR_BOT_FORMAT_HOME: path.dirname(dir) },
+      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1', THREADBEAR_BOT_FORMAT_GUARD_VERSION: '2', THREADBEAR_BOT_FORMAT_HOME: path.dirname(dir) },
       stdio: ['ignore', 'pipe', logFd === 2 ? 'inherit' : logFd, 'ipc'],
     });
     const boot = plan.state.boots.at(-1);

@@ -799,7 +799,7 @@ export const movesPart = {
     const st = this.threads.get(threadId);
     if (!st) return undefined;
     const { rec } = st;
-    if (rec.botLink) throw new Error('A Bot conversation stays on its owning Runner.');
+    if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
     const account = this.accounts.list().find((a) => a.id === rec.accountId);
     const own = Boolean(rec.worktree && !rec.worktree.removedAt);
     const top = await repoTop(rec.cwd);
@@ -852,7 +852,7 @@ export const movesPart = {
     const st = this.threads.get(threadId);
     if (!st) throw new Error("The thread isn't here any more.");
     const { rec, rt } = st;
-    if (rec.botLink) throw new Error('A Bot conversation stays on its owning Runner.');
+    if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
     const leftBehind: string[] = [];
     const shells = rt.tasks.filter((t) => t.kind !== 'agent').length;
     if (shells) leftBehind.push(`${shells} background ${shells === 1 ? 'job was' : 'jobs were'} stopped, as they can't move.`);
@@ -1049,7 +1049,7 @@ export const movesPart = {
       const recFile = path.join(stage, 'thread', 'thread.json');
       const rec = JSON.parse(fs.readFileSync(recFile, 'utf8'));
       if (rec.id !== row.threadId) throw new Error("The moved thread's record is for another thread.");
-      if (rec.botLink) throw new Error('A Bot conversation stays on its owning Runner.');
+      if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
       fitMovedLog(path.join(stage, 'thread', 'events.ndjson'), { threadId: row.threadId, now: path.join(stage, 'thread', 'media'), final: this.store.mediaDir(row.threadId) });
       // From an older runner, a thread it ran in the sandbox experiment.
       if (rec.confined) throw new Error("A thread that ran in a sandbox can't move here: Threadbear no longer has one to run it in.");

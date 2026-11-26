@@ -350,6 +350,7 @@ async function main(): Promise<void> {
   let elsewhere: Elsewhere | undefined;
   let primaryLink: PrimaryLink | undefined;
   const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere, () => crossHooks));
+  const agentRouter = (threadId: string): ThreadRouter => new ThreadRouter(runner, () => elsewhere, () => crossHooks, threadId);
   // Other runners (cross-runner.ts), set once the relay is made.
   let crossHooks: CrossRunnerHooks | undefined;
   let routerCache: ThreadRouter | undefined;
@@ -456,7 +457,7 @@ async function main(): Promise<void> {
     registry,
     log,
     mcpServersFor: (threadId) => ({
-      [SERVER_NAME]: threadbearMcpServer(router(), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, remoteControl, () => experimentOn(cfg.home, 'livePages'), () => runner.coordinators),
+      [SERVER_NAME]: threadbearMcpServer(agentRouter(threadId), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, remoteControl, () => experimentOn(cfg.home, 'livePages'), () => runner.coordinators),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -467,7 +468,7 @@ async function main(): Promise<void> {
   // What Codex and ACP agents get beside the tools: the rich blocks, and
   // live pages with that experiment on.
   const richGuidance = () => (experimentOn(cfg.home, 'livePages') ? `${RICH_BLOCKS_LINE} ${LIVE_PAGES_LINE}` : RICH_BLOCKS_LINE);
-  const codexStyleTools = (threadId: string) => buildThreadbearTools(router(), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply, pocket: pocketControl, gateway: () => cfg.connectorsUrl, gatewayHealth, remote: remoteControl, coordinators: () => runner.coordinators });
+  const codexStyleTools = (threadId: string) => buildThreadbearTools(agentRouter(threadId), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply, pocket: pocketControl, gateway: () => cfg.connectorsUrl, gatewayHealth, remote: remoteControl, coordinators: () => runner.coordinators });
   // One app-server per live Codex thread, each starting what E says is
   // current, with the same threadbear tools as dynamic tools.
   const codex = new CodexAdapter({
@@ -901,6 +902,10 @@ async function main(): Promise<void> {
   // Off with followMain, like the rest of following main.
   let reportedFailure: () => UpdateFailure | undefined = () => (cfg.followMain ? reportedOnDisk(cfg.home) : undefined);
   let remoteFixer: RemoteUpdateFixer | undefined;
+  const privateBotThread = (id: string) => runner.privateBotOf(id) ?? peers.find(id)?.privateBotId;
+  const requireMirrorThread = (id: string) => {
+    if (privateBotThread(id)) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${id}`);
+  };
   const sync = new ConvexSync({
     config: { ...cfg.sync, runnerId: syncRunnerId, icon: runnerIcon },
     use: new ConvexUseTally({ home: cfg.home }),
@@ -924,29 +929,31 @@ async function main(): Promise<void> {
           // A thread.updated names its thread inside `thread`, the rest by threadId.
           const p = n.params as { threadId?: unknown; thread?: { id?: unknown } } | undefined;
           const id = p?.threadId ?? p?.thread?.id;
+          if ((n.method === 'thread.deleted' && n.params.privateBotId) || (n.method === 'thread.updated' && n.params.thread.privateBotId) ||
+              (typeof id === 'string' && privateBotThread(id))) return;
           // Its delete still goes through: sync forgets the thread as
           // sent then, rather than removing the other runner's row.
           if (typeof id === 'string' && movesRef?.gone(id) && n.method !== 'thread.deleted') return;
           fn(n);
         }),
-      list: (include) => runner.list(include).filter((t) => !movesRef?.gone(t.id)),
-      get: (id) => runner.get(id),
-      events: (id, o) => runner.events(id, o),
-      cuts: (id) => runner.cuts(id),
+      list: (include) => runner.list(include).filter((t) => !t.privateBotId && !movesRef?.gone(t.id)),
+      get: (id) => { requireMirrorThread(id); return runner.get(id); },
+      events: (id, o) => { requireMirrorThread(id); return runner.events(id, o); },
+      cuts: (id) => { requireMirrorThread(id); return runner.cuts(id); },
       ...(box
         ? {}
         : {
             listProjects: () => projects.list({ archived: true }),
-            listSchedules: () => scheduler.list(),
+            listSchedules: () => scheduler.list().filter(schedule => !schedule.threadId || !privateBotThread(schedule.threadId)),
             listAccounts: () => runner.hello().accounts,
             listPools: () => runner.listPools(),
           }),
-      buttons: (id) => runner.listButtons(id).buttons,
+      buttons: (id) => { requireMirrorThread(id); return runner.listButtons(id).buttons; },
     },
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.
     commands: {
-      ...phoneCommands(runner, peers),
+      ...phoneCommands(runner, peers, requireMirrorThread),
       // A schedule's own runner gets its command, so the scheduler here is its.
       // Mike's, from his phone: resuming lifts a schedule's ceiling, as from the
       // app (schedules.ts, "Ceilings").

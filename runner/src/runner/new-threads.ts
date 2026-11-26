@@ -22,7 +22,7 @@ import { newRuntime } from './runtime.ts';
 import { providerInfo, providerName } from '../providers.ts';
 import { cutSafely } from '../safe-cut.ts';
 
-type ThreadIdentity = { id: string; sessionId: string; botLink?: ThreadRecord['botLink'] };
+type ThreadIdentity = { id: string; sessionId: string; botLink?: ThreadRecord['botLink']; privateBotId?: string };
 
 export const newThreadsPart = {
   create(this: Runner, params: {
@@ -278,9 +278,11 @@ export const newThreadsPart = {
     if (retired) throw new RpcError(ErrorCode.badParams, retired);
     const now = this.isoNow();
     const id = params.id ?? ids?.id ?? crypto.randomUUID();
+    const privateBotId = ids?.privateBotId ?? (params.startedBy?.threadId && this.privateBotOf(params.startedBy.threadId));
     const rec: ThreadRecord = {
       id,
       ...(ids?.botLink ? { botLink: ids.botLink } : {}),
+      ...(privateBotId ? { privateBotId } : {}),
       title: params.title?.trim() ? cutSafely(params.title.trim(), 200) : titleFrom(params.text),
       titleSet: Boolean(params.title?.trim()),
       cwd,

@@ -155,6 +155,8 @@ export function normaliseRecord(rec: Record<string, unknown>): boolean {
 export type ThreadRecord = {
   id: string;
   botLink?: ThreadSummary['botLink'];
+  // Set before the first event and retained on children and archived records.
+  privateBotId?: string;
   title: string;
   cwd: string;
   accountId: string;

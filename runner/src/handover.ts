@@ -773,16 +773,19 @@ export class ThreadRouter implements ThreadControl {
   private runner: Runner;
   private elsewhere: () => Elsewhere | undefined;
   private cross: () => CrossRunnerHooks | undefined;
+  private actor?: string;
 
-  constructor(runner: Runner, elsewhere: () => Elsewhere | undefined, cross: () => CrossRunnerHooks | undefined = () => undefined) {
+  constructor(runner: Runner, elsewhere: () => Elsewhere | undefined, cross: () => CrossRunnerHooks | undefined = () => undefined, actor?: string) {
     this.runner = runner;
     this.elsewhere = elsewhere;
     this.cross = cross;
+    this.actor = actor;
   }
 
   // Asking another runner (cross-runner.ts). Only a thread's own agent asks,
   // on the runner that has the thread.
   async startOn(threadId: string, req: StartRequest): Promise<string | undefined> {
+    if (this.privateActor()) throw new RpcError(ErrorCode.notAllowed, 'A private Bot starts threads only on its own Runner.');
     const c = this.cross();
     return c ? c.start(threadId, req) : undefined;
   }
@@ -792,6 +795,23 @@ export class ThreadRouter implements ThreadControl {
     if (this.runner.has(threadId)) return undefined;
     const e = this.elsewhere();
     return e?.owns(threadId) ? e : undefined;
+  }
+
+  private privateActor(): string | undefined { return this.actor && this.runner.privateBotOf(this.actor); }
+
+  private visible(privateBotId: string | undefined): boolean {
+    return this.actor === undefined || privateBotId === undefined || this.privateActor() === privateBotId;
+  }
+
+  private checkVisible(id: string, privateBotId: string | undefined): void {
+    if (!this.visible(privateBotId)) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${id}`);
+  }
+
+  private async target(id: string): Promise<{ away?: Elsewhere; privateBotId?: string }> {
+    const away = this.away(id);
+    const privateBotId = this.actor && (away ? (await away.find(id))?.privateBotId : this.runner.privateBotOf(id));
+    this.checkVisible(id, privateBotId);
+    return { away, privateBotId };
   }
 
   hello(): ReturnType<Runner['hello']> {
@@ -839,50 +859,57 @@ export class ThreadRouter implements ThreadControl {
   // A failure to reach the other runner leaves its threads out: list_threads
   // still shows this runner's.
   async list(include: Bucket[] = ['inbox']): Promise<ThreadSummary[]> {
-    return this.listEverywhere(include).catch(() => this.runner.list(include));
+    return this.listEverywhere(include).catch(() => this.runner.list(include).filter(thread => this.visible(thread.privateBotId)));
   }
 
   // Throws instead, for matching a short id (threadbear-mcp.ts, allForIds):
   // a list without the other runner's threads said "No thread" for one of
   // them (12 Nov).
   async listEverywhere(include: Bucket[] = ['inbox']): Promise<ThreadSummary[]> {
-    const local = this.runner.list(include);
+    const local = this.runner.list(include).filter(thread => this.visible(thread.privateBotId));
     const e = this.elsewhere();
-    return e ? mergeSummaries(local, await e.list(include)) : local;
+    return e ? mergeSummaries(local, (await e.list(include)).filter(thread => this.visible(thread.privateBotId))) : local;
   }
 
   async search(query: string, limit = 50): Promise<ThreadSummary[]> {
-    const local = this.runner.search(query, limit);
+    const local = this.runner.search(query, limit, thread => this.visible(thread.privateBotId));
     const e = this.elsewhere();
-    return e ? mergeSummaries(local, await e.search(query, limit).catch(() => [])).slice(0, limit) : local;
+    return e ? mergeSummaries(local, (await e.search(query, limit).catch(() => [])).filter(thread => this.visible(thread.privateBotId))).slice(0, limit) : local;
   }
 
   async get(threadId: string): Promise<ThreadSummary> {
     const e = this.away(threadId);
-    if (!e) return this.runner.get(threadId);
-    const t = await e.find(threadId);
+    const t = e ? await e.find(threadId) : this.runner.get(threadId);
     if (!t) throw new RpcError(ErrorCode.threadNotFound, `Thread not found: ${threadId}`);
+    this.checkVisible(threadId, t.privateBotId);
     return t;
   }
 
   async events(threadId: string, opts: Parameters<Runner['events']>[1] = {}): Promise<ReturnType<Runner['events']>> {
-    const e = this.away(threadId);
+    const { away: e } = await this.target(threadId);
     return e ? e.call('threads.events', { threadId, ...opts }) : this.runner.events(threadId, opts);
   }
 
   async create(params: Parameters<Runner['create']>[0]): Promise<ReturnType<Runner['create']>> {
     // A draining runner makes no threads; the primary does.
     const e = this.runner.keeping() ? this.elsewhere() : undefined;
+    if (this.actor && this.privateActor()) {
+      if (e) throw new RpcError(ErrorCode.busy, 'The private Bot’s Runner is handing over. Try again after the update.');
+      if (params.projectIds?.length) throw new RpcError(ErrorCode.notAllowed, 'A private Bot cannot start a thread in a shared project.');
+      params = { ...params, startedBy: { kind: 'thread', threadId: this.actor, label: 'Agent' }, worktree: false };
+    }
     return e ? e.call('threads.create', { ...params }) : this.runner.create(params);
   }
 
   async send(threadId: string, text: string, images: Parameters<Runner['send']>[2] = [], opts: Parameters<Runner['send']>[3] = {}): Promise<{ turnId: string }> {
-    const e = this.away(threadId);
-    return e ? e.call('threads.send', { threadId, text, images, ...(opts.answers ? { answers: opts.answers } : {}), ...(opts.ceiling ? { ceiling: opts.ceiling } : {}) }) : this.runner.send(threadId, text, images, opts);
+    const { away: e, privateBotId } = await this.target(threadId);
+    const actor = this.privateActor();
+    if (actor && actor !== privateBotId) throw new RpcError(ErrorCode.notAllowed, 'Sending from a private Bot to another thread needs the owner.');
+    return e ? e.call('threads.send', { threadId, text, images, ...(opts.answers ? { answers: opts.answers } : {}), ...(opts.ceiling ? { ceiling: opts.ceiling } : {}) }) : this.runner.send(threadId, text, images, this.actor ? { ...opts, botSource: { kind: 'thread', threadId: this.actor } } : opts);
   }
 
   async createReview(threadId: string, input: Parameters<Runner['createReview']>[1]): Promise<ReturnType<Runner['createReview']>> {
-    const e = this.away(threadId);
+    const { away: e } = await this.target(threadId);
     return e ? e.call('reviews.create', {threadId, ...input}) : this.runner.createReview(threadId, input);
   }
 
@@ -930,7 +957,7 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {
-    const e = this.away(upd.threadId);
+    const { away: e } = await this.target(upd.threadId);
     // An older runner reads a move without `unconfine: false` as the user's
     // (the sandbox experiment's flag, taken out here 16 Nov 2026), so an
     // agent's says so that way too.
@@ -938,13 +965,13 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async interrupt(threadId: string): Promise<Record<string, never>> {
-    const e = this.away(threadId);
+    const { away: e } = await this.target(threadId);
     // The router is what agents' tools go through, so this isn't Mike's Stop.
     return e ? e.call('threads.interrupt', { threadId, byAgent: true }) : this.runner.interrupt(threadId);
   }
 
   async delete(threadId: string): Promise<Record<string, never>> {
-    const e = this.away(threadId);
+    const { away: e } = await this.target(threadId);
     return e ? e.call('threads.delete', { threadId }) : this.runner.delete(threadId);
   }
 }
@@ -953,8 +980,9 @@ export class ThreadRouter implements ThreadControl {
 // directly, and one a draining runner still has over there, as the app's
 // RPCs go (rpc.ts's forward). Without this a command for a thread
 // finishing its turn on the old runner failed with "Thread not found".
-export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'call'>): CommandHost {
+export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'call'>, requireVisible?: (threadId: string) => void): CommandHost {
   const at = <T>(threadId: string, method: string, params: Record<string, unknown>, here: () => T): T | Promise<unknown> => {
+    requireVisible?.(threadId);
     if (runner.has(threadId) || !remote?.owns(threadId)) return here();
     // Just handed over (-32030): this runner has it by now.
     return remote.call(threadId, method, { threadId, ...params }).catch((e) => {
