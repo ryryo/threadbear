@@ -28,3 +28,9 @@
 - For the external picker, reuse [Wayne's capture and thread association](https://github.com/waynesutton/threadbear/commit/56070153d98c9003b6b427bdbbadf170b0cbc9f6) and [page picker](https://github.com/waynesutton/browserbear/commit/0123116122174acff6cd720b91f680ec27d0809d) where the external-tab feature is used. Do not put BrowserBear-specific service startup in the embedded picker. Preserve MIT notices with sourced code.
 
 The port of T3 Code's crop geometry is covered by the [T3 Code MIT notice](third-party/t3-code-MIT.txt).
+
+## Implementation and verification
+
+- The Browser view uses the existing native panel pool, runtime setup, dock and BrowserBear list. Its original Highlights page preview route was removed when the link actions moved to Browser.
+- The T3 Code geometry port lives in `desktop/gpui/src/browser_notes/geometry.rs`. The new GPUI selection code uses the existing CEF DevTools bridge for the image and element bounds. The draft code uses the existing private image staging, `media.import`, draft file, and message image format. The capture and the comment stay in one draft record.
+- Verified on macOS with Chromium: ten scripted scenarios passed, covering the globe, reply and pin opening, the external default, element and region capture, restart and thread isolation, BrowserBear handoff and an existing patch panel. The separate Google smoke test verified a live Browser panel and a direct external open from Command-click. The bundled Chromium renderer sandbox remains a separate packaging check for broader distribution.
