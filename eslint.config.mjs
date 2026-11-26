@@ -23,6 +23,8 @@ export default [
       "docs/**",
       "scripts/**",
       "runner/box/spike/**",
+      // Byte-for-byte DS-Bot reference copies. Lint the executable ports in runner/.
+      "third_party/dsbot/baseline/**",
     ],
     untyped: ["runner/scripts/**"],
     notReact: ["runner/**", "relay/**", "features/**"],
