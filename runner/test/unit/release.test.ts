@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { NO_LINKS_ON_WINDOWS } from '../helpers/platform.ts';
 import { RunnerClient } from '../../src/client.ts';
 import { nullLogger } from '../../src/log.ts';
+import { MARK_NAMES } from '../../src/peer.ts';
 import { PATIENCE_MS, patiently } from '../helpers/patience.ts';
 
 const RUNNER_DIR = path.join(import.meta.dirname, '..', '..');
@@ -68,9 +69,13 @@ function cleanEnv(): NodeJS.ProcessEnv {
 
 function startRunner(entry: string, home: string, extra: Record<string, string> = {}) {
   let out = '';
+  // dev-runner.sh preserves the starting thread's identity so the caller
+  // is the owner of this isolated Runner even if parent lookup times out.
+  const owner = Object.fromEntries(MARK_NAMES.flatMap(name => process.env[name] ? [[name, process.env[name]]] : []));
   const proc: ChildProcess = spawn(process.execPath, [entry], {
     env: {
       ...cleanEnv(),
+      ...owner,
       THREADBEAR_HOME: home,
       THREADBEAR_PORT: '0',
       THREADBEAR_LOG: path.join(home, 'runner.log'),
@@ -104,6 +109,20 @@ async function connect(home: string, port: number) {
   const hello = await c.call('hello', { client: 'test', version: '1' });
   await new Promise((r) => setTimeout(r, 50));
   return { c, hello, notices };
+}
+
+async function connectAfterRestart(home: string, port: number) {
+  const until = Date.now() + PATIENCE_MS;
+  for (;;) {
+    try {
+      return await connect(home, port);
+    } catch (error) {
+      // A busy machine can time out identifying the socket's process. The
+      // desktop retries that specific refusal without changing credentials.
+      if (!(error instanceof Error) || !error.message.includes('connection closed (4503)') || Date.now() >= until) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
 }
 
 // A release laid out the way deploy-runner.sh builds one, from this
@@ -219,23 +238,31 @@ async function nthListening(out: () => string, n: number, ms = PATIENCE_MS): Pro
 test('a managed Bot release writes the marker and reopens its workspace after restarting', async () => {
   const home = tmpDir();
   const id = '20261127T000000Z-abc1234';
-  makeRelease(home, id);
+  const release = makeRelease(home, id);
+  for (const file of ['LICENSE', 'NOTICE']) {
+    assert.deepEqual(fs.readFileSync(path.join(release, 'src', 'bots', 'ported', file)), fs.readFileSync(path.join(RUNNER_DIR, '..', 'third_party', 'dsbot', file)));
+  }
   const launch = installLaunch(home, id);
-  fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ experiments: { nativeBots: true } }));
+  fs.writeFileSync(path.join(home, 'runner.json'), JSON.stringify({ defaults: { cwd: home }, experiments: { nativeBots: true } }));
   const marker = path.join(home, 'bots-format.json');
   const r = startRunner(launch, home, { THREADBEAR_RESTART_MS: '50' });
   try {
-    const { c } = await connect(home, await nthListening(r.out, 1));
+    const { c } = await connectAfterRestart(home, await nthListening(r.out, 1));
     try {
       assert.equal((await c.call('bots.status')).available, true);
       assert.deepEqual(await c.call('bots.list'), { bots: [] });
       assert.equal(fs.existsSync(marker), false);
       const { bot } = await c.call('bots.create', { name: '編集者' });
       assert.equal(fs.readFileSync(marker, 'utf8').trim(), '1');
+      const { conversation: a } = await c.call('bots.conversations.create', { botId: bot.id, operationId: 'conversation-a' });
+      const { note } = await c.call('bots.memory.add', { botId: bot.id, threadId: a.threadId, text: '見出しは短くする' });
+      const { conversation: b } = await c.call('bots.conversations.create', { botId: bot.id, operationId: 'conversation-b' });
+      assert.notEqual(a.threadId, b.threadId);
       await c.call('runner.restart', { reason: 'Bot workspace verification' });
-      const { c: after } = await connect(home, await nthListening(r.out, 2));
+      const { c: after } = await connectAfterRestart(home, await nthListening(r.out, 2));
       try {
         assert.deepEqual(await after.call('bots.list'), { bots: [bot] });
+        assert.deepEqual(await after.call('bots.memory.read', { botId: bot.id, threadId: b.threadId }), { notes: [note] });
       } finally {
         after.close();
       }
