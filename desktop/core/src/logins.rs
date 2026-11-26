@@ -1141,23 +1141,23 @@ impl<'a> ChipSettings<'a> {
 /// How a mode reads on the chip (PermissionMode.composerTitle).
 pub fn permission_title(mode: &str) -> &'static str {
     match mode {
-        "full" => "Full access",
-        "ask" => "Ask before edits",
-        "auto" => "Auto",
-        "plan" => "Plan first",
-        "unknown" => "Access unknown",
-        _ => "Unknown mode",
+        "full" => crate::tr!("Full access"),
+        "ask" => crate::tr!("Ask before edits"),
+        "auto" => crate::tr!("Auto"),
+        "plan" => crate::tr!("Plan first"),
+        "unknown" => crate::tr!("Access unknown"),
+        _ => crate::tr!("Unknown mode"),
     }
 }
 
 pub fn permission_help(mode: &str) -> &'static str {
     match mode {
-        "full" => "Edits files and runs commands without asking",
-        "ask" => "Asks before editing files or running commands",
-        "auto" => "A safety check approves or blocks each action, and asks only when unsure",
-        "plan" => "Reads and plans, and changes nothing until you approve its plan",
-        "unknown" => "Its runner doesn't say what access this thread has. Updating Threadbear there shows it",
-        _ => "A mode from a newer runner that this app doesn't know. Update the app to see it. Anything made from this thread here asks before edits",
+        "full" => crate::tr!("Edits files and runs commands without asking"),
+        "ask" => crate::tr!("Asks before editing files or running commands"),
+        "auto" => crate::tr!("A safety check approves or blocks each action, and asks only when unsure"),
+        "plan" => crate::tr!("Reads and plans, and changes nothing until you approve its plan"),
+        "unknown" => crate::tr!("Its runner doesn't say what access this thread has. Updating Threadbear there shows it"),
+        _ => crate::tr!("A mode from a newer runner that this app doesn't know. Update the app to see it. Anything made from this thread here asks before edits"),
     }
 }
 

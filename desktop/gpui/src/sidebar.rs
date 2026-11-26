@@ -1612,7 +1612,7 @@ impl Threadbear {
         }
         items.push(MenuRow::separator());
         items.push(MenuRow::item(
-            rows::SNOOZE_PICK_TITLE,
+            rows::snooze_pick_title(),
             "calendar",
             MenuAction::PickTime,
         ));
@@ -1867,7 +1867,7 @@ impl Threadbear {
         cx: &mut Context<Self>,
     ) {
         let entity = cx.entity().downgrade();
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder(rows::WAKE_PLACEHOLDER));
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder(rows::wake_placeholder()));
         let field_focus = field.clone();
         window.open_alert_dialog(cx, move |dialog, _, _| {
             let (entity, field_read, id) = (entity.clone(), field.clone(), id.clone());
@@ -1877,7 +1877,7 @@ impl Threadbear {
                 .child(Input::new(&field))
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Hibernate")
+                        .ok_text(tr!("Hibernate"))
                         .show_cancel(true),
                 )
                 .on_ok(move |_, window, cx| {
@@ -1971,7 +1971,7 @@ impl Threadbear {
                 })
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Hibernate")
+                        .ok_text(tr!("Hibernate"))
                         .show_cancel(true),
                 )
                 .on_ok(move |_, window, cx| {

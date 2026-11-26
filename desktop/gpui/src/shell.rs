@@ -2022,7 +2022,10 @@ impl Threadbear {
             ));
         }
         items.push(MenuEntry::Separator);
-        items.push(MenuEntry::item(tr!("Pick a time…"), Command::Hibernate));
+        items.push(MenuEntry::item(
+            threadbear_core::sidebar::snooze_pick_title(),
+            Command::Hibernate,
+        ));
         items.push(MenuEntry::item(
             threadbear_core::sidebar::wake_menu_title(),
             Command::WakeWhen,

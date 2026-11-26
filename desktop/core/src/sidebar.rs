@@ -536,8 +536,9 @@ fn count(n: usize, kind: &str) -> String {
 pub fn wake_menu_title() -> &'static str {
     crate::tr!("Wake when…")
 }
-pub const WAKE_PLACEHOLDER: &str =
-    "at the weekend, in a few weeks, next time I talk about woodworking";
+pub fn wake_placeholder() -> &'static str {
+    crate::tr!("at the weekend, in a few weeks, next time I talk about woodworking")
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
@@ -845,9 +846,9 @@ pub fn trailing<Tz: TimeZone>(
                     };
                 }
                 let text = if t.snoozed_until_release == Some(true) {
-                    "Back on update".to_string()
+                    crate::tr!("Back on update").to_string()
                 } else if t.snoozed_until_restart == Some(true) {
-                    "Back on restart".to_string()
+                    crate::tr!("Back on restart").to_string()
                 } else if let Some(until) = t.snoozed_until_ms() {
                     crate::trf!("Back {time}", time = until_words(until, now))
                 } else {
@@ -861,7 +862,7 @@ pub fn trailing<Tz: TimeZone>(
             }
             if look.woke {
                 return Trailing {
-                    text: "Woke up".into(),
+                    text: crate::tr!("Woke up").into(),
                     kind: TrailingKind::Woke,
                     tip: Some(woke_tip(t)),
                 };
@@ -992,7 +993,9 @@ impl SnoozePreset {
 pub fn snooze_until_restart() -> &'static str {
     crate::tr!("Until the runner restarts")
 }
-pub const SNOOZE_PICK_TITLE: &str = "Pick a time…";
+pub fn snooze_pick_title() -> &'static str {
+    crate::tr!("Pick a time…")
+}
 
 /// The snooze menu: 1 hour, this evening 6 pm, tomorrow 9 am, next Monday
 /// 9 am (`Snooze.presets`).

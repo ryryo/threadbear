@@ -31,6 +31,9 @@ Feature: Desktop language
     When I choose Japanese as the desktop language
     And I start a new thread
     Then the new-thread page asks "何から始めましょうか？"
+    And the "permission" menu shows "フルアクセス" ticked
+    When I pick "編集・実行前に確認" from the "permission" menu
+    Then the composer's permission mode is "ask"
     When I type "バックアップを確認してください" in the composer
     And I press Return
     Then the transcript shows my message "バックアップを確認してください"
