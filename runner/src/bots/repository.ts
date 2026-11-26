@@ -85,6 +85,8 @@ export class BotRepository {
     return structuredClone(this.current.bots);
   }
 
+  workspaceId(): string { return this.current.workspaceId; }
+
   get(id: string): Bot {
     const entry = this.current.bots.find(item => item.id === id);
     if (!entry) throw new Error('Unknown Bot');

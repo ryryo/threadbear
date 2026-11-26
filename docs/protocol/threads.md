@@ -72,6 +72,16 @@ membership. A Bot's own scope, a team, a group and a project are distinct
 scopes. A shared Bot's notes require an explicit same-team read or grant.
 Project access requires both the active conversation's project and a grant.
 Group access requires current membership and must be in the group's context.
+`bots.memory.scopes` lists available scope IDs and labels for the owner.
+`bots.memory.scope.read`, `.search`, `.add`, `.edit`, `.remove`, `.history`
+and `.restore` take `{ scope: { kind, id } }` along with the corresponding
+entry, query or change fields. The owning Runner resolves the scope IDs.
+The initial shared team is the Bot workspace. Project IDs resolve against
+Threadbear Projects. Each scope has its own notes and change journal.
+Scope reads report the current `revision`. Scope writes require that revision
+as `expectedRevision` and a UUID `operationId`. Repeating an accepted operation
+returns its recorded result. A different payload with that ID or a stale
+revision is refused before touching any notes.
 
 Private conversations and their notes are owner-local. Thread RPC and agent
 tools enforce visibility at each read, including filtered lists and searches,

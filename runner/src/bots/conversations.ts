@@ -1,18 +1,18 @@
-import { join } from 'node:path';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
-import { PersonalMemory, type MemoryNote } from './ported/personal-memory.js';
+import type { PersonalMemory, MemoryNote } from './ported/personal-memory.js';
 import type { BotRepository, Conversation } from './repository.ts';
+import { ScopedMemory } from './scoped-memory.ts';
 
 export class BotConversations {
   private readonly runner: Runner;
   private readonly repo: BotRepository;
-  private readonly root: string;
+  readonly scopedMemory: ScopedMemory;
 
-  constructor(runner: Runner, repo: BotRepository, root: string) {
+  constructor(runner: Runner, repo: BotRepository, root: string, redact?: (text: string) => string) {
     this.runner = runner;
     this.repo = repo;
-    this.root = root;
+    this.scopedMemory = new ScopedMemory({ repo, root, projects: runner.projects, redact });
   }
 
   create(botId: string, operationId: string): Conversation {
@@ -48,6 +48,8 @@ export class BotConversations {
 
   summary(threadId: string) { return this.runner.get(threadId); }
 
+  now(): string { return this.runner.isoNow(); }
+
   private conversationRecord(botId: string, threadId: string): ThreadRecord {
     const rec = this.runner.store.load(threadId);
     const saved = rec?.botLink;
@@ -66,9 +68,9 @@ export class BotConversations {
     return this.repo.setModelBinding(botId, expectedRevision, { accountId: rec.accountId, provider: rec.provider, model, effort: rec.effort });
   }
 
-  private memoryFor(botId: string, threadId: string): PersonalMemory {
+  private memoryFor(botId: string, threadId: string, access: 'read' | 'write' = 'read'): PersonalMemory {
     this.conversationRecord(botId, threadId);
-    return new PersonalMemory(join(this.root, 'memory', botId));
+    return this.scopedMemory.open({ kind: 'bot', id: botId }, { kind: 'owner' }, access);
   }
 
   notes(botId: string, threadId: string): MemoryNote[] {
@@ -81,7 +83,7 @@ export class BotConversations {
 
   private writableMemory(botId: string, threadId: string): PersonalMemory {
     if (this.repo.get(botId).archivedAt) throw new Error('This Bot is archived');
-    return this.memoryFor(botId, threadId);
+    return this.memoryFor(botId, threadId, 'write');
   }
 
   remember(botId: string, threadId: string, text: string, until?: string): MemoryNote {
@@ -101,11 +103,7 @@ export class BotConversations {
   }
 
   history(botId: string, threadId: string, before?: string) {
-    const history = this.memoryFor(botId, threadId).history();
-    const offset = before === undefined ? 0 : history.findIndex(change => change.id === before) + 1;
-    if (before !== undefined && offset === 0) return { rows: [], more: null };
-    const page = history.slice(offset, offset + 50);
-    return { rows: page, more: offset + page.length < history.length ? page.at(-1)!.id : null };
+    return this.memoryFor(botId, threadId).historyPage(before);
   }
 
   archive(botId: string, expectedRevision: number) {
@@ -117,7 +115,9 @@ export class BotConversations {
     if (!link) throw new Error('This Thread has no Bot link');
     const bot = this.repo.get(link.botId);
     if (bot.archivedAt) throw new Error('This Bot is archived');
-    const notes = this.notes(bot.id, rec.id);
+    this.conversationRecord(bot.id, rec.id);
+    const memory = this.scopedMemory.open({ kind: 'bot', id: bot.id }, { kind: 'bot', id: bot.id, private: Boolean(bot.privacy), grants: [] }, 'read');
+    const notes = memory.list(this.runner.isoNow().slice(0, 10));
     return [
       `Bot name: ${bot.name}`,
       bot.role ? `Role: ${bot.role}` : '',

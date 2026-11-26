@@ -1,4 +1,4 @@
-export const MEMORY_LIMITS: { entry: number };
+export const MEMORY_LIMITS: { entry: number; bot: number; team: number; group: number };
 export function cleanEntry(raw: unknown): string;
 export function cleanDay(raw: unknown): string | undefined;
 export function looksSecret(raw: string): boolean;

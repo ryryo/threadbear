@@ -71,7 +71,10 @@ export class BotReviews {
     this.checkpoints.reconcile(link.id, [applied]);
   }
 
-  private memory(botId: string): PersonalMemory { return new PersonalMemory(join(this.options.root, 'memory', botId)); }
+  private memory(botId: string): PersonalMemory {
+    const { root, redact } = this.options;
+    return new PersonalMemory(join(root, 'memory', botId), { base: root, redact });
+  }
 
   private reconcile(botId: string, conversationId: string): void {
     const receipts = this.memory(botId).history().flatMap(row => row.review ?? []);

@@ -4,12 +4,16 @@ import type { BotConversations } from './conversations.ts';
 import type { BotRepository } from './repository.ts';
 import type { BotReviews } from './reviews.ts';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
+import type { ScopeChange } from './ported/personal-memory.js';
+import type { ScopeRef } from './scoped-memory.ts';
 
 const botId = z.uuid();
 const identity = z.object({ botId });
 const settings = z.object({ name: z.string().min(1), role: z.string().optional(), instructions: z.string().optional() });
 const memoryTarget = identity.extend({ threadId: z.uuid() });
 const proposal = memoryTarget.extend({ reportId: z.uuid(), index: z.int().nonnegative(), operationId: z.uuid() });
+const scoped = z.object({ scope: z.object({ kind: z.enum(['bot', 'team', 'group', 'project']), id: z.string().min(1).max(128) }) });
+const scopeWrite = scoped.extend({ operationId: z.uuid(), expectedRevision: z.union([z.literal('empty'), z.uuid()]) });
 
 function method<T>(schema: z.ZodType<T>, run: (p: T) => unknown): (p: Record<string, unknown>) => unknown {
   return (p) => {
@@ -24,6 +28,9 @@ const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: 
 export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
   const conversations = () => workspace().conversations;
+  const memory = (scope: ScopeRef, access: 'read' | 'write') => conversations().scopedMemory.open(scope, { kind: 'owner' }, access);
+  const now = () => conversations().now();
+  const change = (target: z.infer<typeof scopeWrite>, mutation: ScopeChange) => memory(target.scope, 'write').change(mutation, target.operationId, target.expectedRevision, now());
   return {
     'bots.list': () => ({ bots: repo().list() }),
     'bots.get': method(identity, ({ botId }) => { const store = repo(); return { bot: store.get(botId), conversations: store.conversations(botId) }; }),
@@ -43,6 +50,17 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.remove': method(memoryTarget.extend({ entryId: z.string().min(1) }), p => { conversations().removeNote(p.botId, p.threadId, p.entryId); return {}; }),
     'bots.memory.history': method(memoryTarget.extend({ before: z.uuid().optional() }), p => conversations().history(p.botId, p.threadId, p.before)),
     'bots.memory.restore': method(memoryTarget.extend({ changeId: z.uuid() }), p => { conversations().restoreNote(p.botId, p.threadId, p.changeId); return {}; }),
+    'bots.memory.scopes': () => ({ scopes: conversations().scopedMemory.catalog() }),
+    'bots.memory.scope.read': method(scoped, ({ scope }) => {
+      const store = memory(scope, 'read');
+      return { notes: store.list(now().slice(0, 10)), revision: store.revision() };
+    }),
+    'bots.memory.scope.search': method(scoped.extend({ query: z.string().trim().min(1).max(300) }), ({ scope, query }) => ({ notes: memory(scope, 'read').search(query, now().slice(0, 10)) })),
+    'bots.memory.scope.add': method(scopeWrite.extend({ text: z.string(), until: z.iso.date().optional() }), p => change(p, { op: 'add', text: p.text, until: p.until })),
+    'bots.memory.scope.edit': method(scopeWrite.extend({ entryId: z.string().min(1), text: z.string() }), p => change(p, { op: 'edit', entryId: p.entryId, text: p.text })),
+    'bots.memory.scope.remove': method(scopeWrite.extend({ entryId: z.string().min(1) }), p => change(p, { op: 'remove', entryId: p.entryId })),
+    'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => memory(scope, 'read').historyPage(before)),
+    'bots.memory.scope.restore': method(scopeWrite.extend({ changeId: z.uuid() }), p => change(p, { op: 'restore', changeId: p.changeId })),
     ...(makePrivate && { 'bots.settings.privacy': method(privacy, p => ({ bot: makePrivate(p) })) }),
     ...(reviews && {
       'bots.settings.automaticReview': method(identity.extend({ expectedRevision: z.int().positive(), enabled: z.boolean() }), ({ botId, expectedRevision, enabled }) => {

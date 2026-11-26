@@ -4,7 +4,7 @@
 // Modified for Threadbear: port the own-scope manual memory operations for
 // MEMORY.md. The caller supplies the Bot's scope directory and decides access.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -41,19 +41,27 @@ const exactLines = (file, line) => file.entries.filter(entry => file.lines[entry
 const entryLine = line => typeof line === 'string' && !/[\r\n]/.test(line) && /^\s*[-*]\s+\S/.test(line);
 
 export class PersonalMemory {
-  constructor(root) {
+  constructor(root, { scope = 'own', base = root, redact = value => value } = {}) {
+    this.scope = scope;
+    this.base = base;
+    this.redact = redact;
     this.storage = new MemoryJournal(root);
     this.file = join(this.storage.root, MAIN);
   }
 
+  refuseSecret(text) {
+    if (looksSecret(text) || this.redact(text) !== text) throw new Error('Memory cannot keep a secret');
+  }
+
   history() {
+    checkPath(this.base, this.storage.root);
     this.storage.recoverPending();
     const text = read(this.storage.root, this.storage.journal, '');
     if (text === '') return [];
     return text.replace(/\n$/, '').split('\n').map((line, index) => {
       try {
         const row = JSON.parse(line);
-        if (!row || typeof row !== 'object' || typeof row.id !== 'string' || row.file !== MAIN || row.scope !== 'own') {
+        if (!row || typeof row !== 'object' || typeof row.id !== 'string' || row.file !== MAIN || row.scope !== this.scope) {
           throw new Error('Invalid row identity');
         }
         return row;
@@ -63,7 +71,39 @@ export class PersonalMemory {
     }).reverse();
   }
 
+  historyPage(before) {
+    const rows = this.history();
+    const at = before === undefined ? 0 : rows.findIndex(row => row.id === before) + 1;
+    if (before !== undefined && at === 0) return { rows: [], more: null };
+    const page = rows.slice(at, at + 50);
+    return { rows: page, more: at + page.length < rows.length ? page.at(-1).id : null };
+  }
+
+  revision() { return this.history()[0]?.id ?? 'empty'; }
+
+  change(mutation, operationId, expectedRevision, time) {
+    const hash = createHash('sha256').update(JSON.stringify(mutation)).digest('hex');
+    const history = this.history();
+    const seen = history.find(row => row.transaction?.operationId === operationId);
+    if (seen) {
+      if (seen.transaction.hash !== hash) throw new Error('The operation id already belongs to a different change');
+      return { revision: seen.id, ...(seen.transaction.note ? { note: seen.transaction.note } : {}) };
+    }
+    if ((history[0]?.id ?? 'empty') !== expectedRevision) throw new Error('These notes changed. Reload the current notes before saving.');
+    const transaction = { operationId, hash };
+    let result;
+    switch (mutation.op) {
+      case 'add': result = this.add(mutation.text, { until: mutation.until }, time, transaction); break;
+      case 'edit': result = this.replace(mutation.entryId, mutation.text, time, transaction); break;
+      case 'remove': this.remove(mutation.entryId, time, transaction); break;
+      case 'restore': this.restore(mutation.changeId, time, transaction); break;
+      default: throw new Error('Unknown memory change');
+    }
+    return { revision: this.revision(), ...(result ? { note: result } : {}) };
+  }
+
   load() {
+    checkPath(this.base, this.storage.root);
     this.storage.recoverPending();
     return parseMemory(read(this.storage.root, this.file, EMPTY_MAIN));
   }
@@ -79,27 +119,34 @@ export class PersonalMemory {
 
   publish(op, lines, time, extra) {
     const text = joinLines(lines);
-    if (text.length > MEMORY_LIMITS.bot) throw new Error('This Bot’s main memory is full');
-    const scope = 'own';
+    const scope = this.scope;
+    const limit = scope === 'team' || scope === 'group' ? MEMORY_LIMITS[scope] : MEMORY_LIMITS.bot;
+    if (text.length > limit) throw new Error('This scope’s main memory is full');
     this.storage.publish(record({
       id: randomUUID(), time, op, scope, steps: [{ action: 'write', path: MAIN, text }],
       row: { op, scope, file: MAIN, actor: 'user', ...extra },
     }));
   }
 
-  add(raw, { until, sourceThreadId }, time) {
+  add(raw, { until, sourceThreadId }, time, transaction) {
     this.history();
     const text = entryText(raw);
+    this.refuseSecret(raw);
+    this.refuseSecret(text);
     if (until !== undefined && (typeof until !== 'string' || cleanDay(until) !== until)) {
       throw new Error('Enter an expiry date as YYYY-MM-DD');
     }
     const file = this.load();
     const same = file.entries.find(entry => squash(entry.text) === squash(text));
-    if (same !== undefined) return note(same);
+    if (same !== undefined) {
+      if (transaction) throw new Error('This note already exists');
+      return note(same);
+    }
     const meta = { id: newEntryId(file.entries), pinned: 'yes', added: time.slice(0, 10), until };
     const line = formatEntry(text, meta);
-    this.publish('add', insertEntry(file.lines, line), time, { after: line, sourceThreadId });
-    return note({ text, meta });
+    const result = note({ text, meta });
+    this.publish('add', insertEntry(file.lines, line), time, { after: line, sourceThreadId, ...(transaction ? { transaction: { ...transaction, note: result } } : {}) });
+    return result;
   }
 
   // Apply the owner's chosen candidate through the same journal as manual
@@ -141,24 +188,29 @@ export class PersonalMemory {
     return receipt;
   }
 
-  replace(id, raw, time) {
+  replace(id, raw, time, transaction) {
     this.history();
     const file = this.load();
     const old = this.find(file, id);
     const text = entryText(raw);
+    this.refuseSecret(raw);
+    this.refuseSecret(text);
     if (file.entries.some(entry => entry.line !== old.line && squash(entry.text) === squash(text))) {
       throw new Error('This note already exists');
     }
     const meta = { ...old.meta, id: entryId(old) };
     const line = formatEntry(text, meta);
     const before = file.lines[old.line];
+    const result = note({ text, meta });
     if (line !== before) {
-      if (looksSecret(before)) throw new Error('Memory history cannot keep a value that looks like a secret');
+      this.refuseSecret(before);
       const lines = [...file.lines];
       lines[old.line] = line;
-      this.publish('replace', lines, time, { before, after: line });
+      this.publish('replace', lines, time, { before, after: line, ...(transaction ? { transaction: { ...transaction, note: result } } : {}) });
+    } else if (transaction) {
+      throw new Error('This leaves the note unchanged');
     }
-    return note({ text, meta });
+    return result;
   }
 
   find(file, id) {
@@ -167,17 +219,17 @@ export class PersonalMemory {
     return found[0];
   }
 
-  remove(id, time) {
+  remove(id, time, transaction) {
     this.history();
     const file = this.load();
     const old = this.find(file, id);
     const before = file.lines[old.line];
-    if (looksSecret(before)) throw new Error('Memory history cannot keep a value that looks like a secret');
+    this.refuseSecret(before);
     const lines = file.lines.filter((_line, index) => index !== old.line);
-    this.publish('remove', lines, time, { before });
+    this.publish('remove', lines, time, { before, transaction });
   }
 
-  restore(id, time) {
+  restore(id, time, transaction) {
     const rows = this.history();
     const row = rows.find(change => change.id === id);
     if (!row || !['add', 'replace', 'remove'].includes(row.op)) throw new Error('This change is not in the memory history');
@@ -187,27 +239,27 @@ export class PersonalMemory {
     if (row.op !== 'add') {
       if (!entryLine(row.before)) throw new Error('This history row cannot be restored');
       entryText(splitMeta(row.before.replace(/^\s*[-*]\s+/, '')).text);
-      if (looksSecret(row.before)) throw new Error('Memory cannot restore a value that looks like a secret');
+      this.refuseSecret(row.before);
       [back] = parseMemory(row.before).entries;
     }
     const occupied = (skip) => file.entries.some(entry => entry.line !== skip && (entryId(entry) === entryId(back) || squash(entry.text) === squash(back.text)));
     if (row.op === 'remove') {
       if (occupied(undefined)) throw new Error('The note removed by this change already exists');
-      this.publish('add', insertEntry(file.lines, row.before), time, { after: row.before, restored: id });
+      this.publish('add', insertEntry(file.lines, row.before), time, { after: row.before, restored: id, transaction });
       return;
     }
     const found = exactLines(file, row.after);
     if (found.length !== 1) throw new Error('The note may have changed or been removed since this change');
-    if (looksSecret(row.after)) throw new Error('Memory history cannot keep a value that looks like a secret');
+    this.refuseSecret(row.after);
     const lines = [...file.lines];
     const index = found[0].line;
     if (row.op === 'replace') {
       if (occupied(index)) throw new Error('The note before this change already exists');
       lines[index] = row.before;
-      this.publish('replace', lines, time, { before: row.after, after: row.before, restored: id });
+      this.publish('replace', lines, time, { before: row.after, after: row.before, restored: id, transaction });
     } else {
       lines.splice(index, 1);
-      this.publish('remove', lines, time, { before: row.after, restored: id });
+      this.publish('remove', lines, time, { before: row.after, restored: id, transaction });
     }
   }
 }

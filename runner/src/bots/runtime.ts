@@ -103,7 +103,7 @@ export class BotRuntime {
       const { home, runner } = this.options;
       const root = join(home, 'bots');
       const repo = this.repo();
-      this.workspace = { repo, conversations: new BotConversations(runner(), repo, root) };
+      this.workspace = { repo, conversations: new BotConversations(runner(), repo, root, text => this.reviewDeps?.redact(text) ?? text) };
     }
     return this.workspace;
   }
