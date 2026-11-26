@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { EFFORT_LEVELS, PROVIDERS } from '../protocol.ts';
+import { nameProblem } from './ported/mentions.js';
 
 const id = z.uuid();
 const revision = z.int().positive();
@@ -30,14 +31,13 @@ type State = z.infer<typeof state>;
 type BotSettings = Pick<Bot, 'name' | 'role' | 'instructions'>;
 
 // Name handling from DS-Bot d104d9ca18d69a35460f14e15dff4d553181433a,
-// src/host/roster.js, src/host/text.js and src/shared/mentions.js.
+// src/host/roster.js and src/host/text.js.
 // Copyright 2026 Fei2411 and the DS Bot contributors. Apache-2.0.
 const normalize = (value: string) => value.trim().toLowerCase();
 function cleanName(name: string): string {
   const text = name.trim().slice(0, 40).toWellFormed();
-  if (text === '') throw new Error('A Bot needs a name');
-  if (/[@`\r\n]/.test(text)) throw new Error('A Bot name cannot contain @, ` or a line break');
-  if (['all', 'everyone', '所有人', '全体', 'user', 'you'].includes(normalize(text))) throw new Error(`The name ${text} is reserved`);
+  const problem = nameProblem(text);
+  if (problem) throw new Error(problem);
   return text;
 }
 

@@ -22,6 +22,15 @@ test('the roster reserves names and saves neither partial edits nor a new id on 
   assert.deepEqual(open().list(), [current]);
 });
 
+test('the ported roster rejects names that cannot be mentioned', t => {
+  const { open } = fixture(t);
+  const roster = open();
+  for (const name of ['a@b', 'All', '所有人']) assert.throws(() => roster.create({ name }), /cannot/);
+  const writer = roster.create({ name: 'Writer 2' });
+  assert.throws(() => roster.update(writer.id, writer.revision, { name: 'Writer@home' }), /cannot/);
+  assert.equal(roster.update(writer.id, writer.revision, { name: '新 Writer' }).name, '新 Writer');
+});
+
 test('a failed save does not leave the Bot registered in memory', t => {
   const { root, open } = fixture(t);
   const repo = open();

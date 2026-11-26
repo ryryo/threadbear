@@ -118,6 +118,72 @@
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/request-id.test.js",
       "phase": 3,
       "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/shared/mentions.js",
+      "upstreamBlob": "504e212b92f895a9bf9e75a13226d69bbb70179e",
+      "sha256": "a011d792da173dcf86f3a480ea8b9f8411528bf0b9a99db36a37e6b0e0aeecec",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/shared/mentions.js",
+      "phase": 1,
+      "portMode": "A",
+      "portPath": "runner/src/bots/ported/mentions.js",
+      "changes": "Implementation preserved byte-for-byte after attribution. The Bot roster uses nameProblem. Group mention handling is reserved for the group phase."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-review.js",
+      "upstreamBlob": "a75f5044e826536f025bcb5760c92f3ab6bb083c",
+      "sha256": "10d2b0458317db525dabe036eb4ea54624f4622277144b77678f7a1107893a1a",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-review.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-copy.js",
+      "upstreamBlob": "6cf0ed86202166c6687c0105659f676c3beccb50",
+      "sha256": "dc319d454d31386d764e118987151dd44eeb7ba8a4069019cb27a0c5f7b80bf1",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-copy.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/memory-tidy.js",
+      "upstreamBlob": "ab5658b6ba4c239b74e4153f637bcbdc12dbce1f",
+      "sha256": "6b21c378d0ed1fa1f6e08707f0a69aca3e68ab932851987b22e21fd708c388ea",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-tidy.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/privacy.js",
+      "upstreamBlob": "40a58c802aaf38bc00d19570c4d568ec912e46d0",
+      "sha256": "2f883e61b9f432e84b1e8866c673b781461d3c6f9a3dcdf31f05019b132ea862",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/privacy.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/permissions.js",
+      "upstreamBlob": "4f450c676cec27ead22bfab6cadac52b319b9ae6",
+      "sha256": "2ebc08a5549b9eecbb94a372f01029a80f75764c9062463ddc816a6706b81763",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/permissions.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/test/privacy.test.js",
+      "upstreamBlob": "a57965577379604c884c5095609754eec3f9ac15",
+      "sha256": "1331ddb7f1fa2182ec049ca1b943638330240b6e0c5eed623eb170b8c7a7705f",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/privacy.test.js",
+      "phase": 2,
+      "portMode": "B"
+    },
+    {
+      "upstreamPath": "ds-bot/test/permissions.test.js",
+      "upstreamBlob": "9526b62d2d958b7ca6357a5f634ce68ca7e9d2f3",
+      "sha256": "deb2b35d0975aa810fdbc96b2be486ade6857c61f6462170fb9669563b06e6a0",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/permissions.test.js",
+      "phase": 2,
+      "portMode": "B"
     }
   ]
 }
