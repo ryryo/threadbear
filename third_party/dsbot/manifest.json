@@ -51,7 +51,9 @@
       "sha256": "6fc08524bceae6d9c85811244c1236b228cfe32ad2c9ac7cbca2e08cd143cdc7",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory-pending.js",
       "phase": 1,
-      "portMode": "A"
+      "portMode": "A",
+      "portPath": "runner/src/bots/ported/memory-pending.js",
+      "changes": "Implementation preserved byte-for-byte after the attribution header."
     },
     {
       "upstreamPath": "ds-bot/src/host/memory-search.js",
@@ -67,7 +69,9 @@
       "sha256": "09ee25154d649445bc0fe67be968fe62551689484992b4da7ae06f00c37b3900",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/memory.js",
       "phase": 1,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/memory-journal.js",
+      "changes": "Ported pending publication and replay with the journal tail helpers. The Runner supplies ownership, its atomic writer and path validation. Other memory operations remain in the baseline."
     },
     {
       "upstreamPath": "ds-bot/test/memory.test.js",
@@ -85,7 +89,9 @@
       "sha256": "6b697f0c528590b0a35cc7e4d973f42ad353fbbe4384d0f548872e40de5e33a1",
       "baselinePath": "third_party/dsbot/baseline/ds-bot/test/memory-pending.test.js",
       "phase": 1,
-      "portMode": "B"
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/memory-journal.test.js",
+      "changes": "Adapted persistence fault and replay cases to use the Runner writer and temporary directories."
     },
     {
       "upstreamPath": "ds-bot/src/host/requests.js",
