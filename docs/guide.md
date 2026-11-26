@@ -2083,6 +2083,8 @@ Bot's memory.
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.
 Processes on the same OS account still have that account's filesystem access.
+Agent Archive reads native CLI transcripts, so its experiment and Private Bots
+cannot be enabled together on the same Runner.
 
 ## Connectors
 <!-- slug: connectors -->

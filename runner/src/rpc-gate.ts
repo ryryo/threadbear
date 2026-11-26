@@ -81,6 +81,7 @@ export type CallerGateDeps = {
 
 const ALL = ['inbox', 'snoozed', 'archived'] as const;
 const PRIVATE_OWNER_RESPONSES = new Set(['approvals.respond', 'plans.approve', 'secrets.answer', 'requests.answer', 'threads.tickAsk', 'buttons.press']);
+const PRIVATE_THREAD_WRITES = new Set(['threads.send', 'threads.update', 'threads.interrupt', 'threads.delete', 'threads.markSeen', 'threads.unsubscribe', 'threads.panelShown', 'threads.showPanel']);
 
 function str(p: Params, k: string): string | undefined {
   return typeof p[k] === 'string' ? (p[k] as string) : undefined;
@@ -154,6 +155,10 @@ export class CallerGate {
     const privateBotId = this.privateBotOf(threadId);
     if (method === 'threads.send' && privateBotId && (target === undefined || this.privateBotOf(target) !== privateBotId)) {
       throw new RpcError(ErrorCode.notAllowed, 'Sending from a private Bot to another thread needs the owner.');
+    }
+    if (privateBotId && method !== 'threads.create' && !GATED_READS.has(method) &&
+        (!PRIVATE_THREAD_WRITES.has(method) || !target || this.privateBotOf(target) !== privateBotId)) {
+      throw new RpcError(ErrorCode.notAllowed, 'This operation would write outside the private Bot.');
     }
     if (method === 'threads.create' && privateBotId) {
       if (p.runnerId !== undefined || p.serviceId !== undefined) throw new RpcError(ErrorCode.notAllowed, 'A private Bot starts threads only on its own Runner.');

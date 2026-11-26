@@ -555,8 +555,28 @@ export class RpcServer {
         if (n.method === 'thread.deleted' && !this.opts.gate?.canReadThread(c.caller, n.params.threadId, n.params.privateBotId)) continue;
       }
       if (n.method === 'thread.event' && !c.subs.has(n.params.threadId)) continue;
-      this.write(c, msg, transient);
+      if (n.method === 'schedules.updated' && c.caller !== undefined) {
+        const params = this.visibleMethodResult(c.caller, 'schedules.list', n.params);
+        this.write(c, JSON.stringify({ jsonrpc: '2.0', method: n.method, params }), false);
+      } else this.write(c, msg, transient);
     }
+  }
+
+  private visibleMethodResult(caller: string, method: string, result: unknown): unknown {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+    const row = result as Record<string, unknown>;
+    const allowed = (id: unknown) => typeof id !== 'string' || this.opts.gate?.canReadThread(caller, id) === true;
+    if (method === 'schedules.list' && Array.isArray(row.schedules)) {
+      return { ...row, schedules: row.schedules.filter(schedule => allowed(schedule?.threadId) && allowed(schedule?.lastRun?.threadId)) };
+    }
+    if (method !== 'runner.status') return result;
+    const filtered = { ...row };
+    for (const key of ['running', 'busy'] as const) if (Array.isArray(row[key])) filtered[key] = row[key].filter(allowed);
+    if (Array.isArray(row.background)) filtered.background = row.background.filter(item => allowed(item?.threadId));
+    if (Array.isArray(row.draining)) filtered.draining = row.draining.map(peer => ({ ...peer, ...(Array.isArray(peer?.threads) ? { threads: peer.threads.filter(allowed) } : {}) }));
+    const restart = row.pendingRestart as { waitingFor?: unknown } | undefined;
+    if (Array.isArray(restart?.waitingFor)) filtered.pendingRestart = { ...restart, waitingFor: restart.waitingFor.filter(allowed) };
+    return filtered;
   }
 
   // The one message a connection may send before it has authenticated
@@ -1208,7 +1228,12 @@ export class RpcServer {
           return this.opts.relay.logins(reqString(p, 'runnerId'));
         }
         const methods = this.opts.methods;
-        if (methods && Object.hasOwn(methods, method)) return methods[method](p);
+        if (methods && Object.hasOwn(methods, method)) {
+          const result = methods[method](p);
+          if (conn.caller === undefined || (method !== 'schedules.list' && method !== 'runner.status')) return result;
+          const caller = conn.caller;
+          return result instanceof Promise ? result.then(value => this.visibleMethodResult(caller, method, value)) : this.visibleMethodResult(caller, method, result);
+        }
         throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);
       }
     }

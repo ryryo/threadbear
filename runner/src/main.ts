@@ -351,6 +351,7 @@ async function main(): Promise<void> {
   let primaryLink: PrimaryLink | undefined;
   const router = (): ThreadRouter => (routerCache ??= new ThreadRouter(runner, () => elsewhere, () => crossHooks));
   const agentRouter = (threadId: string): ThreadRouter => new ThreadRouter(runner, () => elsewhere, () => crossHooks, threadId);
+  const privateAgent = (threadId: string): boolean => Boolean(runner.privateBotOf(threadId));
   // Other runners (cross-runner.ts), set once the relay is made.
   let crossHooks: CrossRunnerHooks | undefined;
   let routerCache: ThreadRouter | undefined;
@@ -449,7 +450,7 @@ async function main(): Promise<void> {
   // Agent Archive's own MCP server for every thread while its experiment's
   // on (agent-archive.ts, archiveMcpServer), read at each session's start.
   const archiveServers = (): Record<string, { command: string; args: string[] }> => {
-    const s = experimentOn(cfg.home, ARCHIVE_EXPERIMENT) ? archiveMcpServer() : undefined;
+    const s = experimentOn(cfg.home, ARCHIVE_EXPERIMENT) && !bots.hasPrivateBots() ? archiveMcpServer() : undefined;
     return s ? { [ARCHIVE_MCP_NAME]: s } : {};
   };
   const claude = new ClaudeAdapter({
@@ -457,7 +458,12 @@ async function main(): Promise<void> {
     registry,
     log,
     mcpServersFor: (threadId) => ({
-      [SERVER_NAME]: threadbearMcpServer(agentRouter(threadId), threadId, scheduleControl(), projectControl(), appRestarts, () => cfg.bulletReplies, pocketControl, () => cfg.oneReply, () => cfg.connectorsUrl, gatewayHealth, () => runner.privateBotOf(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'), () => runner.coordinators),
+      [SERVER_NAME]: threadbearMcpServer(agentRouter(threadId), threadId,
+        privateAgent(threadId) ? undefined : scheduleControl(), privateAgent(threadId) ? undefined : projectControl(), appRestarts,
+        () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
+        () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
+        () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
+        () => privateAgent(threadId) ? undefined : runner.coordinators),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -468,7 +474,15 @@ async function main(): Promise<void> {
   // What Codex and ACP agents get beside the tools: the rich blocks, and
   // live pages with that experiment on.
   const richGuidance = () => (experimentOn(cfg.home, 'livePages') ? `${RICH_BLOCKS_LINE} ${LIVE_PAGES_LINE}` : RICH_BLOCKS_LINE);
-  const codexStyleTools = (threadId: string) => buildThreadbearTools(agentRouter(threadId), threadId, Date.now, scheduleControl(), projectControl(), appRestarts, { provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply, pocket: pocketControl, gateway: () => cfg.connectorsUrl, gatewayHealth, remote: () => runner.privateBotOf(threadId) ? undefined : remoteControl(), coordinators: () => runner.coordinators });
+  const codexStyleTools = (threadId: string) => {
+    const localOnly = privateAgent(threadId);
+    return buildThreadbearTools(agentRouter(threadId), threadId, Date.now, localOnly ? undefined : scheduleControl(), localOnly ? undefined : projectControl(), appRestarts, {
+      provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply,
+      pocket: () => localOnly ? undefined : pocketControl(), gateway: () => localOnly ? undefined : cfg.connectorsUrl,
+      gatewayHealth: localOnly ? undefined : gatewayHealth, remote: () => localOnly ? undefined : remoteControl(),
+      coordinators: () => localOnly ? undefined : runner.coordinators,
+    });
+  };
   // One app-server per live Codex thread, each starting what E says is
   // current, with the same threadbear tools as dynamic tools.
   const codex = new CodexAdapter({
@@ -533,6 +547,7 @@ async function main(): Promise<void> {
     guarded: () => supervisorGuardsBotData(cfg.home),
     owns: () => !box && !draining,
     canChangePrivacy: () => !draining && peers.status().length === 0,
+    archiveExporting: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT),
     withdrawShared: async ids => {
       if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json')) || fs.existsSync(path.join(cfg.home, 'sync-sent.json'))) {
         await sync.removeForBotPrivacy(ids);
@@ -1261,8 +1276,8 @@ async function main(): Promise<void> {
   const agentArchive = new AgentArchive({
     home: cfg.home,
     log,
-    on: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT),
-    records: () => [...runner.threads.values()].map((t) => t.rec),
+    on: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT) && !bots.hasPrivateBots(),
+    records: () => [...runner.threads.values()].filter(({ rec }) => !runner.privateBotOf(rec.id)).map(t => t.rec),
     projectTitles: () => new Map(projects.list({ archived: true }).map((p) => [p.id, p.title])),
     runnerName: () => cfg.sync.name ?? os.hostname(),
     loginDirs: () => accounts.list(),
@@ -1386,6 +1401,13 @@ async function main(): Promise<void> {
   });
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...coordinatorMethods(coordinators), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...recipeMethods(recipes), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }), ...archiveMethods(agentArchive) };
   Object.assign(methods, bots.methods);
+  const updateSettings = methods['settings.update'];
+  methods['settings.update'] = p => {
+    if ((p.experiments as Record<string, unknown> | undefined)?.[ARCHIVE_EXPERIMENT] === true && bots.hasPrivateBots()) {
+      throw new RpcError(ErrorCode.notAllowed, 'Agent Archive reads CLI transcripts and is unavailable while this Runner stores private Bots.');
+    }
+    return updateSettings(p);
+  };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {

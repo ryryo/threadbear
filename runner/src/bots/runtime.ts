@@ -24,6 +24,7 @@ type Options = {
   canChangePrivacy?: () => boolean;
   protectPrivacy?: () => void;
   withdrawShared?: (threadIds: readonly string[]) => Promise<void>;
+  archiveExporting?: () => boolean;
 };
 type ReviewDeps = Pick<BotReviewOptions, 'redact' | 'askers' | 'privateFolder'> & { clock: Clock; onError: (id: string) => void };
 
@@ -135,6 +136,7 @@ export class BotRuntime {
       for (const { rec } of all) if (rec.startedBy?.threadId && moving.has(rec.startedBy.threadId)) moving.add(rec.id);
     }
     const changed = repo.setPrivate(botId, expectedRevision, canonical, operationId, [...moving], () => {
+      if (this.options.archiveExporting?.()) throw new Error('Turn off Agent Archive before making a Bot private. It reads the CLI’s own transcripts.');
       if (!this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the old Runner to finish handing over before making a Bot private.');
       if (!statSync(canonical).isDirectory()) throw new Error('Choose an existing work folder for this Bot');
       const otherFolders = repo.list().flatMap(bot => bot.id !== botId && bot.privacy ? bot.privacy.folder : []);
@@ -181,11 +183,17 @@ export class BotRuntime {
     return this.privateData ? this.repo().movingPrivateBot(threadId) : undefined;
   }
 
+  hasPrivateBots(): boolean {
+    this.privateData ??= hasPrivateBotData(this.options.home);
+    return this.privateData && this.repo().list().some(bot => bot.privacy !== undefined);
+  }
+
   folderRefusal(cwd: string, privateBotId?: string): string | undefined {
     if (!privateBotId && !this.repository && !hasPrivateBotData(this.options.home)) return undefined;
     const entries = this.repo().list();
     if (privateBotId !== undefined) {
       if (!this.options.enabled()) return 'The Bots experiment is turned off.';
+      if (this.options.archiveExporting?.()) return 'Private Bot conversations cannot run while Agent Archive is reading CLI transcripts.';
       const privacy = entries.find(bot => bot.id === privateBotId)?.privacy;
       if (privacy?.moving) return 'Finish moving this Bot to its private folder first.';
       const root = privacy?.folder;

@@ -816,6 +816,13 @@ export class ThreadRouter implements ThreadControl {
     return { away, privateBotId };
   }
 
+  private async writableTarget(id: string): Promise<Elsewhere | undefined> {
+    const { away, privateBotId } = await this.target(id);
+    const actor = this.privateActor();
+    if (actor && actor !== privateBotId) throw new RpcError(ErrorCode.notAllowed, 'This operation would write outside the private Bot.');
+    return away;
+  }
+
   hello(): ReturnType<Runner['hello']> {
     return this.runner.hello();
   }
@@ -977,7 +984,7 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {
-    const { away: e } = await this.target(upd.threadId);
+    const e = await this.writableTarget(upd.threadId);
     // An older runner reads a move without `unconfine: false` as the user's
     // (the sandbox experiment's flag, taken out here 16 Nov 2026), so an
     // agent's says so that way too.
@@ -985,13 +992,13 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async interrupt(threadId: string): Promise<Record<string, never>> {
-    const { away: e } = await this.target(threadId);
+    const e = await this.writableTarget(threadId);
     // The router is what agents' tools go through, so this isn't Mike's Stop.
     return e ? e.call('threads.interrupt', { threadId, byAgent: true }) : this.runner.interrupt(threadId);
   }
 
   async delete(threadId: string): Promise<Record<string, never>> {
-    const { away: e } = await this.target(threadId);
+    const e = await this.writableTarget(threadId);
     return e ? e.call('threads.delete', { threadId }) : this.runner.delete(threadId);
   }
 }
