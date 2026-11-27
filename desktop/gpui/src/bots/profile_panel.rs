@@ -16,6 +16,7 @@ struct Lease {
 
 struct View {
     id: String,
+    bot_id: String,
     panel: ThreadSummary,
 }
 
@@ -91,7 +92,7 @@ impl Threadbear {
                             panels: Some(vec![json!({ "id": PANEL, "title": tr!("Profile"), "kind": "url", "url": address })]),
                             ..Default::default()
                         };
-                        this.bots.profile_panel.current = Some(View { id: lease.id, panel });
+                        this.bots.profile_panel.current = Some(View { id: lease.id, bot_id: bot, panel });
                         cx.notify();
                         return;
                     }
@@ -101,6 +102,35 @@ impl Threadbear {
                 cx.notify();
             }).ok();
         }).detach();
+    }
+
+    pub(crate) fn manage_profile_memory(&mut self, params: &Value, cx: &mut Context<Self>) {
+        let Some(view) = self.bots.profile_panel.current.as_ref() else {
+            return;
+        };
+        let Some(detail) = &self.bots.detail else {
+            return;
+        };
+        if self.home_page() != Some(SidebarMode::Bots)
+            || self.open_project().is_some()
+            || self.bots.tab != Tab::Settings
+            || self.bots.selected.as_ref() != Some(&view.bot_id)
+            || detail.bot.id != view.bot_id
+            || params["id"].as_str() != Some(view.id.as_str())
+            || params["botId"].as_str() != Some(view.bot_id.as_str())
+        {
+            return;
+        }
+        let id = view.bot_id.clone();
+        self.bots.scope = Some(MemoryScope {
+            kind: "bot".into(),
+            id: id.clone(),
+            title: detail.bot.name.clone(),
+            archived: false,
+        });
+        self.dismiss_bot_profile(false, cx);
+        self.bots.tab = Tab::Memory;
+        self.load_bot(id, cx);
     }
 
     fn revoke_profile(&self, id: String, cx: &mut Context<Self>) {

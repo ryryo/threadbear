@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { Given, Then, When } from '@cucumber/cucumber';
 import { GpuiDriver } from '../support/gpui.ts';
 import { okValue } from '../support/driver.ts';
@@ -167,9 +168,34 @@ When('I open the original Bot profile editor', async function (this: BotWorld) {
 });
 
 Then('the original profile cards show the Bot {string}', async function (this: BotWorld, name: string) {
-  assert.equal(await profileValue(this, 'document.querySelectorAll(".bt-set-card").length'), 2);
+  assert.equal(await profileValue(this, 'document.querySelectorAll(".bt-set-card").length'), 3);
   assert.equal(await profileValue(this, 'getComputedStyle(document.querySelector(".bt-set-card")).borderRadius'), '12px');
   assert.equal(await profileValue(this, profileField('Name') + '.value'), name);
+});
+
+Then('the original memory card shows {string}', async function (this: BotWorld, label: string) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const shown = await profileValue(this, 'document.querySelector(".bt-mem-row-go")?.parentElement.querySelector(".bt-bs-label")?.textContent');
+    if (shown === label) return;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The original memory card did not show ' + label);
+});
+
+When('I give the Bot {string} the note {string}', async function (this: BotWorld, name: string, text: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { bots } = await client.call<{ bots: { id: string; name: string }[] }>('bots.list', {});
+    const bot = bots.find(item => item.name === name);
+    assert.ok(bot);
+    const scope = { kind: 'bot', id: bot.id };
+    const { revision } = await client.call<{ revision: string }>('bots.memory.scope.read', { scope });
+    await client.call('bots.memory.scope.add', { scope, expectedRevision: revision, text, operationId: randomUUID() });
+  });
+});
+
+When('I manage the memory from the original profile', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-mem-row-go' }));
 });
 
 When('I set the original profile label to {string}', async function (this: BotWorld, label: string) {

@@ -459,7 +459,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
-      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves."
+      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab."
     },
     {
       "upstreamPath": "ds-bot/src/client/styles.js",
@@ -469,7 +469,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.css",
-      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js."
+      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js. Copy the memory action row icon and label layout."
     },
     {
       "upstreamPath": "ds-bot/src/client/locales/ja.js",
@@ -479,7 +479,27 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-ja.json",
-      "changes": "Copy the original Japanese translations of the profile controls and their hints."
+      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/memory-panel.js",
+      "upstreamBlob": "06f33201da90e21ab0f9c900ac2ef5d8dca23e21",
+      "sha256": "3d1d23fd66aa7549ff7cca351e31d2878598e3c56ebd4e1d99fa50c7e4acbf54",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/memory-panel.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/memory-count.mjs",
+      "changes": "Copy the count cache, subscription and React useMemoryCount hook. The Threadbear adapter exposes only the selected Bot count."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/icons.js",
+      "upstreamBlob": "e49be4496feb3b8dd255c637e3378e53b4aa6868",
+      "sha256": "789d9f24b843b4aa51c4471e7e468c5419c831087452399e0cfc4c7cec3f55d7",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/icons.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
+      "changes": "Copy the original ChevronRightIcon used by the Memory card."
     }
   ]
 }

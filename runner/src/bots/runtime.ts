@@ -14,7 +14,7 @@ import { BotRepository, type BotWorkspaceIdentity } from './repository.ts';
 import { BotReviews, type BotReviewOptions } from './reviews.ts';
 import { ReviewCheckpoints } from './review-checkpoints.ts';
 import { botMethods, botRequestMethods, method } from './rpc.ts';
-import { closeProfilePanelInput, openProfilePanelInput, ProfilePanelServer } from './profile-panel.ts';
+import { closeProfilePanelInput, openProfilePanelInput, ProfilePanelServer, type ProfileMemoryRequest } from './profile-panel.ts';
 import { BotRequests } from './request-service.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { BotTeams } from './teams.ts';
@@ -108,7 +108,7 @@ export class BotRuntime {
 
   profilePanelControl() {
     return {
-      open: (params: Record<string, unknown>, connected: () => boolean) => {
+      open: (params: Record<string, unknown>, connected: () => boolean, openMemory: (request: ProfileMemoryRequest) => void) => {
         const input = openProfilePanelInput.safeParse(params);
         if (!input.success) throw new RpcError(ErrorCode.badParams, 'Choose the Bot whose profile to open.');
         this.profilePanel ??= new ProfilePanelServer({
@@ -116,9 +116,11 @@ export class BotRuntime {
             const bot = this.getWorkspace().repo.get(id);
             return bot.archivedAt ? undefined : bot;
           },
+          countMemory: id => this.getWorkspace().conversations.scopedMemory.open({ kind: 'bot', id }, { kind: 'owner' }, 'read')
+            .list(this.options.runner().isoNow().slice(0, 10)).length,
           update: (id, revision, changes) => this.getWorkspace().repo.update(id, revision, changes),
         });
-        return this.profilePanel.open(input.data.botId, connected);
+        return this.profilePanel.open(input.data.botId, connected, openMemory);
       },
       close: method(closeProfilePanelInput, ({ id }) => { this.profilePanel?.close(id); return {}; }),
     };

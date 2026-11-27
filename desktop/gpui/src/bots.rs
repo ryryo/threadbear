@@ -460,43 +460,51 @@ impl Threadbear {
             this.update(cx, |this, cx| {
                 this.bots.busy = false;
                 match result {
-                    Ok(value) => match serde_json::from_value::<Details>(value) {
-                        Ok(detail) => {
-                            if let Some(row) = this
-                                .bots
-                                .list
-                                .iter_mut()
-                                .find(|row| row.id == detail.bot.id)
-                            {
-                                *row = detail.bot.clone();
-                            }
-                            if !detail
-                                .conversations
-                                .iter()
-                                .any(|row| Some(&row.thread_id) == this.bots.source.as_ref())
-                            {
-                                this.bots.source = detail
+                    Ok(value) => {
+                        match serde_json::from_value::<Details>(value) {
+                            Ok(detail) => {
+                                if let Some(row) = this
+                                    .bots
+                                    .list
+                                    .iter_mut()
+                                    .find(|row| row.id == detail.bot.id)
+                                {
+                                    *row = detail.bot.clone();
+                                }
+                                if !detail
                                     .conversations
-                                    .first()
-                                    .map(|row| row.thread_id.clone());
+                                    .iter()
+                                    .any(|row| Some(&row.thread_id) == this.bots.source.as_ref())
+                                {
+                                    this.bots.source = detail
+                                        .conversations
+                                        .first()
+                                        .map(|row| row.thread_id.clone());
+                                }
+                                if let Some(scope) = this.bots.scope.as_mut().filter(|scope| {
+                                    scope.kind == "bot" && scope.id == detail.bot.id
+                                }) {
+                                    scope.title.clone_from(&detail.bot.name);
+                                    scope.archived = detail.bot.archived_at.is_some();
+                                }
+                                this.bots.detail = Some(detail);
+                                this.bots.error = None;
+                                if this.bots.tab == Tab::Memory {
+                                    this.load_bot_memory(false, cx);
+                                } else if this.bots.tab == Tab::Reviews {
+                                    this.load_bot_reviews(cx);
+                                } else if this.bots.tab == Tab::Requests {
+                                    this.load_bot_requests(cx);
+                                } else if this.bots.tab == Tab::Tasks {
+                                    this.load_bot_tasks(false, cx);
+                                }
                             }
-                            this.bots.detail = Some(detail);
-                            this.bots.error = None;
-                            if this.bots.tab == Tab::Memory {
-                                this.load_bot_memory(false, cx);
-                            } else if this.bots.tab == Tab::Reviews {
-                                this.load_bot_reviews(cx);
-                            } else if this.bots.tab == Tab::Requests {
-                                this.load_bot_requests(cx);
-                            } else if this.bots.tab == Tab::Tasks {
-                                this.load_bot_tasks(false, cx);
+                            Err(_) => {
+                                this.bots.error =
+                                    Some(tr!("Could not read this Bot’s settings.").into())
                             }
                         }
-                        Err(_) => {
-                            this.bots.error =
-                                Some(tr!("Could not read this Bot’s settings.").into())
-                        }
-                    },
+                    }
                     Err(error) => this.bots.error = Some(error.message),
                 }
                 cx.notify();

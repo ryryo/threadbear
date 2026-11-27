@@ -2,19 +2,23 @@ import { createElement as h, useRef, useState } from 'react';
 import { BotProfileCards } from './profile-cards.mjs';
 import { profileActions } from './profile-actions.mjs';
 
-export function ProfilePanel({ initial, callOwner, t }) {
+export function ProfilePanel({ initial, callOwner, memory, t }) {
   const [bot, setBot] = useState(initial);
   const [error, setError] = useState(null);
   const [pending, setPending] = useState(0);
   const current = useRef(initial);
+  const saves = useRef(new Set());
   const actions = profileActions({
     visibleProfile: () => current.current,
     callOwner: async (method, params) => {
       setError(null);
       setPending(value => value + 1);
+      const save = Promise.resolve().then(() => callOwner(method, params));
+      saves.current.add(save);
       try {
-        return await callOwner(method, params);
+        return await save;
       } finally {
+        saves.current.delete(save);
         setPending(value => value - 1);
       }
     },
@@ -24,6 +28,18 @@ export function ProfilePanel({ initial, callOwner, t }) {
     },
     report: setError,
   });
+  if (memory) {
+    actions.memoryView = memory.memoryView;
+    actions.openMemory = async botId => {
+      try {
+        // Focusing Manage can blur an edited profile field first.
+        await Promise.all(saves.current);
+        await memory.openMemory(botId);
+      } catch (error) {
+        setError(error);
+      }
+    };
+  }
   return h('main', null,
     h(BotProfileCards, { bot, actions, t }),
     pending > 0 ? h('p', { role: 'status' }, t('Saving…')) : null,

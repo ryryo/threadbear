@@ -1104,6 +1104,7 @@ impl Threadbear {
                 }
             }
             Seen::Note(method, params) => match method.as_str() {
+                "bots.profilePanel.memory" => self.manage_profile_memory(&params, cx),
                 "thread.updated" => {
                     if let Some(mut t) =
                         threadbear_core::wire::read::<ThreadSummary>(params["thread"].clone())

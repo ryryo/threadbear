@@ -893,7 +893,8 @@ the owning runner.
   The primary records and applies the operations.
   Opening the profile editor starts a Runner listener on a temporary
   `127.0.0.1` port. The owning desktop connection grants that view short-lived
-  access to three profile fields on the selected Bot. The listener serves the
+  access to three profile fields and the note count on the selected Bot. The
+  Manage button asks that same desktop connection to open the Bot's Memory tab. The listener serves the
   bundled DS-Bot view without contacting another service for its assets.
   Its request journal and receipt store under `<home>/bots/` keep the original
   and recipient conversation IDs and a reference to the result. The full

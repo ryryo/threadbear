@@ -7,10 +7,14 @@ type Profile = { id: string; name: string; role: string; instructions: string; r
 type Patch = Pick<Profile, 'name'> | Pick<Profile, 'role'> | Pick<Profile, 'instructions'>;
 type Ports = {
   read: (botId: string) => Profile | undefined;
+  countMemory: (botId: string) => number;
   update: (botId: string, revision: number, patch: Patch) => Profile;
   now?: () => number;
 };
-type Lease = { id: string; botId: string; expires: number; connected: () => boolean };
+export type ProfileMemoryRequest = { id: string; botId: string };
+type Lease = ProfileMemoryRequest & {
+  expires: number; connected: () => boolean; openMemory: (request: ProfileMemoryRequest) => void; memoryOpened?: true;
+};
 const loopback = '127.0.0.1';
 const lifetime = 30 * 60_000;
 const maxBody = 64 * 1024;
@@ -67,12 +71,12 @@ export class ProfilePanelServer {
     this.now = ports.now ?? Date.now;
   }
 
-  async open(botId: string, connected: () => boolean): Promise<{ id: string; url: string }> {
+  async open(botId: string, connected: () => boolean, openMemory: Lease['openMemory']): Promise<{ id: string; url: string }> {
     if (!connected() || !this.read(botId)) throw new Error('This Bot profile cannot be edited now.');
     const origin = await (this.binding ??= this.listen());
     if (!connected() || !this.read(botId)) throw new Error('This Bot profile cannot be edited now.');
     const id = randomBytes(32).toString('hex');
-    this.lease = { id, botId, expires: this.now() + lifetime, connected };
+    this.lease = { id, botId, expires: this.now() + lifetime, connected, openMemory };
     return { id, url: `${origin}/#${id}` };
   }
 
@@ -152,15 +156,29 @@ export class ProfilePanelServer {
         return send(res, 200, 'text/javascript; charset=utf-8', readFileSync(new URL('profile.js.gz', source)));
       }
     }
-    if (req.url !== '/api/profile' || (req.method !== 'GET' && req.method !== 'PATCH')) {
+    const count = req.method === 'GET' && req.url === '/api/memory-count';
+    const navigate = req.method === 'POST' && req.url === '/api/open-memory';
+    const profileRequest = req.url === '/api/profile' && (req.method === 'GET' || req.method === 'PATCH');
+    if (!profileRequest && !count && !navigate) {
       return json(res, 404, { error: 'There is no such Bot profile resource.' });
     }
     const lease = this.approved(req);
     const profile = lease && this.read(lease.botId);
     const forbidden = () => json(res, 403, { error: 'Reopen this Bot profile in Threadbear.' });
     if (!lease || !profile) return forbidden();
+    if (count) return json(res, 200, { count: this.ports.countMemory(lease.botId) });
     if (req.method === 'GET') return json(res, 200, publicProfile(profile));
     if (req.headers.origin !== this.origin) return forbidden();
+    if (navigate) {
+      if (req.headers['transfer-encoding'] || Number(req.headers['content-length'] ?? '0') !== 0) {
+        return json(res, 400, { error: 'Choose Manage on the selected Bot.' });
+      }
+      if (!lease.memoryOpened) {
+        lease.memoryOpened = true;
+        lease.openMemory({ id: lease.id, botId: lease.botId });
+      }
+      return json(res, 200, {});
+    }
     const body = await editBody(req);
     if (this.approved(req) !== lease || !this.read(lease.botId)) return forbidden();
     if (!body) return json(res, 400, { error: 'Choose one valid profile field to save.' });

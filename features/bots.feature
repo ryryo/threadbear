@@ -35,11 +35,20 @@ Feature: Bot workspace
     And I narrow the window beside Highlights
     And I open the original Bot profile editor
     Then the original profile cards show the Bot "編集者"
+    And the original memory card shows "Nothing saved yet"
     When I set the original profile label to "校正者"
     Then the Bot "編集者" has the label "校正者"
     And the Bot "別のBot" has the label ""
     When I close the original Bot profile editor
     Then the old profile view cannot read the Bot
+    When I give the Bot "別のBot" the note "別の覚書"
+    And I give the Bot "編集者" the note "編集担当の覚書"
+    And I open the original Bot profile editor
+    Then the original memory card shows "1 entry"
+    When I manage the memory from the original profile
+    Then the Bot's notes show "編集担当の覚書"
+    And the Bot's notes do not show "別の覚書"
+    And the old profile view cannot read the Bot
 
   @bots.roster_operations @bots @swift-pending
   Scenario: The owner can attach an existing conversation without replacing its transcript

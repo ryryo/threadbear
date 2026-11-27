@@ -68,4 +68,18 @@ test('the profile cards, CSS and Japanese labels come from the pinned client sou
   const originals = readFileSync(new URL('locales/ja.js', upstream), 'utf8');
   const labels = JSON.parse(readFileSync(new URL('profile-ja.json', port), 'utf8')) as Record<string, string>;
   for (const [key, label] of Object.entries(labels)) assert.ok(originals.includes(`${JSON.stringify(key)}: ${JSON.stringify(label)}`), key);
+  const extract = (source: string, name: string) => source.match(new RegExp(`^${name}.*?^}\\n`, 'ms'))?.[0];
+  const memory = readFileSync(new URL('memory-panel.js', upstream), 'utf8');
+  const hook = readFileSync(new URL('memory-count.mjs', port), 'utf8');
+  for (const name of ['function noteCount', 'export function useMemoryCount']) {
+    assert.ok(extract(memory, name));
+    assert.equal(extract(hook, name), extract(memory, name));
+  }
+  const originalMemoryCard = extract(settings, 'function MemoryCard');
+  assert.ok(originalMemoryCard);
+  assert.equal(extract(cards, 'function MemoryCard'), originalMemoryCard.replace('{ bot, actions }', '{ bot, actions, t }'));
+  const icons = readFileSync(new URL('icons.js', upstream), 'utf8');
+  const chevron = /^export const ChevronRightIcon = .*$/m;
+  assert.ok(icons.match(chevron));
+  assert.equal(cards.match(chevron)?.[0], icons.match(chevron)?.[0]);
 });

@@ -43,7 +43,11 @@ panel reads only the selected profile and sends one of `name`, `role` or
 `instructions` with its displayed `expectedRevision`. The panel uses the
 same profile revision check as `bots.update`. Switching Bots or closing
 the view sends `bots.profilePanel.close` with that `id`. Disconnecting or
-opening another profile also invalidates the old capability. The panel
+opening another profile also invalidates the old capability. Its memory
+card can read only the selected Bot's note count. Clicking **Manage**
+sends `bots.profilePanel.memory` with the capability `id` and `botId`
+only to the desktop connection that opened it. The desktop matches both
+against the open view before switching to that Bot's Memory tab. The panel
 link does not enter the Thread, Highlights or the project's patch summary.
 
 Bot RPCs require the owner's credential. A Thread key cannot use them at any

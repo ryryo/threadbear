@@ -8,5 +8,12 @@
   "What this Bot does": "この Bot の役割",
   "Its job on the team. Part of the Bot's system prompt.": "チーム内での役割です。Bot のシステムプロンプトに組み込まれます。",
   "What this Bot is responsible for…": "この Bot の担当・役割…",
-  "Saving…": "保存中…"
+  "Saving…": "保存中…",
+  "Memory": "メモリ",
+  "Loading…": "読み込み中…",
+  "Nothing saved yet": "まだ何も保存されていません",
+  "1 entry": "1 件",
+  "{count} entries": "{count} 件",
+  "Manage {name}'s memory": "{name} のメモリを管理",
+  "Manage": "管理"
 }

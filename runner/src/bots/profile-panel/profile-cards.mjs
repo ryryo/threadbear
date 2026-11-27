@@ -1,6 +1,7 @@
 // DS-Bot settings, d104d9ca18d69a35460f14e15dff4d553181433a. Extracted from bot-settings.js.
 // InlineText carries the edit-version check for late saves. Row and Card are copied unchanged.
 import { createElement as h, useEffect, useRef, useState } from 'react';
+import { useMemoryCount } from './memory-count.mjs';
 
 export function InlineText({ label, value, placeholder, required = false, maxLength, multiline = false, className, autoFocus = false, onSave, onDone }) {
   const [draft, setDraft] = useState(null)
@@ -64,6 +65,17 @@ export function Card({ title, children }) {
   return h('section', { className: 'bt-set-section' }, title ? h('h3', null, title) : null, h('div', { className: 'bt-set-card' }, children))
 }
 
+export const ChevronRightIcon = () => h('svg', { width: 14, height: 14, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, h('path', { d: 'M7.5 4.5L13 10l-5.5 5.5' }))
+
+function MemoryCard({ bot, actions, t }) {
+  const count = useMemoryCount(bot.id, actions)
+  const label = count === null ? t('Loading…') : count === 0 ? t('Nothing saved yet') : count === 1 ? t('1 entry') : t('{count} entries', { count })
+  return h(Card, { title: t('Memory') },
+    h('button', { type: 'button', className: 'bt-set-row bt-bs-row', 'aria-label': t("Manage {name}'s memory", { name: bot.name }), onClick: () => actions.openMemory(bot.id) },
+      h('span', { className: 'bt-set-copy' }, h('span', { className: 'bt-bs-label' }, label)),
+      h('span', { className: 'bt-mem-row-go' }, t('Manage'), h(ChevronRightIcon))))
+}
+
 export function BotProfileCards({ bot, actions, t }) {
   const save = patch => actions.updateBot(bot.id, patch);
   return h('div', { className: 'bt-bs' },
@@ -72,6 +84,7 @@ export function BotProfileCards({ bot, actions, t }) {
       h(Row, { label: t('Label'), hint: t('Optional. Shown under the name.') }, h(InlineText, { label: t('Label'), value: bot.role, placeholder: t('Research, admin…'), maxLength: 24, onSave: role => save({ role }) }))),
     h(Card, { title: t('Instructions') },
       h(Row, { label: t('What this Bot does'), hint: t('Its job on the team. Part of the Bot\'s system prompt.'), stack: true },
-        h(InlineText, { label: t('Instructions'), value: bot.instructions, multiline: true, placeholder: t('What this Bot is responsible for…'), onSave: instructions => save({ instructions }) })))
+        h(InlineText, { label: t('Instructions'), value: bot.instructions, multiline: true, placeholder: t('What this Bot is responsible for…'), onSave: instructions => save({ instructions }) }))),
+    actions.memoryView ? h(MemoryCard, { bot, actions, t }) : null
   );
 }
