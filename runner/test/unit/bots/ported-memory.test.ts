@@ -31,6 +31,10 @@ test('the ported DS-Bot Group history search tests pass in the Runner', () => {
   runPorted(['group-search.test.js'], 6);
 });
 
+test('the seven original DS-Bot photo storage tests pass in the Runner', () => {
+  runPorted(['avatar-library.test.js'], 7);
+});
+
 test('the pinned DS-Bot baseline and direct ports match their recorded source', () => {
   const root = new URL('../../../../', import.meta.url);
   const manifest = JSON.parse(readFileSync(new URL('third_party/dsbot/manifest.json', root), 'utf8')) as {
@@ -109,7 +113,11 @@ test('the native editor uses the pinned DS-Bot avatar controls, assets and raste
   assert.equal(exact(read(port, 'avatar-mark.mjs'), 'export function BotMark'), originalMark);
   const originalCrop = exact(read(upstream, 'client/avatar-library.js'), 'export async function avatarImage');
   assert.ok(originalCrop);
-  assert.equal(exact(read(port, 'avatar-upload.mjs'), 'export async function avatarImage'), originalCrop);
+  const library = read(port, 'avatar-library.mjs');
+  const originalLibrary = read(upstream, 'client/avatar-library.js');
+  assert.equal(exact(library, 'export async function avatarImage'), originalCrop);
+  assert.equal(library.replace(/^.*\n/, ''), originalLibrary.replace("from './icons.js'", "from './avatar-icons.mjs'").replace("from './i18n.js'", "from './avatar-i18n.mjs'"));
+  assert.equal(exact(editor, 'function AvatarEditor'), exact(settings, 'function AvatarEditor'));
   const validator = read(new URL('runner/src/bots/ported/', root), 'avatar-image.js');
   const upstreamValidator = read(upstream, 'host/avatar.js');
   for (const name of ['function mimeOf', 'function readDataUrl', 'export function avatarBytes']) {

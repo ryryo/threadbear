@@ -15,6 +15,7 @@ import { BotReviews, type BotReviewOptions } from './reviews.ts';
 import { ReviewCheckpoints } from './review-checkpoints.ts';
 import { botMethods, botRequestMethods, method } from './rpc.ts';
 import { closeProfilePanelInput, openProfilePanelInput, ProfilePanelServer, type ProfileMemoryRequest } from './profile-panel.ts';
+import { install as installAvatarLibrary } from './ported/avatar-library.js';
 import { BotRequests } from './request-service.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { BotTeams } from './teams.ts';
@@ -111,6 +112,7 @@ export class BotRuntime {
       open: (params: Record<string, unknown>, connected: () => boolean, openMemory: (request: ProfileMemoryRequest) => void) => {
         const input = openProfilePanelInput.safeParse(params);
         if (!input.success) throw new RpcError(ErrorCode.badParams, 'Choose the Bot whose profile to open.');
+        const identity = this.getWorkspace().repo.workspaceIdentity();
         this.profilePanel ??= new ProfilePanelServer({
           read: id => {
             const bot = this.getWorkspace().repo.get(id);
@@ -120,8 +122,17 @@ export class BotRuntime {
             .list(this.options.runner().isoNow().slice(0, 10)).length,
           update: (id, revision, changes) => this.getWorkspace().repo.update(id, revision, changes),
           updateAppearance: (id, revision, changes) => this.getWorkspace().repo.updateAppearance(id, revision, changes),
+          avatarLibrary: installAvatarLibrary({ home: this.options.home }),
         });
-        return this.profilePanel.open(input.data.botId, connected, openMemory);
+        return this.profilePanel.open(input.data.botId, () => {
+          if (!connected()) return false;
+          try {
+            const current = this.getWorkspace().repo.workspaceIdentity();
+            return current.workspaceId === identity.workspaceId && current.ownerRunnerId === identity.ownerRunnerId && current.epoch === identity.epoch;
+          } catch {
+            return false;
+          }
+        }, openMemory);
       },
       close: method(closeProfilePanelInput, ({ id }) => { this.profilePanel?.close(id); return {}; }),
     };

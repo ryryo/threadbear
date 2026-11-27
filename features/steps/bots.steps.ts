@@ -6,7 +6,7 @@ import { okValue } from '../support/driver.ts';
 import type { ThreadbearWorld } from '../support/world.ts';
 import { BOT_FIXTURE_REPLY } from '../../runner/test/helpers/managed-runner.ts';
 
-type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string; requestSource?: string; attachment?: string; attachmentEvents?: unknown[]; profileUrl?: string };
+type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string; requestSource?: string; attachment?: string; attachmentEvents?: unknown[]; profileUrl?: string; libraryPhoto?: string };
 
 Given('the app is connected to an isolated Bot Runner', async function (this: BotWorld) {
   await this.until('the app connected to the Bot Runner', d => d.connection === 'connected', 30_000);
@@ -242,12 +242,16 @@ When('I reset the original avatar to its default', async function (this: BotWorl
 
 When('I upload a raster photo using the original Bot editor', async function (this: BotWorld) {
   okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-tab:nth-of-type(2)' }));
-  await profileValue(this, `(() => {
-    const input = document.querySelector('.bt-dropzone input[type=file]');
+  await chooseAvatarFixture(this, '.bt-dropzone input[type=file]', '#006bea');
+});
+
+async function chooseAvatarFixture(world: BotWorld, selector: string, color: string) {
+  await profileValue(world, `(() => {
+    const input = document.querySelector(${JSON.stringify(selector)});
     const canvas = document.createElement('canvas');
     canvas.width = 32; canvas.height = 22;
     const brush = canvas.getContext('2d');
-    brush.fillStyle = '#006bea'; brush.fillRect(0, 0, 32, 22);
+    brush.fillStyle = ${JSON.stringify(color)}; brush.fillRect(0, 0, 32, 22);
     canvas.toBlob(blob => {
       const files = new DataTransfer();
       files.items.add(new File([blob], 'photo.png', { type: 'image/png' }));
@@ -255,6 +259,42 @@ When('I upload a raster photo using the original Bot editor', async function (th
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }, 'image/png');
   })()`);
+}
+
+async function photoInPanel(world: BotWorld, expression: string, expected?: string): Promise<string> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const value = await profileValue(world, expression);
+    if (typeof value === 'string' && (expected === undefined || expected === value)) return value;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The avatar library did not update the displayed photo');
+}
+
+When('I import a different photo into the original avatar library', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-tab:nth-of-type(3)' }));
+  const oldPhoto = await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src');
+  await chooseAvatarFixture(this, '.bt-lib input[type=file]', '#b03de0');
+  this.libraryPhoto = await photoInPanel(this, 'document.querySelector(".bt-lib-pick img")?.src');
+  assert.notEqual(this.libraryPhoto, oldPhoto);
+});
+
+When('I use the imported photo for the Bot', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-lib-pick' }));
+  assert.ok(this.libraryPhoto);
+  await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src', this.libraryPhoto);
+});
+
+When('I remove the imported photo from the library', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-lib-del' }));
+  await photoInPanel(this, 'document.querySelector(".bt-lib .bt-note")?.textContent', 'No photos in the library yet.');
+});
+
+Then('the Bot {string} still uses the imported photo', async function (this: BotWorld, name: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  assert.ok(this.libraryPhoto);
+  await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src', this.libraryPhoto);
+  const { bots } = await this.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { image?: string } }[] }>('bots.list', {}));
+  assert.equal(bots.find(bot => bot.name === name)?.avatar?.image, this.libraryPhoto);
 });
 
 Then('the original Bot {string} shows its saved photo', async function (this: BotWorld, name: string) {

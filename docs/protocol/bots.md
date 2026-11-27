@@ -51,8 +51,11 @@ against the open view before switching to that Bot's Memory tab. The panel
 can also update that Bot's avatar or color using the same profile revision.
 It keeps the character's original defaults and lets the owner reset either
 appearance field with `null`. Uploaded photos are validated as bounded raster
-data. The panel link does not enter the Thread, Highlights or the project's
-patch summary.
+data. Its Library can list a page, import a batch of raster photos, or remove
+one content ID through the same local connection. The library stays on this
+Runner. A Bot adopting a photo keeps its own copy, so removing the library
+entry leaves that Bot's appearance intact. The panel link does not enter
+the Thread, Highlights or the project's patch summary.
 
 Bot RPCs require the owner's credential. A Thread key cannot use them at any
 permission level.

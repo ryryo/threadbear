@@ -62,6 +62,11 @@ Feature: Bot workspace
     Then the Bot "編集者" has its default avatar
     When I upload a raster photo using the original Bot editor
     Then the original Bot "編集者" shows its saved photo
+    When I import a different photo into the original avatar library
+    And I use the imported photo for the Bot
+    And I remove the imported photo from the library
+    Then the Bot "編集者" still uses the imported photo
+    And the Bot "別のBot" has its default avatar
 
   @bots.roster_operations @bots @swift-pending
   Scenario: The owner can attach an existing conversation without replacing its transcript

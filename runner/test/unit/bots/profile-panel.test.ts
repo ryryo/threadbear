@@ -10,6 +10,9 @@ import { RpcServer } from '../../../src/rpc.ts';
 import { makeHarness, tmpDir } from '../../helpers/fakes.ts';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { join } from 'node:path';
+import { install as installAvatarLibrary } from '../../../src/bots/ported/avatar-library.js';
+
+const tinyPhoto = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJhsAAAAASUVORK5CYII=';
 
 test('the profile panel can edit only its selected live Bot and only one profile field', async t => {
   let available = true;
@@ -188,7 +191,7 @@ test('the selected Bot can persist its original color, shape, validated photo an
   assert.equal((await change({ expectedRevision: 1, color: 'aurora' })).status, 409);
   assert.equal((await change({ expectedRevision: 2, color: 'aurora' })).status, 200);
   assert.equal((await change({ expectedRevision: 3, avatar: { image: 'data:image/png;base64,YWJjZA==' } })).status, 409);
-  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJhsAAAAASUVORK5CYII=';
+  const png = tinyPhoto;
   assert.equal((await change({ expectedRevision: 3, avatar: { shape: 'star', image: png } })).status, 200);
   const reopened = new BotRepository(root, 'local');
   assert.deepEqual(reopened.get(bot.id).avatar, { shape: 'star', image: png });
@@ -201,4 +204,61 @@ test('the selected Bot can persist its original color, shape, validated photo an
   assert.equal(repo.get(bot.id).color, undefined);
   panel.close(lease.id);
   assert.equal((await change({ expectedRevision: 5, color: 'red' })).status, 403);
+});
+
+test('the active profile alone can read, import and remove photos without changing an adopted copy', async t => {
+  const home = tmpDir();
+  const repo = new BotRepository(join(home, 'bots'), 'local');
+  const bot = repo.create({ name: 'Editor' });
+  const other = repo.create({ name: 'Reader' });
+  const library = installAvatarLibrary({ home });
+  const waiting = Promise.withResolvers<void>();
+  const proceed = Promise.withResolvers<void>();
+  const panel = new ProfilePanelServer({
+    read: id => repo.get(id), countMemory: () => 0,
+    update: (id, rev, changes) => repo.update(id, rev, changes),
+    updateAppearance: (id, rev, changes) => repo.updateAppearance(id, rev, changes),
+    avatarLibrary: {
+      ...library,
+      async avatarLibraryImport(items, authorize) {
+        if (items[0]?.name === 'late') { waiting.resolve(); await proceed.promise; }
+        return library.avatarLibraryImport(items, authorize);
+      },
+    },
+  });
+  t.after(() => panel.dispose());
+  const choose = (id: string) => panel.open(id, () => true, () => {});
+  const lease = await choose(bot.id);
+  const origin = new URL(lease.url).origin;
+  const request = (method: string, body?: object, id = lease.id, path = '/api/avatar-library', source = origin) => fetch(new URL(path, origin), {
+    method, headers: { 'X-Threadbear-Profile': id, ...(body ? { 'Content-Type': 'application/json', Origin: source } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  assert.equal((await request('GET', undefined, 'unbound')).status, 403);
+  assert.equal((await request('GET', undefined, lease.id, '/api/avatar-library?botId=other')).status, 400);
+  const sample = { items: [{ name: 'test photo', image: tinyPhoto }] };
+  assert.equal((await request('POST', sample, lease.id, '/api/avatar-library', 'https://other.test')).status, 403);
+  assert.equal((await request('POST', { items: Array.from({ length: 21 }, () => sample.items[0]) })).status, 400);
+  const importResponse = await request('POST', sample);
+  assert.equal(importResponse.status, 200);
+  const result = await importResponse.json() as { imported: { id: string }[] };
+  const id = result.imported[0].id;
+  const page = await (await request('GET', undefined, lease.id, '/api/avatar-library?offset=0&limit=1')).json() as { items: { id: string; image: string }[] };
+  assert.equal(page.items[0].image, tinyPhoto);
+  assert.equal((await request('PATCH', { expectedRevision: 1, avatar: { image: page.items[0].image } }, lease.id, '/api/appearance')).status, 200);
+  assert.equal((await request('DELETE', { id, botId: other.id })).status, 400);
+  assert.deepEqual(await (await request('DELETE', { id })).json(), { removed: true });
+  assert.deepEqual(await (await request('DELETE', { id })).json(), { removed: false });
+  assert.equal((await library.avatarLibraryView()).total, 0);
+  assert.deepEqual(repo.get(bot.id).avatar, { image: tinyPhoto });
+  assert.deepEqual(repo.get(other.id), other);
+
+  const delayed = request('POST', { items: [{ name: 'late', image: tinyPhoto }] });
+  await waiting.promise;
+  const next = await choose(other.id);
+  proceed.resolve();
+  assert.equal((await delayed).status, 403);
+  assert.equal(await (await request('GET', undefined, next.id)).status, 200);
+  assert.equal((await request('DELETE', { id })).status, 403);
+  assert.equal((await library.avatarLibraryView()).total, 0);
 });

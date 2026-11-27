@@ -43,5 +43,19 @@
   "Violet": "バイオレット",
   "Magenta": "マゼンタ",
   "Gray": "グレー",
-  "Aurora": "オーロラ"
+  "Aurora": "オーロラ",
+  "1 photo imported": "1 枚の写真をインポートしました",
+  "1 photo was already in the library": "1 枚の写真はすでにライブラリにあります",
+  "Import photos": "写真をインポート",
+  "Importing photos…": "写真をインポート中…",
+  "Library": "ライブラリ",
+  "No photos in the library yet.": "ライブラリにはまだ写真がありません。",
+  "Remove photo from the library": "ライブラリから写真を削除",
+  "Show more photos": "さらに写真を表示",
+  "Showing {shown} of {total} photos": "{total} 枚中 {shown} 枚を表示中",
+  "Use this photo": "この写真を使用",
+  "photo": "写真",
+  "{count} photos imported": "{count} 枚の写真をインポートしました",
+  "{count} photos were already in the library": "{count} 枚の写真はすでにライブラリにあります",
+  "{name}: {reason}": "{name}: {reason}"
 }

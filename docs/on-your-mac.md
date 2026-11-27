@@ -896,6 +896,8 @@ the owning runner.
   access to three profile fields and the note count on the selected Bot. The
   Manage button asks that same desktop connection to open the Bot's Memory tab. The listener serves the
   bundled DS-Bot view without contacting another service for its assets.
+  The avatar library keeps its index and content-addressed raster files under
+  `<home>/avatars/`. A Bot's chosen photo is part of its own profile.
   Its request journal and receipt store under `<home>/bots/` keep the original
   and recipient conversation IDs and a reference to the result. The full
   result lives in the recipient's Thread events. The first request raises the

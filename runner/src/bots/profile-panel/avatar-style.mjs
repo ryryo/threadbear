@@ -123,6 +123,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-soft:hover{background:var(--bt-active)}
 .bt-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .bt-soft-sm{height:28px;padding:0 12px;font-size:12px;font-weight:500}
+.bt-note{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-error{padding:0 14px 10px;color:var(--bt-danger);font-size:12px}
 @keyframes bt-pop-drop{from{translate:0 -4px;scale:.96}}
 @keyframes bt-pop-out{to{opacity:0;scale:.97;filter:var(--bt-fx-blur-2,blur(2px))}}
 @keyframes bt-veil-in{from{opacity:0;filter:var(--bt-fx-blur-6,blur(6px))}}

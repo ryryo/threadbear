@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { z } from 'zod';
 import type { BotAppearancePatch } from './repository.ts';
 import { copyAppearance, MAX_AVATAR_IMAGE } from './ported/roster-copy.js';
+import type { AvatarLibrary } from './ported/avatar-library.js';
 
 type Profile = { id: string; name: string; role: string; instructions: string; revision: number; color?: unknown; avatar?: unknown };
 type Patch = Pick<Profile, 'name'> | Pick<Profile, 'role'> | Pick<Profile, 'instructions'>;
@@ -12,6 +13,7 @@ type Ports = {
   countMemory: (botId: string) => number;
   update: (botId: string, revision: number, patch: Patch) => Profile;
   updateAppearance?: (botId: string, revision: number, patch: BotAppearancePatch) => Profile;
+  avatarLibrary?: AvatarLibrary;
   now?: () => number;
 };
 export type ProfileMemoryRequest = { id: string; botId: string };
@@ -22,6 +24,11 @@ const loopback = '127.0.0.1';
 const lifetime = 30 * 60_000;
 const maxBody = 64 * 1024;
 const maxAppearanceBody = MAX_AVATAR_IMAGE + 1024;
+const libraryPath = '/api/avatar-library';
+const batchSize = 20;
+const libraryPage = z.strictObject({ offset: z.coerce.number().int().min(0).max(500).optional(), limit: z.coerce.number().int().min(1).max(48).optional() });
+const photos = z.strictObject({ items: z.array(z.strictObject({ name: z.string().max(1024), image: z.string().max(MAX_AVATAR_IMAGE) })).min(1).max(batchSize) });
+const photoId = z.strictObject({ id: z.string().regex(/^[a-f0-9]{64}$/) });
 export const openProfilePanelInput = z.strictObject({ botId: z.uuid() });
 export const closeProfilePanelInput = z.strictObject({ id: z.string().regex(/^[a-f0-9]{64}$/) });
 const revision = z.int().positive();
@@ -178,13 +185,15 @@ export class ProfilePanelServer {
     const navigate = req.method === 'POST' && req.url === '/api/open-memory';
     const profileRequest = req.url === '/api/profile' && (req.method === 'GET' || req.method === 'PATCH');
     const setAppearance = req.url === '/api/appearance' && req.method === 'PATCH' ? this.ports.updateAppearance : undefined;
-    if (!profileRequest && !count && !navigate && !setAppearance) {
+    const library = req.url?.split('?')[0] === libraryPath ? this.ports.avatarLibrary : undefined;
+    if (!profileRequest && !count && !navigate && !setAppearance && !library) {
       return json(res, 404, { error: 'There is no such Bot profile resource.' });
     }
     const lease = this.approved(req);
     const profile = lease && this.read(lease.botId);
     const forbidden = () => json(res, 403, { error: 'Reopen this Bot profile in Threadbear.' });
     if (!lease || !profile) return forbidden();
+    if (library) return this.serveLibrary(req, res, library, () => this.approved(req) === lease && this.read(lease.botId) !== undefined);
     if (count) return json(res, 200, { count: this.ports.countMemory(lease.botId) });
     if (req.method === 'GET') return json(res, 200, publicProfile(profile));
     if (req.headers.origin !== this.origin) return forbidden();
@@ -214,6 +223,44 @@ export class ProfilePanelServer {
       return json(res, 200, { bot: publicProfile(saved) });
     } catch (error) {
       return json(res, 409, { error: error instanceof Error ? error.message : 'Could not save that profile.' });
+    }
+  }
+
+  private async serveLibrary(req: IncomingMessage, res: ServerResponse, library: AvatarLibrary, isCurrent: () => boolean) {
+    const forbidden = () => json(res, 403, { error: 'Reopen this Bot profile in Threadbear.' });
+    const authorize = () => {
+      if (!isCurrent()) throw new Error('Reopen this Bot profile in Threadbear.');
+    };
+    try {
+      if (req.method === 'GET') {
+        const search = new URLSearchParams(req.url?.slice(libraryPath.length + 1));
+        const query = libraryPage.safeParse(Object.fromEntries(search));
+        if (search.size !== new Set(search.keys()).size || !query.success) return json(res, 400, { error: 'Choose a valid page of photos.' });
+        const page = await library.avatarLibraryView(query.data, authorize);
+        authorize();
+        return json(res, 200, page);
+      }
+      if (req.headers.origin !== this.origin) return forbidden();
+      if (req.url !== libraryPath || (req.method !== 'POST' && req.method !== 'DELETE')) {
+        return json(res, 404, { error: 'There is no such photo library operation.' });
+      }
+      const body = await jsonBody(req, req.method === 'POST' ? batchSize * maxAppearanceBody : 1024);
+      authorize();
+      if (req.method === 'DELETE') {
+        const selected = photoId.safeParse(body);
+        if (!selected.success) return json(res, 400, { error: 'Choose a photo from the library.' });
+        const removed = await library.avatarLibraryDelete(selected.data.id, authorize);
+        authorize();
+        return json(res, 200, { removed });
+      }
+      const batch = photos.safeParse(body);
+      if (!batch.success) return json(res, 400, { error: 'Choose a valid batch of photos.' });
+      const report = await library.avatarLibraryImport(batch.data.items, authorize);
+      authorize();
+      return json(res, 200, report);
+    } catch (error) {
+      if (!isCurrent()) return forbidden();
+      return json(res, 409, { error: error instanceof Error ? error.message : 'Could not use the Bot photo library.' });
     }
   }
 }

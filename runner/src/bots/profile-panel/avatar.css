@@ -119,6 +119,8 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 .bt-soft:hover{background:var(--bt-active)}
 .bt-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .bt-soft-sm{height:28px;padding:0 12px;font-size:12px;font-weight:500}
+.bt-note{font-size:12px;line-height:16px;color:var(--bt-ink-3)}
+.bt-error{padding:0 14px 10px;color:var(--bt-danger);font-size:12px}
 @keyframes bt-pop-drop{from{translate:0 -4px;scale:.96}}
 @keyframes bt-pop-out{to{opacity:0;scale:.97;filter:var(--bt-fx-blur-2,blur(2px))}}
 @keyframes bt-veil-in{from{opacity:0;filter:var(--bt-fx-blur-6,blur(6px))}}
@@ -126,3 +128,17 @@ body[data-bt-motion=quiet] .bt-mark[data-poke]{cursor:default}
 @media (prefers-reduced-motion:reduce){.bt-menu,.bt-avedit,.bt-react-strip{animation:bt-fade .1s ease-out}.bt-react-strip button,.bt-q-check,.bt-color[aria-pressed=true] span{animation:none}}
 .bt-thumb{position:absolute;left:0;top:0;z-index:0;pointer-events:none;transition:opacity .14s ease}
 .bt-thumb[data-hidden]{opacity:0}
+
+.bt-lib{display:flex;flex-direction:column;gap:8px;width:100%}
+.bt-lib-bar{display:flex;align-items:center;gap:8px}
+.bt-lib-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:210px;overflow-y:auto}
+.bt-lib-cell{position:relative}
+.bt-lib-pick{display:block;width:100%;aspect-ratio:1;padding:0;border:1px solid var(--bt-line);border-radius:12px;background:var(--bt-hover);cursor:pointer;overflow:hidden}
+.bt-lib-pick:hover{background:var(--bt-active)}
+.bt-lib-pick img{display:block;width:100%;height:100%;object-fit:cover}
+.bt-lib-del{position:absolute;right:0;top:0;width:28px;height:28px;padding:0;border:1px solid var(--bt-line-2);border-radius:50%;background:var(--bt-main);color:var(--bt-ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.bt-lib-del:hover{color:var(--bt-ink)}
+.bt-lib-del svg{width:14px;height:14px}
+.bt-lib-pick:focus-visible,.bt-lib-del:focus-visible{outline:2px solid var(--bt-accent);outline-offset:-2px}
+.bt-lib-more{display:flex;align-items:center;gap:8px}
+.bt-lib-report{display:flex;flex-direction:column;gap:4px}

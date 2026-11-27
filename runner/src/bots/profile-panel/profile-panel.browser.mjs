@@ -29,6 +29,11 @@ try {
   };
   root.render(h(ProfilePanel, {
     initial, t, appearance: true,
+    library: {
+      avatarLibrary: ({ offset, limit }) => request('/api/avatar-library?' + new URLSearchParams({ offset, limit }), 'GET'),
+      importAvatars: items => request('/api/avatar-library', 'POST', { items }),
+      deleteAvatar: id => request('/api/avatar-library', 'DELETE', { id }),
+    },
     async callOwner(method, params) {
       if (!['bots.update', 'bots.updateAppearance'].includes(method)) throw new Error('This Bot profile cannot be saved here.');
       selected(params.botId);

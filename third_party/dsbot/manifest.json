@@ -459,7 +459,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
-      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab. Copy CharacterGrid, ShapeRing and AvatarEditor character and upload tabs; attach the original hero markup to the native roster."
+      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab. Copy CharacterGrid, ShapeRing and AvatarEditor character, upload and library tabs; attach the original hero markup to the native roster."
     },
     {
       "upstreamPath": "ds-bot/src/client/styles.js",
@@ -479,7 +479,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-ja.json",
-      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels. Reuse available Japanese translations of avatar controls and colors."
+      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels. Reuse available Japanese translations of avatar controls and colors. Copy the labels and available host errors for the Avatar Library."
     },
     {
       "upstreamPath": "ds-bot/src/client/memory-panel.js",
@@ -499,7 +499,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
-      "changes": "Copy the original ChevronRightIcon used by the Memory card. Use the original pencil icon and its lineIcon helper in the Avatar editor."
+      "changes": "Copy the original ChevronRightIcon used by the Memory card. Use the original pencil icon and its lineIcon helper in the Avatar editor. Copy the original TrashIcon for the Library."
     },
     {
       "upstreamPath": "ds-bot/src/host/avatar.js",
@@ -558,8 +558,28 @@
       "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/avatar-library.js",
       "phase": 10,
       "portMode": "B",
-      "portPath": "runner/src/bots/profile-panel/avatar-upload.mjs",
-      "changes": "Copy the original raster file validation, crop and encoding."
+      "portPath": "runner/src/bots/profile-panel/avatar-library.mjs",
+      "changes": "Copy the original raster crop, batching, paging, photo picker and CSS. Adapt only local imports."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/avatar-library.js",
+      "upstreamBlob": "600faf5202cc15b93930b3a180af2f56c3a0d2a2",
+      "sha256": "23948d575f857f8363c6cb7e4e481a59e56ed1fc513764239f66e7de3a15c3ab",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/avatar-library.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/avatar-library.js",
+      "changes": "Retain the original content-hash storage, queue, import results and paging. Use the Runner atomic write and the selected profile lease with a local directory check."
+    },
+    {
+      "upstreamPath": "ds-bot/test/avatar-library.test.js",
+      "upstreamBlob": "08f1f54d83f0a2f9bd44686885d0b10c521fd87b",
+      "sha256": "a7df919e9987873dfb701ddaf6ac504d5356a1e92d5c0d4f5341dba38ce8c77e",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/avatar-library.test.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/avatar-library.test.js",
+      "changes": "Run seven original storage tests through the ported install function. The read concurrency case releases the first eight reads in reverse order with explicit barriers."
     }
   ]
 }

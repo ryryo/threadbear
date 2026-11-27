@@ -3,17 +3,12 @@ import { createElement as h, Fragment, useCallback, useEffect, useRef, useState 
 import { paintCss } from './inks.mjs'
 import { CHARACTERS, PICKER_SHAPES, PICKER_COLUMNS, CHARACTER_COLORS, SHAPES, hasShape, shapeOf, bodyOf, maskBox, holes, nextMarkSerial } from './characters.mjs'
 import { lookOf, BotMark } from './avatar-mark.mjs'
-import { avatarImage } from './avatar-upload.mjs'
+import { AvatarLibraryPanel, avatarImage } from './avatar-library.mjs'
+import { PencilIcon } from './avatar-icons.mjs'
 import { useGlide, useLinger } from './motion.mjs'
 import { t } from './avatar-i18n.mjs'
 
 const capitalize = word => word[0].toUpperCase() + word.slice(1)
-
-const lineIcon = paths => function LineIcon() {
-  return h('svg', { width: 15, height: 15, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-    paths.map((d, index) => h('path', { key: index, d })))
-}
-export const PencilIcon = lineIcon(['M9 4H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-3', 'M14.3 3.7a1.6 1.6 0 0 1 2.3 2.3L10.5 12l-3 .8.8-3z'])
 
 // The selection ring of a picker cell follows the shape: a 1px line 3px outside it.
 function ShapeRing({ shape, size }) {
@@ -43,7 +38,8 @@ export function CharacterGrid({ look, hasPhoto = false, onShape, onColor }) {
 }
 
 // The avatar editor: the Bot tab picks a character (every click saves), the
-// Upload tab takes a photo. Reset returns to the look the Bot id gives.
+// Upload tab takes a photo, the Library tab picks one the user imported before, and
+// Reset returns to the look the Bot id gives.
 function AvatarEditor({ bot, actions, run, onClose, leaving = false }) {
   const look = lookOf(bot)
   const [tab, setTab] = useState(look.image ? 'upload' : 'bot')
@@ -78,7 +74,7 @@ function AvatarEditor({ bot, actions, run, onClose, leaving = false }) {
     h('div', { className: 'bt-avedit-top' },
       h('div', { ref: glide.box, role: 'tablist', 'aria-label': t('Avatar source'), className: 'bt-avedit-tabs' },
         h('span', { ref: glide.thumb, className: 'bt-thumb', 'aria-hidden': true }),
-        [['bot', 'Bot'], ['upload', 'Upload']].map(([id, label]) => h('button', { key: id, type: 'button', role: 'tab', className: 'bt-avedit-tab', 'aria-selected': tab === id, onClick: () => setTab(id) }, t(label)))),
+        [['bot', 'Bot'], ['upload', 'Upload'], ['library', 'Library']].map(([id, label]) => h('button', { key: id, type: 'button', role: 'tab', className: 'bt-avedit-tab', 'aria-selected': tab === id, onClick: () => setTab(id) }, t(label)))),
       h('button', {
         type: 'button', className: 'bt-avedit-tab bt-avedit-reset', title: t('Reset character to default'),
         onClick: () => run(actions.updateBot(bot.id, { avatar: null, color: null })),
@@ -99,7 +95,13 @@ function AvatarEditor({ bot, actions, run, onClose, leaving = false }) {
     h('div', { className: 'bt-actions', style: { justifyContent: 'center' } },
       h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => fileRef.current?.click() }, hasPhoto ? t('Replace') : t('Browse files')),
       hasPhoto ? h('button', { type: 'button', className: 'bt-soft bt-soft-sm', onClick: () => run(actions.updateBot(bot.id, { avatar: hasShape(bot.avatar?.shape) ? { shape: bot.avatar.shape } : null })) }, t('Remove photo')) : null),
-    h('input', { ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, onChange: (event) => { const file = event.target.files?.[0]; event.target.value = ''; upload(file) } })) : null)
+    h('input', { ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true, onChange: (event) => { const file = event.target.files?.[0]; event.target.value = ''; upload(file) } })) : null,
+    // A photo from the library is the same photo the user uploaded before: the Bot
+    // keeps its own copy, and the library keeps its entry.
+    tab === 'library' ? h(AvatarLibraryPanel, {
+      actions,
+      onPick: entry => run(actions.updateBot(bot.id, { avatar: { ...bot.avatar, image: entry.image } })),
+    }) : null)
 }
 
 export function AvatarHeader({ bot, actions, run }) {
