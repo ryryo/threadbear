@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync, removeTempFiles } from '../fsutil.ts';
 import { archive, MAX_SEALED_BYTES, sha256, unarchive, unpackedSize, type PackEntry } from '../move-pack.ts';
-import { botOperationId, workspaceTransferConversations, type BotWorkspaceIdentity } from './repository.ts';
+import { botOperationId, workspaceTransferConversations, type BotWorkspaceIdentity, type Conversation } from './repository.ts';
+import { scrubArchivedReviewErasure } from './review-checkpoints.ts';
 import { cleanTopic, entryId, MAIN, parseMemory } from './ported/memory-entries.js';
 import { assertWorkspaceMemoryErased, eraseMemoryCopies, type RequiredNoteErasure } from './memory-erasure.js';
 import type { BackupMemoryNote, MemoryChange, PersonalMemory } from './ported/personal-memory.js';
@@ -164,47 +165,72 @@ export function openManagedMemoryBackup(home: string, input: { backupId: string;
   }
 }
 
+function legacyReviewLinks(files: PackEntry[], state: string, workspaceId: string): Map<string, Conversation> {
+  const { ownerRunnerId, ownerEpoch } = z.object({ ownerRunnerId: z.string().min(1), ownerEpoch: z.int().positive() }).parse(JSON.parse(state));
+  const links = workspaceTransferConversations(state, { workspaceId, ownerRunnerId, epoch: ownerEpoch });
+  const byPath = new Map(links.map(link => ['bots/reviews/' + link.id + '.json', link]));
+  const paths = new Set<string>();
+  for (const { path } of files) {
+    const key = path.normalize('NFC').toLowerCase();
+    if (!path.startsWith('bots/') || paths.has(key) || (key.startsWith('bots/reviews/') && !byPath.has(path))) {
+      throw new Error('The backup has an unrecognized Bot review or file path.');
+    }
+    paths.add(key);
+  }
+  return byPath;
+}
+
+function scrubBackupFiles(files: PackEntry[], required: RequiredNoteErasure, receipt: MemoryChange, links?: Map<string, Conversation>): PackEntry[] {
+  const prefix = prefixFor(required.scope);
+  const journalPath = prefix + 'journal.jsonl';
+  const reviews = (path: string) => required.scope.kind === 'bot' && links?.get(path)?.botId === required.scope.id ? links.get(path) : undefined;
+  const memory = files.filter(file => file.path.normalize('NFC').toLowerCase().startsWith(prefix.toLowerCase()));
+  if (links && !memory.length && !files.some(file => reviews(file.path))) return files;
+  for (const file of memory) {
+    const name = file.path.slice(prefix.length);
+    if (!file.path.startsWith(prefix) || (name !== 'journal.jsonl' && !allowedNoteFile(name) &&
+        (name !== 'journal-torn.jsonl' || file.data.length !== 0))) {
+      throw new Error('The Bot backup has an unknown file in its memory scope or an unresolved journal.');
+    }
+  }
+  const savedJournal = memory.find(file => file.path === journalPath);
+  if (!savedJournal && !links) throw new Error('The Bot backup has no memory erasure journal.');
+  const history: MemoryChange[] = savedJournal?.data.toString('utf8').split('\n').filter(Boolean).map(row => JSON.parse(row)) ?? [];
+  const content = memory.filter(file => allowedNoteFile(file.path.slice(prefix.length)))
+    .map(file => ({ file: file.path.slice(prefix.length), content: file.data.toString('utf8') }));
+  const { rows, steps } = eraseMemoryCopies(required.entryId, content, history, true);
+  if (!rows.some(row => row.op === 'erase' && row.entryId === required.entryId)) rows.push(erasureReceipt(receipt));
+  const rewrittenJournal = journal(journalPath, rows);
+  const bodies = new Map(steps.map(step => [prefix + step.path, Buffer.from(step.text)]));
+  const result = files.map(file => {
+    const link = reviews(file.path);
+    const data = link ? Buffer.from(scrubArchivedReviewErasure(file.data.toString('utf8'), link, rows, required.entryId))
+      : file.path === journalPath ? rewrittenJournal.data : bodies.get(file.path);
+    return data && !file.data.equals(data) ? { ...file, data } : file;
+  });
+  if (!savedJournal) result.push(rewrittenJournal);
+  assertWorkspaceMemoryErased(result, [required]);
+  return result;
+}
+
 export function scrubManagedMemoryBackups(home: string, identity: BotWorkspaceIdentity, required: RequiredNoteErasure, receipt: MemoryChange): void {
   const path = join(home, 'bot-backups');
   if (!lstatSync(path, { throwIfNoEntry: false })) return;
   const root = backupFolder(home);
   if (!root) throw new Error('The Bot backup folder is unavailable.');
   removeTempFiles(root);
-  const prefix = prefixFor(required.scope);
-  const journalPath = prefix + 'journal.jsonl';
   for (const candidate of readdirSync(root)) {
     if (/^\..+\.pack\.\d+\.[0-9a-f]{8}\.tmp$/.test(candidate)) throw new Error('A Bot backup write has not been recovered.');
     const backupId = candidate.replace(/\.pack$/, '');
     if (backupId === candidate || !z.uuid().safeParse(backupId).success) continue;
     const { files } = openManagedMemoryBackup(home, { backupId });
-    const state = files.find(file => file.path === STATE);
-    const workspaceId = z.uuid().parse(JSON.parse(state?.data.toString('utf8') ?? 'null')?.workspaceId);
+    const state = files.find(file => file.path === STATE)?.data.toString('utf8') ?? 'null';
+    const workspaceId = z.uuid().parse(JSON.parse(state)?.workspaceId);
     if (workspaceId !== identity.workspaceId) continue;
     const capturedScope = managedBackupScope(files);
-    if (!capturedScope) {
-      // Pre-staged full workspace packs may include review snapshots and other
-      // history that the scoped writer never copies. Do not overwrite them.
-      const containsScope = files.some(file => file.path.startsWith(prefix));
-      const hasReviews = required.scope.kind === 'bot' && files.some(file => file.path.startsWith('bots/reviews/'));
-      if (containsScope || hasReviews) assertWorkspaceMemoryErased(files, [required]);
-      continue;
-    }
-    if (!sameScope(capturedScope, required.scope)) continue;
-    const content = files.flatMap(file => file.path.startsWith(prefix) && file.path !== journalPath
-      ? [{ file: file.path.slice(prefix.length), content: file.data.toString('utf8') }] : []);
-    const savedJournal = files.find(file => file.path === journalPath);
-    if (!savedJournal) throw new Error('The Bot backup has no memory erasure journal.');
-    const history: MemoryChange[] = savedJournal.data.toString('utf8').split('\n').filter(Boolean).map(row => JSON.parse(row));
-    const { rows, steps } = eraseMemoryCopies(required.entryId, content, history, true);
-    const prior = rows.some(row => row.op === 'erase' && row.entryId === required.entryId);
-    if (!prior) rows.push(erasureReceipt(receipt));
-    const rewritten = files.map(file => {
-      if (file.path === journalPath) return journal(journalPath, rows);
-      const removed = steps.find(step => file.path === prefix + step.path);
-      return removed ? asEntry(file.path, removed.text) : file;
-    });
-    assertWorkspaceMemoryErased(rewritten, [required]);
-    if (steps.length || !savedJournal.data.equals(rewritten.find(file => file.path === journalPath)!.data)) {
+    if (capturedScope && !sameScope(capturedScope, required.scope)) continue;
+    const rewritten = scrubBackupFiles(files, required, receipt, capturedScope ? undefined : legacyReviewLinks(files, state, workspaceId));
+    if (rewritten.some((file, index) => file !== files[index])) {
       atomicWriteFileSync(join(root, candidate), archive(rewritten), 0o600);
     }
   }

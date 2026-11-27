@@ -8,6 +8,7 @@ import { backupMemoryRestoreInput, listManagedMemoryBackups, readManagedMemoryBa
 import { BotWorkspaceTransfer } from '../../src/bots/workspace-transfer.ts';
 import { BotConversations } from '../../src/bots/conversations.ts';
 import { PersonalMemory } from '../../src/bots/ported/personal-memory.js';
+import { ReviewCheckpoints } from '../../src/bots/review-checkpoints.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { GroupStore } from '../../src/bots/group-store.ts';
 import { nullLogger } from '../../src/log.ts';
@@ -240,7 +241,8 @@ test('the retired native Runner erases only the exact scope and retries across a
   const packId = saveManagedMemoryBackup(source.home, captureManagedMemoryBackup(identity,
     { scope, expectedRevision: stored.revision, operationId: 'retired-backup' }, oldMemory));
   const fullPack = join(source.home, 'bot-backups', randomUUID() + '.pack');
-  const legacy = archive(readTree(oldRoot, 'bots'));
+  const legacy = archive([...readTree(oldRoot, 'bots'),
+    { path: 'bots/memory/' + bot.id + '/opaque.snapshot', data: Buffer.from(draft) }]);
   writeFileSync(fullPack, legacy);
   const projectId = randomUUID();
   const otherRoot = join(oldRoot, 'memory', 'project-' + projectId);
@@ -274,7 +276,7 @@ test('the retired native Runner erases only the exact scope and retries across a
   assert.deepEqual(await erase(), { done: false, waitingForSources: true });
   await wire(SOURCE, source, false).poll();
   assert.equal(oldMemory.list(now)[0]?.id, entryId);
-  await assert.rejects(sender.poll(), /missing a required memory erasure/);
+  await assert.rejects(sender.poll(), /unknown file in its memory scope/);
   assert.deepEqual(readFileSync(fullPack), legacy);
   assert.deepEqual(await erase(), { done: false, waitingForSources: true });
   rmSync(fullPack);
@@ -929,6 +931,15 @@ test('scoped backup packs keep current notes, replay the creation, and discard o
   assert.doesNotMatch(Buffer.concat(copied.files.map(file => file.data)).toString('utf8'), /not a backed up prompt|add-erased/);
   assert.deepEqual(scopedBackupNotes(copied.files, other, copied.checksum), []);
   const untouched = openManagedMemoryBackup(home, { backupId: otherId });
+  const reserve = repo.reserveConversation(scope.id, 'legacy-archive-review');
+  const link = repo.confirmConversation('legacy-archive-review', reserve.threadId);
+  const reviews = new ReviewCheckpoints(join(home, 'bots', 'reviews'));
+  const review = reviews.record({ purpose: 'bot-memory-review', botId: scope.id, conversationId: link.id,
+    threadId: link.threadId, configRevision: 1, scopeRevision: kept.revision,
+    first: 1, through: 2, provider: 'claude', model: 'test', accountId: 'fixture' }, 0, { rejected: 0, changes: [
+    { op: 'edit', id: erased.note.id, before: '消す覚書', text: '消すレビュー' },
+    { op: 'remove', id: kept.note.id, before: '残す覚書' },
+  ] });
   const legacy = archive(readTree(join(home, 'bots'), 'bots'));
 
   memory.erase(erased.note.id, 'erase', kept.revision, time, () => {});
@@ -964,8 +975,19 @@ test('scoped backup packs keep current notes, replay the creation, and discard o
   memory.restoreBackupNote(selectBackupMemoryNote(cleaned.files, restore), restore.operationId, restore.expectedRevision, time, () => {});
   assert.deepEqual(memory.list('2026-11-27').map(note => note.text), ['残す覚書']);
 
-  const legacyPath = join(home, 'bot-backups', randomUUID() + '.pack');
+  const legacyId = randomUUID();
+  const legacyPath = join(home, 'bot-backups', legacyId + '.pack');
   writeFileSync(legacyPath, legacy);
-  assert.throws(() => scrubManagedMemoryBackups(home, identity, required, tombstone), /required memory erasure/);
-  assert.deepEqual(readFileSync(legacyPath), legacy, 'the pre-staged workspace archive requires explicit handling');
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  const safeLegacy = openManagedMemoryBackup(home, { backupId: legacyId });
+  assert.doesNotMatch(Buffer.concat(safeLegacy.files.map(file => file.data)).toString('utf8'), /消す覚書|消すレビュー/);
+  assert.equal(scopedBackupNotes(safeLegacy.files, other, safeLegacy.checksum)[0]?.entryId, erased.note.id);
+  const reviewFile = safeLegacy.files.find(file => file.path === 'bots/reviews/' + link.id + '.json');
+  const reviewed = JSON.parse(reviewFile!.data.toString());
+  assert.equal(reviewed.cursor, 2);
+  assert.equal(reviewed.reports[0].id, review.id);
+  assert.deepEqual(reviewed.reports[0].changes, [{ op: 'erased', decision: 'erased' }, review.changes[1]]);
+  await wire.verifyMemoryRestore(safeLegacy.files, identity);
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  assert.equal(openManagedMemoryBackup(home, { backupId: legacyId }).checksum, safeLegacy.checksum);
 });

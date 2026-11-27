@@ -431,6 +431,12 @@ checks the workspace and owner epoch of the backup candidate, then verifies
 the same current erasure records. It refuses stale or mixed copies. Checking
 a frozen candidate does not change the backup or install it.
 
+The Runner can scrub an older managed workspace archive whose saved
+identity, memory layout and linked review records it recognizes. It
+keeps unrelated files and replaces the archive atomically after
+verification. An unresolved journal, unknown file in the target scope or
+unrecognized review keeps the erasure pending.
+
 On an owning Runner with a compatible supervisor and backend,
 `bots.status` advertises `managedMemoryRestore`. The owner can list the
 Runner’s staged backup IDs and saved times with `bots.memory.backups`.
