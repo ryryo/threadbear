@@ -894,7 +894,11 @@ the owning runner.
   thread records and transcripts keep the conversations. The first Bot data
   write adds `<home>/bots-format.json` so a managed release without support
   for that data cannot start. Bot notes go to the CLI of a linked conversation
-  as context. Bot controls and notes files stay on the owning Runner.
+  as context. A Bot's own note adds its Bot, Thread, turn and input event to
+  the memory journal. The owning Runner writes the notes files. It can mirror
+  public Bot profiles, visible notes and work status to paired devices
+  through Convex. The old process forwards active Bot tool calls to the
+  primary during a handover. The primary records and applies the operations.
   Its request journal and receipt store under `<home>/bots/` keep the original
   and recipient conversation IDs and a reference to the result. The full
   result lives in the recipient's Thread events. The first request raises the

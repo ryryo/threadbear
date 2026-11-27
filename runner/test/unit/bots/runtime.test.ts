@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotRuntime } from '../../../src/bots/runtime.ts';
 import { neutraliseCopied } from '../../../src/real-copy.ts';
-import { makeHarness, tmpDir } from '../../helpers/fakes.ts';
+import { makeHarness, tick, tmpDir } from '../../helpers/fakes.ts';
 
 test('the feature defaults off, and an unguarded Runner cannot create Bot data', () => {
   const h = makeHarness(tmpDir());
@@ -30,6 +30,42 @@ test('the feature defaults off, and an unguarded Runner cannot create Bot data',
   assert.equal(existsSync(state), true);
   owns = false;
   assert.throws(() => runtime.methods['bots.list']({}), /owning Runner/);
+});
+
+test('a kept turn stores one Bot note on the primary with the authenticated source', async () => {
+  const home = tmpDir();
+  let old: BotRuntime;
+  let oldOwns = true;
+  const h = makeHarness(home, {}, { botContext: rec => old.context(rec) });
+  old = new BotRuntime({ home, runner: () => h.runner, owner: () => 'local', enabled: () => true, guarded: () => true, owns: () => oldOwns });
+  const { bot } = old.methods['bots.create']({ name: 'Editor' }) as { bot: { id: string } };
+  const { thread } = old.methods['bots.conversations.create']({ botId: bot.id, operationId: 'source' }) as { thread: { id: string } };
+  h.runner.send(thread.id, 'Keep the headline short');
+  await tick();
+  const cli = h.adapter.last;
+  cli.init();
+  const turnId = h.runner.threads.get(thread.id)!.rt.turn!.turnId;
+  oldOwns = false;
+  const next = makeHarness(home, {}, {}, { skip: new Set([thread.id]) });
+  const primary = new BotRuntime({ home, runner: () => next.runner, owner: () => 'local', enabled: () => true, guarded: () => true, owns: () => true, peerOwns: id => id === thread.id });
+  const input = { operationId: 'headlines', text: '見出しは短くする', pin: false };
+  assert.throws(() => old.rememberFromTurn(thread.id, turnId, input), /owning Runner/);
+  assert.throws(() => primary.rememberFromTurn(thread.id, 'old-turn', input, true), /active turn/);
+  const saved = primary.rememberFromTurn(thread.id, turnId, input, true);
+  assert.deepEqual(primary.rememberFromTurn(thread.id, turnId, input, true), saved);
+  assert.throws(() => primary.rememberFromTurn(thread.id, turnId, { ...input, text: 'Different note' }, true), /different change/);
+  assert.equal(saved.note?.pinned, false);
+  const { rows } = primary.methods['bots.memory.history']({ botId: bot.id, threadId: thread.id }) as {
+    rows: { actor: string; sourceThreadId: string; sourceTurnId: string; sourceSeq: number }[];
+  };
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.actor, bot.id);
+  assert.equal(rows[0]!.sourceThreadId, thread.id);
+  assert.equal(rows[0]!.sourceTurnId, turnId);
+  assert.ok(rows[0]!.sourceSeq > 0);
+  cli.result();
+  await tick();
+  assert.throws(() => primary.rememberFromTurn(thread.id, turnId, input, true), /active turn/);
 });
 
 test('Bot Threads cannot be packed for moving, and a copy retains its read-only link', async () => {

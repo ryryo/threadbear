@@ -4618,3 +4618,54 @@ test('heartbeats mirror effective pools only after the backend can take them', a
     await sync.stop();
   }
 });
+
+test('the compatible owner mirror carries public Bot links and removes them for older backends and Private Bots', () => {
+  const { h } = setup();
+  const ordinary = h.runner.create({ text: 'Ordinary thread', cwd: h.cfg.defaults.cwd, accountId: 'claude-3' }).thread;
+  const now = h.clock.now();
+  const link = { botId: 'bot-identity', conversationId: 'chat-identity', taskId: 'task-identity' };
+  const linked = { ...ordinary, botLink: link };
+  assert.equal(toThreadDoc(ordinary, 'runner', now).botLink, undefined);
+  assert.deepEqual(forBackend(toThreadDoc(linked, 'runner', now), BACKEND_API_VERSION, now).botLink, link);
+  assert.equal(forBackend(toThreadDoc(linked, 'runner', now), 105, now).botLink, undefined);
+  assert.equal(toThreadDoc({ ...linked, privateBotId: link.botId }, 'runner', now).botLink, undefined);
+});
+
+test('making a Bot private waits for an older projection and then excludes it until the local change ends', async () => {
+  let open = true;
+  let release: (() => void) | undefined;
+  const firstWrite = new Promise<void>(resolve => { release = resolve; });
+  const { h, sync, calls } = setup({
+    answer: (method) => {
+      if (method === 'sync:heartbeat') return { apiVersion: BACKEND_API_VERSION };
+      if (method === 'sync:setBotWorkspace' && open) return firstWrite;
+      return null;
+    },
+    extra: { botWorkspace: (_scrub, ignored) => ({
+      workspaceId: 'workspace', ownerRunnerId: 'r1', epoch: 1,
+      profiles: ignored?.has('editor') ? [] : [{ id: 'editor', name: 'Editor', role: '', instructions: '', revision: 1 }],
+      notes: [], tasks: [], requests: [], groups: [],
+    }) },
+  });
+  const projections = () => calls.filter(call => call.fn === 'sync:setBotWorkspace')
+    .map(call => (call.args.workspace as { profiles: unknown[] }).profiles.length);
+  sync.start();
+  await tick();
+  assert.deepEqual(projections(), [1]);
+  let withdrawn = false;
+  const pending = sync.withdrawBotProfile('editor').then(resume => { withdrawn = true; return resume; });
+  await tick();
+  assert.equal(withdrawn, false);
+  assert.deepEqual(projections(), [1]);
+  open = false;
+  release?.();
+  const resume = await pending;
+  assert.deepEqual(projections(), [1, 0]);
+  h.clock.advance(HEARTBEAT_MS);
+  await tick();
+  assert.deepEqual(projections(), [1, 0]);
+  resume();
+  await tick();
+  assert.deepEqual(projections(), [1, 0, 1], 'a refused local change re-publishes the still public profile');
+  sync.stop();
+});

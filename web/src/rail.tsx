@@ -28,6 +28,8 @@ export function Rail({ token, route }: { token: string; route: Route }) {
   // The small rows, not phone:schedules: this is on screen all the time.
   const wakes = useLiveQuery(api.phone.wakes, { token });
   const runners = useLiveQuery(api.phone.runners, { token });
+  const apiVersion = useLiveQuery(api.phone.me, { token })?.apiVersion ?? 0;
+  const botsAvailable = useLiveQuery(api.phone.botWorkspaceAvailable, apiVersion >= 106 ? { token } : 'skip');
   const now = Date.now();
   if (route.page === 'thread') lastThread = route.threadId;
   const waiting = build(inbox ?? [], now, wakesOf(wakes ?? []), 'needsYou').inbox.length;
@@ -71,6 +73,8 @@ export function Rail({ token, route }: { token: string; route: Route }) {
       </a>
       {view('scheduled', m(msg('Scheduled')), <Icon.Clock />, active)}
       {view('projects', m(msg('Projects')), <Icon.Stack />)}
+      {botsAvailable ? <a className="rail-btn" href="/bots" title={m(msg('Bots'))} aria-label={m(msg('Bots'))}
+        onClick={e => { e.preventDefault(); go('/bots'); }}><Icon.Bubbles /><span className="word"><T>Bots</T></span></a> : null}
       <span className="grow" />
       {runnersShown(runners ?? [], now).map((r) => (
         <a

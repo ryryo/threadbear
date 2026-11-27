@@ -83,8 +83,11 @@ export class PersonalMemory {
 
   revision() { return this.history()[0]?.id ?? 'empty'; }
 
-  change(mutation, operationId, expectedRevision, time) {
-    const hash = createHash('sha256').update(JSON.stringify(mutation)).digest('hex');
+  change(mutation, operationId, expectedRevision, time, source) {
+    // Steered input can add a later event to the same active turn. A replay
+    // keeps the first saved source event for that operation.
+    const { sourceSeq: _sourceSeq, ...identity } = source ?? {};
+    const hash = createHash('sha256').update(JSON.stringify(source ? { mutation, source: identity } : mutation)).digest('hex');
     const history = this.history();
     const seen = history.find(row => row.transaction?.operationId === operationId);
     if (seen) {
@@ -95,7 +98,7 @@ export class PersonalMemory {
     const transaction = { operationId, hash };
     let result;
     switch (mutation.op) {
-      case 'add': result = this.add(mutation.text, { until: mutation.until }, time, transaction); break;
+      case 'add': result = this.add(mutation.text, { until: mutation.until, ...source }, time, transaction); break;
       case 'edit': result = this.replace(mutation.entryId, mutation.text, time, transaction); break;
       case 'remove': this.remove(mutation.entryId, time, transaction); break;
       case 'restore': this.restore(mutation.changeId, time, transaction); break;
@@ -139,7 +142,7 @@ export class PersonalMemory {
     }));
   }
 
-  add(raw, { until, sourceThreadId }, time, transaction) {
+  add(raw, { until, sourceThreadId, sourceTurnId, sourceSeq, actor, pin = true }, time, transaction) {
     this.history();
     const text = entryText(raw);
     this.refuseSecret(raw);
@@ -155,10 +158,13 @@ export class PersonalMemory {
       if (transaction) throw new Error('This note already exists');
       return note(same);
     }
-    const meta = { id: newEntryId(siblings), pinned: 'yes', added: time.slice(0, 10), until };
+    const meta = { id: newEntryId(siblings), pinned: pin ? 'yes' : undefined, added: time.slice(0, 10), until };
     const line = formatEntry(text, meta);
     const result = note({ text, meta });
-    this.publish('add', insertEntry(file.lines, line), time, { after: line, sourceThreadId, ...(transaction ? { transaction: { ...transaction, note: result } } : {}) });
+    this.publish('add', insertEntry(file.lines, line), time, {
+      after: line, sourceThreadId, sourceTurnId, sourceSeq, ...(actor === undefined ? {} : { actor }),
+      ...(transaction ? { transaction: { ...transaction, note: result } } : {}),
+    });
     return result;
   }
 

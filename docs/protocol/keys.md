@@ -410,6 +410,7 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `addShareImage` | its own | the thread's row is its runner's, and the file no other runner's row uses; none: dropped, and the upload deleted if nothing uses it |
 | `dropShareImages` | its own | the thread's row is its runner's; none: nothing |
 | `setProjects` | its own | `runnerId` |
+| `setBotWorkspace` | its own | Current owning Runner process and workspace epoch |
 | `upsertProjects` | its own | `runnerId` |
 | `projectIcons` | its own | `runnerId` |
 | `setProjectIcon` | its own | `runnerId`, and the file no other runner's row uses |

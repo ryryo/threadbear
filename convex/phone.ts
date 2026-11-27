@@ -13,6 +13,7 @@ import { messageButton, threadFields, views } from './schema';
 import { checkPhoneToken, hasLiveKey, pageLimit, readRunnerOrder, runnerStatsRows, saveRunnerOrder, sha256, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
 import { pushLocale } from './pushText';
+import { botDeviceAction, botProfileEdit, botWorkspaceProjection } from './botWorkspaceValues';
 import { pushOff } from './pushHealth';
 import { imagesFrom, phoneImage, replyImagesFrom, siteUrl } from './share';
 import { deleteIfUnused, endCommandFiles, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
@@ -541,7 +542,7 @@ export const command = query({
     // to parse: its notes are keyed by option id, which can be any text, and
     // Convex refuses an object key that isn't plain ASCII or starts with "$".
     if (c.kind === 'designReviews' && c.result) result = c.result;
-    else if (c.kind === 'slashCommands' && c.result) {
+    else if ((c.kind === 'slashCommands' || c.kind === 'botProfileEdit' || c.kind === 'botDeviceAction') && c.result) {
       try {
         result = JSON.parse(c.result);
       } catch {
@@ -715,6 +716,64 @@ export const removePocketCard = mutation({
   },
 });
 
+export const botWorkspaceAvailable = query({
+  args: { token: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    return (await ctx.db.query('botWorkspaces').first()) !== null;
+  },
+});
+
+export const botWorkspaces = query({
+  args: { token: v.string() },
+  returns: v.array(botWorkspaceProjection),
+  handler: async (ctx, { token }) => {
+    await checkPhoneToken(ctx, token);
+    return (await ctx.db.query('botWorkspaces').take(100)).map(row => row.workspace);
+  },
+});
+
+export const editBotProfile = mutation({
+  args: { token: v.string(), runnerId: v.string(), edit: botProfileEdit },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, runnerId, edit }) => {
+    await checkPhoneToken(ctx, token);
+    const row = await ctx.db.query('botWorkspaces').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
+    if (!row || row.workspace.workspaceId !== edit.workspaceId || row.workspace.epoch !== edit.epoch ||
+        !row.workspace.profiles.some(bot => bot.id === edit.botId)) {
+      throw new ConvexError({ kind: 'notFound', message: 'This Bot workspace is unavailable. Reload it before editing.' });
+    }
+    if (edit.operationId.length > 128 || (edit.settings.instructions?.length ?? 0) > 30_000 ||
+        (edit.settings.name?.length ?? 0) > 120 || (edit.settings.role?.length ?? 0) > 120) {
+      throw new ConvexError({ kind: 'badArgs', message: 'The Bot settings edit is too long.' });
+    }
+    return queue(ctx, runnerId, 'botProfileEdit', undefined, edit);
+  },
+});
+
+export const actOnBotWorkspace = mutation({
+  args: { token: v.string(), runnerId: v.string(), input: botDeviceAction },
+  returns: v.id('commands'),
+  handler: async (ctx, { token, runnerId, input }) => {
+    await checkPhoneToken(ctx, token);
+    const row = await ctx.db.query('botWorkspaces').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
+    const workspace = row?.workspace;
+    if (!workspace || workspace.workspaceId !== input.workspaceId || workspace.epoch !== input.epoch) {
+      throw new ConvexError({ kind: 'notFound', message: 'The Bot workspace changed. Reload it before sending.' });
+    }
+    const action = input.action;
+    const visible = action.kind === 'group.post' ? workspace.groups.some(group => group.id === action.groupId)
+      : action.kind === 'task.stop' ? workspace.tasks.some(task => task.id === action.taskId)
+      : workspace.notes.some(note => note.scopeId === action.scope.id && note.scope === action.scope.kind);
+    if (!visible) throw new ConvexError({ kind: 'notFound', message: 'That work is unavailable on this device.' });
+    if (input.operationId.length > 128 || ('text' in action && action.text.length > (action.kind === 'group.post' ? 30_000 : 300))) {
+      throw new ConvexError({ kind: 'badArgs', message: 'The Bot action is too long.' });
+    }
+    return queue(ctx, runnerId, 'botDeviceAction', undefined, input);
+  },
+});
+
 export const schedules = query({
   args: { token: v.string() },
   returns: v.array(v.any()),
@@ -723,6 +782,7 @@ export const schedules = query({
     const out = [];
     // `owned` and `claim` are the backend's own (API 9), not the phone's.
     for await (const s of ctx.db.query('schedules')) {
+      if (s.botTarget) continue;
       const { owned, claim, updatedMs: _u, ...rest } = strip(s);
       out.push(rest);
     }
@@ -1404,7 +1464,7 @@ async function knownRunner(ctx: QueryCtx, runnerId: string): Promise<string> {
 // what the runner's own pendingCommands reads. One that waits too long goes
 // (sync:pruneFiles, COMMAND_KEEP_MS). Its photos are recorded in commandFiles
 // so a delete elsewhere sees they're still on their way (sync.ts storageInUse).
-async function queue(ctx: MutationCtx, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk' | 'schedule' | 'picture' | 'press' | 'slashCommands' | 'interrupt' | 'designReviews' | 'respondReview', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: MutationCtx, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk' | 'schedule' | 'picture' | 'press' | 'slashCommands' | 'interrupt' | 'designReviews' | 'respondReview' | 'botProfileEdit' | 'botDeviceAction', threadId: string | undefined, args: Record<string, unknown>) {
   let n = 0;
   let bytes = docBytes(args);
   for await (const c of ctx.db.query('commands').withIndex('by_runner_state', (q) => q.eq('runnerId', runnerId).eq('state', 'pending'))) {

@@ -8,6 +8,10 @@ import { MEMORY_LIMITS } from './ported/memory-entries.js';
 const id = z.object({ groupId: z.uuid() });
 const write = id.extend({ expectedRevision: z.int().positive() });
 const seq = z.int().positive();
+export const keptGroupCall = z.object({
+  threadId: z.uuid(), turnId: z.string().min(1).max(128), operationId: botOperationId,
+  members: z.array(z.uuid()).min(1).max(12), note: z.string().trim().min(1).max(30_000),
+});
 
 export function groupMethods(groups: () => BotGroups,
   review: (groupId: string, seq: number, operationId: string, text: string) => unknown): Record<string, (input: Record<string, unknown>) => unknown> {

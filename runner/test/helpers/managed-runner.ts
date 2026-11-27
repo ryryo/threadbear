@@ -42,18 +42,37 @@ export function configureBotFixture(home: string, port?: number): void {
 
 export const BOT_FIXTURE_REPLY = '日本語の見出し案。'.repeat(300);
 
-export function installBotFixtureCli(home: string): string {
+export function installBotFixtureCli(home: string, replyGate?: string, toolFixture?: {
+  trigger: string; calls: { name: string; arguments: Record<string, unknown> }[];
+}): string {
   const cli = path.join(home, 'claude-fixture');
   fs.writeFileSync(cli, `#!${process.execPath}
 const readline = require('node:readline');
+const { existsSync, writeFileSync } = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const session = randomUUID();
 const next = (frame) => console.log(JSON.stringify({ session_id: session, uuid: randomUUID(), ...frame }));
 const model = 'claude-haiku-5-5';
 const reply = ${JSON.stringify(BOT_FIXTURE_REPLY)};
+const gate = ${JSON.stringify(replyGate ?? null)};
+const fixture = ${JSON.stringify(toolFixture ?? null)};
+const pending = new Map();
+const mcp = (method, params) => {
+  const id = randomUUID();
+  const done = new Promise(resolve => pending.set(id, resolve));
+  next({ type: 'control_request', request_id: id, request: {
+    subtype: 'mcp_message', server_name: 'threadbear', message: { jsonrpc: '2.0', id, method, params },
+  } });
+  return done;
+};
 let started = false;
-readline.createInterface({ input: process.stdin }).on('line', (line) => {
+readline.createInterface({ input: process.stdin }).on('line', async (line) => {
   const frame = JSON.parse(line);
+  if (frame.type === 'control_response' && pending.has(frame.response.request_id)) {
+    const id = frame.response.request_id;
+    pending.get(id)(frame.response);
+    pending.delete(id);
+  }
   if (frame.type === 'control_request') {
     next({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: {} } });
   }
@@ -61,6 +80,16 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (!started) {
     next({ type: 'system', subtype: 'init', model });
     started = true;
+  }
+  const isTrigger = fixture && JSON.stringify(frame.message.content).includes(fixture.trigger);
+  if (gate && (!fixture || isTrigger)) {
+    writeFileSync(gate + '.waiting', '');
+    while (!existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  if (isTrigger) {
+    const results = [];
+    for (const args of fixture.calls) results.push(await mcp('tools/call', args));
+    writeFileSync(gate + '.tools-result', JSON.stringify(results));
   }
   next({ type: 'assistant', message: { id: randomUUID(), role: 'assistant', model, content: [{ type: 'text', text: reply }] } });
   next({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn', duration_ms: 1, result: reply });

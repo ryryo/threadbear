@@ -7,7 +7,7 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -24,8 +24,12 @@ import type { BotInputRef } from '../protocol.ts';
 import { GroupStore } from './group-store.ts';
 import { BotGroups } from './groups.ts';
 import { groupMethods } from './group-rpc.ts';
+import { DeviceBotWorkspace } from './device-workspace.ts';
+import { deviceAction } from './device-actions.ts';
 import type { BotScheduleScope } from './schedule-rpc.ts';
 import { BotScheduleTargets } from './schedule-target.ts';
+import type { RememberInput } from './memory-tool.ts';
+import { activeBotInput } from './turn-proof.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
 
@@ -39,7 +43,9 @@ type Options = {
   canChangePrivacy?: () => boolean;
   protectPrivacy?: () => void;
   withdrawShared?: (threadIds: readonly string[]) => Promise<void>;
+  withdrawDeviceProfile?: (botId: string) => Promise<() => void>;
   archiveExporting?: () => boolean;
+  peerOwns?: (threadId: string) => boolean;
 };
 type ReviewDeps = Pick<BotReviewOptions, 'redact' | 'askers' | 'privateFolder'> & { clock: Clock; onError: (id: string) => void };
 
@@ -55,6 +61,7 @@ export class BotRuntime {
   private teamService?: BotTeams;
   private groupService?: BotGroups;
   private scheduleTargets?: BotScheduleTargets;
+  private deviceWorkspace?: DeviceBotWorkspace;
   private groupWake = false;
   private permissionChanges?: PermissionChanges;
   private readonly taskWake = new Set<string>();
@@ -83,11 +90,46 @@ export class BotRuntime {
     return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_REQUEST_FORMAT);
   }
 
+  rememberFromTurn(threadId: string, turnId: string, input: RememberInput, kept = false) {
+    const { repo, conversations } = this.getWorkspace();
+    const runner = this.options.runner();
+    const state = runner.threads.get(threadId);
+    const current = kept
+      ? !state && this.options.peerOwns?.(threadId)
+      : state && !state.rt.deleted && state.rt.turn?.turnId === turnId;
+    if (!current) throw new RpcError(ErrorCode.moved, 'The Bot no longer has that active turn.');
+    const rec = kept ? runner.store.load(threadId) : state?.rec;
+    const link = rec?.botLink;
+    if (!rec || rec.copied || rec.archivedAt || !link || link.taskId) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot or Group conversation is required.');
+    const source = activeBotInput(kept ? runner.store.peerLog(threadId) : runner.store.log(threadId), turnId);
+    const bot = repo.get(link.botId);
+    if (bot.archivedAt || bot.privacy?.moving || rec.privateBotId !== (bot.privacy ? bot.id : undefined)) {
+      throw new RpcError(ErrorCode.notAllowed, 'This Bot cannot save notes now.');
+    }
+    if (link.groupId) {
+      const { round, frozen } = this.groups().threads.check(rec);
+      if (frozen || round?.status !== 'running' || !round.slots.some(slot =>
+        slot.status === 'speaking' && slot.threadId === threadId && slot.turnId === turnId)) {
+        throw new RpcError(ErrorCode.notAllowed, 'Only a speaking member can save Group notes.');
+      }
+    } else if (!repo.matchesConversation(bot.id, link.conversationId, threadId)) {
+      throw new RpcError(ErrorCode.notAllowed, 'This Thread does not belong to this Bot.');
+    }
+    const scope = link.groupId ? { kind: 'group' as const, id: link.groupId } : { kind: 'bot' as const, id: bot.id };
+    const memory = conversations.scopedMemory.open(scope, {
+      kind: 'bot', id: bot.id, private: Boolean(bot.privacy), groupId: link.groupId, teamId: repo.teamIdForBot(bot.id), grants: [],
+    }, 'write');
+    protectBotData(this.options.home);
+    return memory.change({ op: 'add', text: input.text, until: input.until }, `bot:${threadId}:${input.operationId}`, memory.revision(), runner.isoNow(), {
+      actor: bot.id, sourceThreadId: threadId, sourceTurnId: turnId, sourceSeq: source.seq, pin: input.pin,
+    });
+  }
+
   requests(): BotRequests {
     if (!this.requestsAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot requests need an updated Runner supervisor.');
     const { home, runner, owns } = this.options;
     return this.requestService ??= new BotRequests({
-      root: join(home, 'bots'), runner: runner(), repo: this.getWorkspace().repo, owns,
+      root: join(home, 'bots'), runner: runner(), repo: this.getWorkspace().repo, owns, peerOwns: this.options.peerOwns,
       task: id => this.tasksAvailable() ? this.tasks().get(id) : undefined,
       childTasks: id => this.tasksAvailable() ? this.tasks().children(id) : [],
       onCancel: row => {
@@ -95,7 +137,9 @@ export class BotRuntime {
         this.reconcileTasks(row.sourceThreadId);
       },
       protect: () => {
-        if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+        // Only the primary changes the journal. A peer can still own an
+        // execution Thread while this primary settles its saved result.
+        if (!owns()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
         protectBotData(home, BOT_REQUEST_FORMAT);
       },
       warn: () => runner().notice('error', 'A Bot request could not be reconciled.'),
@@ -194,6 +238,103 @@ export class BotRuntime {
     });
   }
 
+  devicesAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_DEVICE_FORMAT);
+  }
+
+  devices(): DeviceBotWorkspace {
+    if (!this.devicesAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot access from connected devices needs an updated Runner.');
+    return this.deviceWorkspace ??= new DeviceBotWorkspace(this.repo(),
+      () => this.options.owns() && this.options.canChangePrivacy?.() === true,
+      () => protectBotData(this.options.home, BOT_DEVICE_FORMAT),
+      (visible, scrub) => this.deviceDetails(visible, scrub),
+    );
+  }
+
+  private deviceDetails(visible: ReadonlySet<string>, scrub: (value: string) => string) {
+    const { conversations, repo } = this.getWorkspace();
+    const today = this.options.runner().isoNow().slice(0, 10);
+    const groups = this.groupsAvailable() ? this.groups().store.list().filter(group =>
+      !group.archivedAt && group.memberIds.every(id => visible.has(id))
+    ) : [];
+    const scopes = [
+      ...[...visible].map(id => ({ kind: 'bot' as const, id })),
+      ...groups.map(group => ({ kind: 'group' as const, id: group.id })),
+    ];
+    const notes = scopes.map(ref => {
+      const memory = conversations.scopedMemory.open(ref, { kind: 'owner' }, 'read');
+      return { scope: ref.kind, scopeId: ref.id, revision: memory.revision(), rows: memory.list(today).map(row => ({
+        id: row.id, text: scrub(row.text), pinned: row.pinned,
+      })) };
+    });
+    const tasks = this.tasksAvailable() ? [...visible].flatMap(id => this.tasks().list(id).rows.filter(task =>
+      !task.privateBotId && (!task.group || groups.some(group => group.id === task.group?.groupId))
+    ).map(task => ({
+      botId: id, id: task.id, threadId: task.threadId, title: scrub(task.title), status: task.state.status, revision: task.revision,
+    }))) : [];
+    const requests = this.requestsAvailable() ? [...visible].flatMap(id => repo.conversations(id).flatMap(link => {
+      if (!this.options.runner().threads.has(link.threadId)) return [];
+      return this.requests().ownerList(link.threadId).filter(row => !row.sourcePrivateBotId && !row.targetPrivateBotId && visible.has(row.targetBotId))
+        .map(row => ({ id: row.id, threadId: row.sourceThreadId, targetThreadId: row.targetThreadId, status: row.state.status }));
+    })) : [];
+    return {
+      notes, tasks, requests,
+      groups: groups.map(group => {
+        const details = this.groups().read(group.id);
+        return { id: group.id, title: scrub(group.title), queued: details.queued,
+          status: details.frozen ? 'stopped' : details.round?.status ?? 'idle',
+          events: details.events.filter(row => typeof row.text === 'string').slice(-20)
+            .map(row => ({ id: row.id, text: scrub(String(row.text)) })),
+        };
+      }),
+    };
+  }
+
+  async applyDeviceAction(raw: unknown, scrub: (text: string) => string) {
+    const parsed = deviceAction.safeParse(raw);
+    if (!parsed.success) throw new RpcError(ErrorCode.badParams, 'Invalid Bot action.');
+    const { workspaceId, epoch, operationId, action } = parsed.data;
+    this.devices().requireIdentity(workspaceId, epoch);
+    const { repo, conversations } = this.getWorkspace();
+    const publicBot = (id: string) => {
+      const bot = repo.get(id);
+      return !bot.privacy && !bot.archivedAt;
+    };
+    const publicGroup = (id: string) => {
+      const { group } = this.groups().store.get(id);
+      return !group.archivedAt && group.memberIds.every(publicBot);
+    };
+    const unavailable = () => new RpcError(ErrorCode.notAllowed, 'This Bot work is unavailable on the connected device.');
+    if (action.kind === 'group.post') {
+      if (!publicGroup(action.groupId)) throw unavailable();
+      const post = this.groups().post(action.groupId, operationId, action.text);
+      return { outcome: 'saved', eventId: post.eventId };
+    }
+    if (action.kind === 'task.stop') {
+      const task = this.tasks().get(action.taskId);
+      if (task.privateBotId || !publicBot(task.botId) || task.group && !publicGroup(task.group.groupId)) throw unavailable();
+      if ('outcome' in task.state && task.state.status === 'stopped') return { outcome: 'saved' };
+      const result = await this.tasks().cancel(task.id, action.expectedRevision);
+      if (!result.saved) throw new Error('The task stopped but the Runner could not save that stop.');
+      return { outcome: 'saved' };
+    }
+    if (!(action.scope.kind === 'group' ? publicGroup(action.scope.id) : publicBot(action.scope.id))) throw unavailable();
+    const memory = conversations.scopedMemory.open(action.scope, { kind: 'owner' }, 'write');
+    const changes = action.kind === 'note.add' ? { op: 'add' as const, text: action.text }
+      : action.kind === 'note.edit' ? { op: 'edit' as const, entryId: action.entryId, text: action.text }
+      : { op: 'remove' as const, entryId: action.entryId };
+    // Let the existing journal recognize a retried operation before deciding a conflict.
+    try {
+      const result = memory.change(changes, operationId, action.expectedRevision, this.options.runner().isoNow());
+      return { outcome: 'saved', revision: result.revision };
+    } catch (error) {
+      const revision = memory.revision();
+      if (revision === action.expectedRevision) throw error;
+      const rows = memory.list(this.options.runner().isoNow().slice(0, 10)).map(note => ({ id: note.id, text: scrub(note.text), pinned: note.pinned }));
+      return { outcome: 'conflict', revision, rows, draft: 'text' in action ? scrub(action.text) : undefined };
+    }
+  }
+
   botSchedulesAvailable(): boolean {
     return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_SCHEDULE_FORMAT);
   }
@@ -231,8 +372,10 @@ export class BotRuntime {
     if (!this.groupsAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot Groups need an updated Runner supervisor.');
     if (this.groupService) return this.groupService;
     const { home, runner, owns } = this.options;
-    const store = new GroupStore(join(home, 'bots'), this.repo(), () => {
-      if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+    const store = new GroupStore(join(home, 'bots'), this.repo(), keptDelegation => {
+      if (!owns() || (!keptDelegation && !this.options.canChangePrivacy?.())) {
+        throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+      }
       protectBotData(home, BOT_GROUP_FORMAT);
     });
     return this.groupService = new BotGroups({
@@ -261,7 +404,7 @@ export class BotRuntime {
   }
 
   reconcileGroups(): void {
-    if (this.groupWake || !this.groupsAvailable()) return;
+    if (!this.requestListener || this.groupWake || !this.groupsAvailable()) return;
     this.groupWake = true;
     setImmediate(() => {
       if (!this.groupWake) return;
@@ -334,7 +477,10 @@ export class BotRuntime {
       if (note.method !== 'thread.event') return;
       const { threadId, event } = note.params;
       const link = runner.threads.get(threadId)?.rec.botLink;
-      if (!link) return;
+      if (!link) {
+        if (event.type === 'turn.completed' && this.options.peerOwns?.(threadId)) this.reconcileRequests(threadId);
+        return;
+      }
       if (link.groupId && (event.type === 'turn.completed' || event.type === 'approval.resolved')) this.reconcileGroups();
       if (event.type === 'turn.completed' || (event.type === 'user.message' && (event.botInput?.request || event.botInput?.task))) this.reconcileRequests(threadId);
       if (event.type === 'turn.completed' || (event.type === 'user.message' && event.botInput?.task)) this.reconcileTasks(threadId);
@@ -453,7 +599,14 @@ export class BotRuntime {
     this.privateData = true;
   }
 
-  private makePrivate({ botId, expectedRevision, folder, operationId }: { botId: string; expectedRevision: number; folder: string; operationId: string }) {
+  private async makePrivate(input: { botId: string; expectedRevision: number; folder: string; operationId: string }) {
+    this.getWorkspace();
+    const resume = await this.options.withdrawDeviceProfile?.(input.botId);
+    try { return await this.applyPrivate(input); }
+    finally { resume?.(); }
+  }
+
+  private applyPrivate({ botId, expectedRevision, folder, operationId }: { botId: string; expectedRevision: number; folder: string; operationId: string }) {
     const { repo } = this.getWorkspace();
     const runner = this.options.runner();
     const canonical = realpathSync.native(folder);

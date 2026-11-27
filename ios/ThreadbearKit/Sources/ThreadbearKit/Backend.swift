@@ -4,6 +4,16 @@ import Foundation
 /// Reads are live; writes are commands the owning runner picks up and
 /// applies, each returning a command id the app can watch.
 public extension Backend {
+    func actOnBotWorkspace(workspace: PhoneBotWorkspace, action: PhoneBotAction, operationId: String) async throws -> String {
+        throw TransportError.server("Bot actions are unavailable on this backend.")
+    }
+    func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error> { AsyncThrowingStream { $0.finish() } }
+    func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> { AsyncThrowingStream { $0.finish() } }
+    func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error> { AsyncThrowingStream { $0.finish() } }
+    func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String {
+        throw TransportError.server("Bot settings are unavailable on this backend.")
+    }
+
     func designReviews(threadId: String, reviewId: String?) async throws -> String {
         throw TransportError.server("Reviews are unavailable on this backend.")
     }
@@ -31,6 +41,12 @@ public extension Backend {
 }
 
 public protocol Backend: Sendable {
+    func actOnBotWorkspace(workspace: PhoneBotWorkspace, action: PhoneBotAction, operationId: String) async throws -> String
+    func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error>
+    func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error>
+    func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error>
+    func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String
+
     func designReviews(threadId: String, reviewId: String?) async throws -> String
     func respondReview(threadId: String, review: PhoneDesignReview, draft: DesignReviewDraft) async throws -> String
     func reviewImages(threadId: String, sources: [String]) -> AsyncThrowingStream<[MessageImage], Error>
@@ -206,6 +222,33 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
         let data = try await transport.mutation(name, args(extra))
         // The mutation answers the command id as a bare string.
         return try Self.decode(String.self, data)
+    }
+
+    public func actOnBotWorkspace(workspace: PhoneBotWorkspace, action: PhoneBotAction, operationId: String) async throws -> String {
+        try await command("phone:actOnBotWorkspace", ["runnerId": .string(workspace.ownerRunnerId), "input": .object([
+            "workspaceId": .string(workspace.workspaceId), "epoch": .number(Double(workspace.epoch)),
+            "operationId": .string(operationId), "action": .object(action.arguments),
+        ])])
+    }
+
+    public func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error> {
+        live("phone:botWorkspaces", [:], as: [PhoneBotWorkspace].self)
+    }
+
+    public func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> {
+        live("phone:botWorkspaceAvailable", [:], as: Bool.self)
+    }
+
+    public func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error> {
+        live("phone:command", ["commandId": .string(commandId)], as: PhoneBotEditStatus?.self, missing: .some(nil))
+    }
+
+    public func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String {
+        try await command("phone:editBotProfile", ["runnerId": .string(workspace.ownerRunnerId), "edit": .object([
+            "workspaceId": .string(workspace.workspaceId), "epoch": .number(Double(workspace.epoch)),
+            "botId": .string(profile.id), "expectedRevision": .number(Double(profile.revision)),
+            "operationId": .string(operationId), "settings": .object(settings.mapValues(JSONValue.string)),
+        ])])
     }
 
     public func designReviews(threadId: String, reviewId: String?) async throws -> String {

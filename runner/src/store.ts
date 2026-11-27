@@ -469,9 +469,11 @@ export class EventLog {
   private offsets: number[] | undefined;
   private count = 0;
   private size = 0;
+  private readonly readOnly: boolean;
 
-  constructor(file: string) {
+  constructor(file: string, readOnly = false) {
     this.file = file;
+    this.readOnly = readOnly;
     if (!this.openTail()) this.loadIndex();
   }
 
@@ -510,7 +512,7 @@ export class EventLog {
       if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 1) return false;
       const whole = at + lastNl + 1;
       // A crash mid-append left half a line. Drop it so seq stays gapless.
-      if (whole < total) fs.truncateSync(this.file, whole);
+      if (!this.readOnly && whole < total) fs.truncateSync(this.file, whole);
       this.count = seq;
       this.size = whole;
       return true;
@@ -539,7 +541,7 @@ export class EventLog {
         start = i + 1;
       }
     }
-    if (start < buf.length) {
+    if (!this.readOnly && start < buf.length) {
       // A crash mid-append left half a line. Drop it so seq stays gapless.
       fs.truncateSync(this.file, start);
     }
@@ -558,6 +560,7 @@ export class EventLog {
   }
 
   append(event: PersistedEvent): void {
+    if (this.readOnly) throw new Error('Cannot append to a read-only event log');
     if (event.seq !== this.count + 1) {
       throw new Error(`event seq ${event.seq} out of order (last ${this.count})`);
     }
@@ -732,6 +735,12 @@ export class ThreadStore {
     fs.mkdirSync(bin, { recursive: true });
     fs.renameSync(dir, path.join(bin, `${id}-${now}`));
     this.logs.delete(id);
+  }
+
+  // A draining peer is still writing. Ignore an incomplete final line and
+  // keep this short-lived view out of the primary's own writers' cache.
+  peerLog(id: string): Pick<EventLog, 'lastSeq' | 'read'> {
+    return new EventLog(path.join(this.threadDir(id), 'events.ndjson'), true);
   }
 
   log(id: string): EventLog {

@@ -1,5 +1,5 @@
 import { ceilingMode, lowerMode } from '../access.ts';
-import { ErrorCode, RpcError, type BotInputRef, type PermissionMode } from '../protocol.ts';
+import { ErrorCode, RpcError, type BotInputRef, type PermissionMode, type PersistedEvent } from '../protocol.ts';
 import type { Runner, ThreadState } from '../runner.ts';
 import type { BotRepository } from './repository.ts';
 import { BotRequestDispatch, type AuthorizeRequest, type RequestActor, type RequestDraft, type RequestLink } from './request-dispatch.ts';
@@ -9,14 +9,18 @@ import { RequestStateStore, type RequestRow } from './request-state.ts';
 import { RequestThreadEvidence } from './request-thread-evidence.ts';
 import { resultText } from './handoff-result.ts';
 import type { SavedTask } from './task-journal.ts';
+import { activeBotInput } from './turn-proof.ts';
 
 type Options = { root: string; runner: Runner; repo: BotRepository; owns: () => boolean; protect: () => void; warn: () => void;
   task?: (id: string) => SavedTask | undefined;
   childTasks?: (requestId: string) => readonly SavedTask[];
   onCancel?: (row: RequestRow) => void;
+  peerOwns?: (threadId: string) => boolean;
 };
 type Correlation = NonNullable<BotInputRef['request']>;
-type PublicDraft = Omit<RequestDraft, 'parentRequestId' | 'rerunOf'>;
+export type PublicDraft = Omit<RequestDraft, 'parentRequestId' | 'rerunOf'>;
+export type RequestApproval = (target: RequestLink, text: string) => Promise<PermissionMode>;
+type KeptApproval = (target: RequestLink, text: string) => Promise<{ ceiling: PermissionMode; sourceAccess: PermissionMode }>;
 
 export class BotRequests {
   private readonly options: Readonly<Options>;
@@ -29,7 +33,7 @@ export class BotRequests {
     this.options = options;
     const { root, runner, owns, protect, warn } = options;
     this.requests = new RequestStateStore(root, protect);
-    this.evidence = new RequestThreadEvidence(runner);
+    this.evidence = new RequestThreadEvidence(runner, options.peerOwns);
     this.dispatch = new BotRequestDispatch({
       requests: this.requests,
       receipts: new RequestReceipts(root, owns, protect, warn),
@@ -65,19 +69,20 @@ export class BotRequests {
     return state;
   }
 
-  private link(threadId: string, writable: boolean): RequestLink {
-    const { repo, runner } = this.options;
-    const st = this.current(threadId);
-    const link = st.rec.botLink;
-    if (!link) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
+  private link(threadId: string, writable: boolean, allowKept = false) {
+    const { repo, runner, peerOwns } = this.options;
+    const kept = allowKept && !runner.threads.has(threadId) && peerOwns?.(threadId);
+    const rec = kept ? runner.store.load(threadId) : this.current(threadId).rec;
+    const link = rec?.botLink;
+    if (!link || rec.copied) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
     const task = link.taskId ? this.options.task?.(link.taskId) : undefined;
     const matched = task
       ? task.threadId === threadId && task.botId === link.botId && task.id === link.conversationId && (!writable || !('outcome' in task.state))
       : repo.matchesConversation(link.botId, link.conversationId, threadId);
     if (!matched) throw new RpcError(ErrorCode.notAllowed, 'A linked Bot conversation is required.');
     const bot = repo.get(link.botId);
-    if (bot.privacy?.moving || (writable && (bot.archivedAt || st.rec.archivedAt))) throw new RpcError(ErrorCode.notAllowed, 'This Bot conversation cannot receive requests right now.');
-    return { ...link, threadId, privateBotId: runner.privateBotOf(threadId) };
+    if (bot.privacy?.moving || (writable && (bot.archivedAt || rec.archivedAt))) throw new RpcError(ErrorCode.notAllowed, 'This Bot conversation cannot receive requests right now.');
+    return { ...link, threadId, privateBotId: kept ? rec.privateBotId : runner.privateBotOf(threadId) };
   }
 
   private recipient(botId: string, preferred?: string): RequestLink {
@@ -96,7 +101,7 @@ export class BotRequests {
       if (this.requests.cancelledAncestor(row)) return false;
       const { runner } = this.options;
       const source = this.link(row.sourceThreadId, true);
-      const target = this.link(row.targetThreadId, false);
+      const target = this.link(row.targetThreadId, false, true);
       return source.conversationId === row.sourceConversationId && target.conversationId === row.targetConversationId &&
         source.privateBotId === row.sourcePrivateBotId && target.privateBotId === row.targetPrivateBotId &&
         (!target.privateBotId || source.privateBotId === target.privateBotId) &&
@@ -108,7 +113,9 @@ export class BotRequests {
 
   private sendSaved(row: RequestRow, text: string, actor: RequestActor) {
     const { runner } = this.options;
-    const current = this.link(row.sourceThreadId, true);
+    const current = actor.kind === 'bot' && actor.keptTurnId
+      ? this.keptSource(row.sourceThreadId, actor.keptTurnId).source
+      : this.link(row.sourceThreadId, true);
     if (current.conversationId !== row.sourceConversationId || current.privateBotId !== row.sourcePrivateBotId) {
       throw new RpcError(ErrorCode.notAllowed, 'The source changed while this request was being approved.');
     }
@@ -133,10 +140,14 @@ export class BotRequests {
     if (!turnId) return undefined;
     const log = this.options.runner.store.log(threadId);
     const input = log.read(1, log.lastSeq).findLast(event => event.type === 'user.message' && event.turnId === turnId);
+    return this.parentFrom(threadId, input, st.rec.botLink?.taskId);
+  }
+
+  private parentFrom(threadId: string, input: PersistedEvent | undefined, taskId?: string): string | undefined {
     if (input?.type !== 'user.message') return undefined;
     if (!input.botInput?.request) {
       const reference = input.botInput?.task;
-      const id = reference?.id ?? st.rec.botLink?.taskId;
+      const id = reference?.id ?? taskId;
       if (!id) return undefined;
       const task = this.options.task?.(id);
       if (!task || !task.originRequestId || (reference?.role === 'result' ? task.sourceThreadId !== threadId : task.threadId !== threadId)) return undefined;
@@ -161,19 +172,45 @@ export class BotRequests {
     return this.dispatch.send({ kind: 'owner', source: this.link(threadId, true) }, input, async () => ({ ceiling: 'full', returnCeiling: 'full' }));
   }
 
-  sendBot(threadId: string, input: PublicDraft, authorize: (target: RequestLink, text: string) => Promise<PermissionMode>) {
+  private checkRecipient(source: RequestLink, target: RequestLink): void {
+    const { repo } = this.options;
+    if ((target.privateBotId && target.privateBotId !== source.privateBotId) ||
+        repo.teamIdForBot(target.botId) !== repo.teamIdForBot(source.botId)) {
+      throw new RpcError(ErrorCode.threadNotFound, 'The recipient Bot is unavailable.');
+    }
+  }
+
+  sendBot(threadId: string, input: PublicDraft, authorize: RequestApproval) {
     const source = this.link(threadId, true);
     const { runner } = this.options;
     const before = runner.accessOf(threadId);
     const authorizer: AuthorizeRequest = async (_actor, target, text) => {
-      if ((target.privateBotId && target.privateBotId !== source.privateBotId) ||
-          this.options.repo.teamIdForBot(target.botId) !== this.options.repo.teamIdForBot(source.botId)) {
-        throw new RpcError(ErrorCode.threadNotFound, 'The recipient Bot is unavailable.');
-      }
+      this.checkRecipient(source, target);
       const ceiling = await authorize(target, text);
       return { ceiling, returnCeiling: ceilingMode(lowerMode(lowerMode(before, runner.accessOf(threadId)), runner.accessOf(target.threadId))) };
     };
     return this.dispatch.send({ kind: 'bot', source }, { ...input, parentRequestId: this.currentParent(threadId) }, authorizer);
+  }
+
+  private keptSource(threadId: string, turnId: string) {
+    const { runner, peerOwns } = this.options;
+    const moved = () => new RpcError(ErrorCode.moved, 'The Bot no longer has that active turn on a draining Runner.');
+    if (!peerOwns?.(threadId) || runner.threads.has(threadId)) throw moved();
+    const source = this.link(threadId, true, true);
+    if (source.groupId) throw new RpcError(ErrorCode.notAllowed, 'Group turns delegate within their Group.');
+    const input = activeBotInput(runner.store.peerLog(threadId), turnId);
+    return { source, input };
+  }
+
+  async sendKeptBot(threadId: string, turnId: string, input: PublicDraft, authorize: KeptApproval) {
+    const { source, input: savedInput } = this.keptSource(threadId, turnId);
+    const parentRequestId = this.parentFrom(threadId, savedInput, source.taskId);
+    return this.dispatch.send({ kind: 'bot', source, keptTurnId: turnId }, { ...input, parentRequestId }, async (_actor, target, text) => {
+      this.checkRecipient(source, target);
+      const { ceiling, sourceAccess } = await authorize(target, text);
+      this.keptSource(threadId, turnId);
+      return { ceiling, returnCeiling: ceilingMode(lowerMode(sourceAccess, this.options.runner.accessOf(target.threadId))) };
+    });
   }
 
   queue(threadId: string, ref: Correlation): 'allow' | 'wait' | 'drop' {

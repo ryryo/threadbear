@@ -2064,7 +2064,7 @@ shows edits, removals and the option to undo a change. Each conversation
 keeps its own messages and can reopen after the Runner restarts.
 
 The owning Runner needs its updated supervisor running before it can create a
-Bot. Its Bot controls are on the local desktop connection. The conversations
+Bot. The desktop app has the full set of Bot controls. The conversations
 use the same model, permission and approval controls as ordinary threads.
 To use one conversation's model and login for future conversations, open the
 Bot from that conversation, go to **Settings** and choose **Use this
@@ -2080,6 +2080,15 @@ conversation. Turn it on after choosing the Bot's model and login. You can
 accept, edit or reject a proposed change and review the same messages again.
 **Turn on automatic tidy** queues a tidy after you accept a change to the
 Bot's memory.
+
+You can also ask a Bot to remember a preference or decision during a
+conversation. A Bot saves the note in its own memory or in the current
+Group's memory. The change record includes the conversation that supplied it.
+
+On a paired device, open **Bots** to edit the settings and notes shared by
+the owning Runner. If another device saved a change first, the page shows
+the saved version alongside your draft. **Retry removal** checks a missing
+confirmation after a note has disappeared from the list.
 
 Ask a Bot by name to consult another Bot. Use **Requests from this
 conversation** in its header to see where the request went, open the recipient,

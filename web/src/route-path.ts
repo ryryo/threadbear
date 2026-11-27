@@ -7,7 +7,7 @@ export type RailView = 'scheduled' | 'projects' | 'runners' | 'usage';
 // one (Daybreak finding 141). An address with the id alone, from before,
 // has no runnerId, and its page says the project's gone.
 // machines: the backend's state machines (machines.tsx), for the deployment's owner.
-export type Route = { page: 'list' } | { page: 'new' } | { page: 'machines' } | { page: 'thread'; threadId: string } | { page: 'share'; slug: string } | { page: RailView; id?: string; runnerId?: string };
+export type Route = { page: 'list' } | { page: 'new' } | { page: 'machines' } | { page: 'bots' } | { page: 'thread'; threadId: string } | { page: 'share'; slug: string } | { page: RailView; id?: string; runnerId?: string };
 
 // A path part as text, or undefined for a bad % escape (/s/%zz): that's the
 // list, as decodeURIComponent throwing there stopped the app loading at all.
@@ -31,6 +31,7 @@ export function parsePath(pathname: string): Route {
     return threadId === undefined ? { page: 'list' } : { page: 'thread', threadId };
   }
   if (/^\/new\/?$/.test(pathname)) return { page: 'new' };
+  if (/^\/bots\/?$/.test(pathname)) return { page: 'bots' };
   if (/^\/machines\/?$/.test(pathname)) return { page: 'machines' };
   const p = pathname.match(/^\/projects\/([^/]+)\/([^/]+)\/?$/);
   if (p) {

@@ -203,6 +203,7 @@ export const ACCESS: Record<string, Access> = {
   appendMessages: 'own',
   messageHeads: 'own',
   setProjects: 'own',
+  setBotWorkspace: 'own',
   upsertProjects: 'own',
   projectIcons: 'own',
   iconUploadUrl: 'shared',

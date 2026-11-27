@@ -58,11 +58,11 @@ type Write = (file: string, body: string, mode: number) => void;
 export class GroupStore {
   private readonly root: string;
   private readonly repo: BotRepository;
-  private readonly protect: () => void;
+  private readonly protect: (keptDelegation?: true) => void;
   private readonly write: Write;
   private readonly books = new Map<string, GroupBook>();
 
-  constructor(root: string, repo: BotRepository, protect: () => void, write: Write = atomicWriteFileSync) {
+  constructor(root: string, repo: BotRepository, protect: (keptDelegation?: true) => void, write: Write = atomicWriteFileSync) {
     this.root = join(root, 'groups');
     this.repo = repo;
     this.protect = protect;
@@ -73,10 +73,10 @@ export class GroupStore {
     return join(this.root, bookFile(id));
   }
 
-  private save(book: GroupBook): void {
+  private save(book: GroupBook, keptDelegation?: true): void {
     const { events, ...state } = book;
     const record = { seq: (events.at(-1)?.seq ?? 0) + 1, id: book.group.id, kind: 'state', state };
-    this.protect();
+    this.protect(keptDelegation);
     this.write(this.path(book.group.id), [...events, record].map(row => JSON.stringify(row)).join('\n') + '\n', 0o600);
     this.books.set(book.group.id, book);
   }
@@ -142,10 +142,10 @@ export class GroupStore {
     return structuredClone(profile);
   }
 
-  change<T>(id: string, write: (book: GroupBook) => T): T {
+  change<T>(id: string, write: (book: GroupBook) => T, keptDelegation?: true): T {
     const book = this.get(id);
     const value = write(book);
-    this.save(book);
+    this.save(book, keptDelegation);
     return structuredClone(value);
   }
 

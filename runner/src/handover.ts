@@ -916,7 +916,7 @@ export class ThreadRouter implements ThreadControl {
   }
 
   async authorizeBotSend(threadId: string, text: string, signal?: AbortSignal): Promise<void> {
-    if (await this.authorizeSend(threadId, text, [], signal)) {
+    if (await this.authorizeSend(threadId, text, [], signal) && !(this.actor && this.runner.keeping()?.includes(this.actor))) {
       throw new RpcError(ErrorCode.notAllowed, 'Bot requests stay on their owning Runner.');
     }
   }

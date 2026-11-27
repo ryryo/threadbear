@@ -4,6 +4,7 @@
 // row once when it's back.
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
+import { botWorkspaceProjection } from './botWorkspaceValues';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2226,6 +2227,28 @@ const projectDoc = v.object({
   icon: v.optional(v.object({ symbol: v.optional(v.string()), picture: v.optional(v.string()), by: v.string() })),
 });
 
+export const setBotWorkspace = mutation({
+  args: { key: v.string(), runnerId: v.string(), startedAt: v.string(), workspace: v.union(botWorkspaceProjection, v.null()) },
+  returns: v.null(),
+  handler: async (ctx, { key, runnerId, startedAt, workspace }) => {
+    const caller = await runnerAuth(ctx, key, 'setBotWorkspace');
+    if (!mayWrite(caller, runnerId, runnerId) || await ownerFenced(ctx, caller, runnerId)) throw forbidden('mirror this Bot workspace');
+    const live = await ctx.db.query('runners').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
+    if (!live || live.box || live.startedAt !== startedAt || live.draining) throw forbidden('mirror Bots from a Runner that is no longer primary');
+    const row = await ctx.db.query('botWorkspaces').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
+    if (workspace === null) {
+      if (row) await ctx.db.delete('botWorkspaces', row._id);
+      return null;
+    }
+    if (workspace.ownerRunnerId !== runnerId || (row && row.workspace.epoch > workspace.epoch)) throw forbidden('mirror a different Bot workspace');
+    capDoc(caller, 'A Bot workspace projection', workspace, 400 * 1_024);
+    const safe = clean(workspace);
+    if (row) await ctx.db.patch('botWorkspaces', row._id, { workspace: safe });
+    else await ctx.db.insert('botWorkspaces', { runnerId, workspace: safe });
+    return null;
+  },
+});
+
 const scheduleDoc = v.object({
   id: v.string(),
   title: v.string(),
@@ -3514,7 +3537,7 @@ export const finishCommand = mutation({
     // And (API 77) a login or model change's: the login and model that
     // runner applied, which may not be the model asked for.
     const settings = c.kind === 'update' && (c.args?.accountId !== undefined || c.args?.model !== undefined);
-    let kept = ok && (c.kind === 'call' || c.kind === 'slashCommands' || c.kind === 'designReviews' || settings) && result !== undefined && utf8Bytes(result) <= RESULT_MAX_BYTES ? cleanResult(result) : undefined;
+    let kept = ok && (c.kind === 'call' || c.kind === 'slashCommands' || c.kind === 'designReviews' || c.kind === 'botProfileEdit' || c.kind === 'botDeviceAction' || settings) && result !== undefined && utf8Bytes(result) <= RESULT_MAX_BYTES ? cleanResult(result) : undefined;
     // A thread's description for the Move sheet carries its repo's address:
     // stored without whatever an older runner's scrubber left in its
     // userinfo (an ssh user that's a token), as moves:moveInfo stores it

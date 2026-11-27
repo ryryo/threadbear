@@ -29,6 +29,7 @@ import { pastedOf } from './picture-chips';
 import { Rail } from './rail';
 // Loaded only when it's opened: the viewer's diagrams are most of its size.
 const MachinesPage = lazy(() => import('./machines'));
+const BotsPage = lazy(() => import('./bots'));
 import { NewThread, ProjectPage, ProjectsList, RunnerPage, RunnersList, ScheduledList, SchedulePage, UsageList, UsagePage } from './pages';
 import { duration, fold, gapLabel, isNote, splitTurns, type Item } from './turns';
 import { folderName, sender } from './format';
@@ -45,6 +46,14 @@ export function App() {
   // A shared thread is for anyone, signed in or not.
   if (route.page === 'share') return <SharePage key={route.slug} slug={route.slug} token={token} />;
   if (!token) return <SignIn />;
+  if (route.page === 'bots')
+    return (
+      <Catch key={token}>
+        <Suspense fallback={<main className="signin"><p>Loading Bots…</p></main>}>
+          <BotsPage token={token} />
+        </Suspense>
+      </Catch>
+    );
   // The backend's state machines: a page of its own, the viewer filling it.
   if (route.page === 'machines')
     return (

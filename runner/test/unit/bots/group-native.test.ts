@@ -16,6 +16,7 @@ function fixture() {
   const root = join(home, 'bots');
   let service: BotGroups;
   let tasks: BotTaskThreads;
+  let handingOver = false;
   const h = makeHarness(home, {}, {
     botContext: rec => {
       if (rec.botLink?.taskId) tasks.active(rec);
@@ -36,13 +37,16 @@ function fixture() {
     groupActive: task => service.taskActive(task), groupReply: task => service.taskReply(task),
   });
   const restore = () => service = new BotGroups({
-    runner: h.runner, owns: () => true, store: new GroupStore(root, repo, () => {}), otherActive: () => journal.activeCount(),
+    runner: h.runner, owns: () => true, store: new GroupStore(root, repo, kept => {
+      if (handingOver && !kept) throw new Error('Wait for the Runner to finish handing over.');
+    }), otherActive: () => journal.activeCount(),
     tasks: (id, roundId) => tasks.groupTasks(id, roundId), stopTasks: (id, threadIds) => tasks.stopGroup(id, threadIds),
   });
   const groups = restore();
   const draft = { teamId: repo.workspaceId(), adminId: chief.id, memberIds: [chief.id, writer.id, tester.id] };
   const group = groups.create({ ...draft, title: 'Desk' });
-  return { h, chief, writer, tester, group, draft, restore, tasks, journal, service: () => service };
+  return { h, chief, writer, tester, group, draft, restore, tasks, journal, service: () => service,
+    handover: (waiting: boolean) => { handingOver = waiting; } };
 }
 
 function finish(session: FakeSession, reply: string) {
@@ -199,6 +203,29 @@ test('native Tasks belong to the originating Group call, with a saved result or 
       assert.deepEqual(groups.result(group.id, rows[0].seq), { text: '見出し案を保存しました。', whole: true });
     }
   }
+});
+
+test('the primary accepts delegated work from the same kept Group turn once', async () => {
+  const { h, group, writer, service, handover } = fixture();
+  const groups = service();
+  groups.post(group.id, 'first', 'Draft a title');
+  await tick();
+  const editor = h.adapter.last;
+  editor.init();
+  const source = h.runner.threads.get(editor.opts.threadId)!;
+  const turnId = source.rt.turn!.turnId;
+  handover(true);
+  assert.throws(() => groups.stop(group.id), /finish handing over/);
+  assert.throws(() => groups.delegateKept(source.rec, 'wrong-turn', 'kept', [writer.id], 'Draft'), /cannot delegate/);
+  const first = groups.delegateKept(source.rec, turnId, 'kept', [writer.id], 'Draft');
+  const retry = groups.delegateKept(source.rec, turnId, 'kept', [writer.id], 'Draft');
+  assert.deepEqual(retry, first);
+  assert.equal(groups.read(group.id).events.filter(row => row.kind === 'batch').length, 1);
+  assert.equal(h.adapter.sessions.length, 1);
+  handover(false);
+  groups.recover();
+  await tick();
+  assert.equal(h.adapter.sessions.length, 2);
 });
 
 test('Group calls and background tasks use the same four slots', () => {

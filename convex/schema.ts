@@ -6,6 +6,7 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
+import { botWorkspaceProjection } from './botWorkspaceValues';
 import { machineTimers } from '@convex-dev/state-machines';
 import { commandStateV } from './commandStates';
 import { moveStateV } from './moveStates';
@@ -47,6 +48,9 @@ export const usagePool = v.object({ id: v.string(), title: v.string(), accountId
 
 export const threadFields = {
   threadId: v.string(),
+  botLink: v.optional(v.object({
+    botId: v.string(), conversationId: v.string(), taskId: v.optional(v.string()), groupId: v.optional(v.string()),
+  })),
   runnerId: v.string(),
   title: v.string(),
   cwd: v.string(),
@@ -811,12 +815,17 @@ export const appSchema = defineSchema({
   // What the phone asks a runner to do (step 3). The owning runner takes
   // pending ones for its runnerId (or "any"), applies them through the
   // same code the Mac app uses, and marks them done or failed.
+  botWorkspaces: defineTable({
+    runnerId: v.string(),
+    workspace: botWorkspaceProjection,
+  }).index('by_runnerId', ['runnerId']),
+
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),
     // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
     // save only from the backend, for a thread's box before it sleeps (boxService.ts askToSave).
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture'), v.literal('press'), v.literal('slashCommands'), v.literal('designReviews'), v.literal('respondReview'), v.literal('save')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture'), v.literal('press'), v.literal('slashCommands'), v.literal('designReviews'), v.literal('respondReview'), v.literal('save'), v.literal('botProfileEdit'), v.literal('botDeviceAction')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     // The same, as its state machine has it (commandMachine.ts), which writes

@@ -282,3 +282,48 @@ conversation if the user opens another one. When the configured Bot or
 Group is archived, the schedule cannot create or start work. Pause and
 delete withdraw pending inputs. A turn that has already started can be
 stopped separately in its Thread or Group.
+
+### Connected devices
+
+A capable backend can mirror the owning Runner's public Bot profiles, approved
+Bot and Group notes, Group history previews, and the status of requests and
+background tasks. The owning Runner removes Private Bot records before sending
+the view. It withdraws the earlier public profile before making a Bot private
+on a backend that can mirror Bot workspaces.
+
+An edit names its workspace, owner epoch, Bot ID, base revision and operation
+ID. The backend queues it through the ordinary command lifecycle. Only the
+owning primary Runner can apply it. The profile and its acceptance receipt
+are saved together. A retry with the same operation ID can read that receipt.
+A conflict returns the saved profile and the submitted draft. Editing in a
+connected browser or app keeps the draft until the owner settles it.
+
+Backend API 106 and Bot storage format 8 add device editing. A Bot Thread
+row sent to that backend carries `botLink` with its existing Bot,
+conversation, and optional task and Group IDs. Older backends receive
+the usual Thread row. Private Bot threads and their links stay local.
+
+The same device command queue accepts a note change at its memory
+revision, a Group message under a stable operation ID, and a stop at
+the Task revision. The owning Runner checks that the target still
+belongs to the visible workspace before doing the work. Completion and
+conflict are sent in the command's result. A kept Group turn can call
+members through the new primary after a restart. The primary checks
+the saved turn and Group call before accepting the operation. It
+records the batch on the primary immediately and starts the queued
+Group work when the handover clears. While a draining Runner still has a recipient conversation, its saved
+completion can settle the request on the primary. Only a Thread kept by
+a connected handover peer is eligible. The primary reads complete
+journal lines without editing that Thread, and the existing result ID
+keeps delivery repeatable across a duplicate notice or later adoption.
+If the source is also still on the old Runner, delivery waits for its
+handover.
+
+`bot_remember` saves a note to the calling Bot's own memory, or to the
+current Group's memory during a Group turn. The Runner resolves the scope
+from the conversation and records the Bot, Thread, turn and input event.
+During a handover the old Runner forwards the same operation ID to the
+primary, which verifies the peer's active turn and saves the change in
+the scope's existing journal. It returns the stored receipt for a retry
+of that operation. If it cannot reach the primary, the old Runner does
+not write a copy.

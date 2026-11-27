@@ -7,6 +7,9 @@ export type MemoryChange = {
   after?: string;
   restored?: string;
   sourceThreadId?: string;
+  sourceTurnId?: string;
+  sourceSeq?: number;
+  actor?: string;
   review?: ReviewReceipt;
 };
 
@@ -16,6 +19,7 @@ export type ScopeChange = { op: 'add'; text: string; until?: string }
   | { op: 'edit'; entryId: string; text: string }
   | { op: 'remove'; entryId: string }
   | { op: 'restore'; changeId: string };
+type BotNoteSource = { actor: string; sourceThreadId: string; sourceTurnId: string; sourceSeq: number; pin: boolean };
 type TidyEntry = { text: string; file: { topic?: string }; meta: { added?: string } };
 export type TidyCounts = { merged: number; moved: number; retired: number };
 type TidyInput = { revision: string; numbered: TidyEntry[]; ended: TidyEntry[] };
@@ -31,7 +35,7 @@ export class PersonalMemory {
   replace(id: string, text: string, time: string): MemoryNote;
   remove(id: string, time: string): void;
   restore(id: string, time: string): void;
-  change(mutation: ScopeChange, operationId: string, expectedRevision: string, time: string): { revision: string; note?: MemoryNote };
+  change(mutation: ScopeChange, operationId: string, expectedRevision: string, time: string, source?: BotNoteSource): { revision: string; note?: MemoryNote };
   tidyInput(today: string): TidyInput | undefined;
   tidy(input: TidyInput, reply: string, operationId: string, time: string): { revision: string; counts: TidyCounts };
   tidyResult(operationId: string): { revision: string; counts: TidyCounts } | undefined;

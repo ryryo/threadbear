@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createServer } from 'node:net';
+import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpDir } from '../helpers/fakes.ts';
@@ -284,6 +286,131 @@ test('a managed Bot request keeps its full result and receipt after a Runner res
     }
     run.proc.kill('SIGTERM');
     assert.equal(await run.exited, 0);
+  } finally {
+    if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
+  }
+});
+
+test('a supervised handover keeps a running Bot request and the new primary reads its reply once', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  configureBotFixture(home);
+  const gate = path.join(home, 'reply-ready');
+  const fake = installBotFixtureCli(home, gate);
+  const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_RESTART_MS: '50', THREADBEAR_LOG_STDERR: '1' });
+  try {
+    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    try {
+      const { bot: editor } = await c.call('bots.create', { name: '編集者' });
+      const { bot: writer } = await c.call('bots.create', { name: 'ライター' });
+      const { conversation: source } = await c.call('bots.conversations.create', { botId: editor.id, operationId: 'source' });
+      const { conversation: target } = await c.call('bots.conversations.create', { botId: writer.id, operationId: 'target' });
+      const params = { threadId: source.threadId, botId: writer.id, name: 'handed-over', text: '見出しを提案してください。', when: 'queue' };
+      const accepted = await c.call('bots.requests.send', params);
+      const read = { threadId: source.threadId, requestId: accepted.requestId };
+      await patiently(() => fs.existsSync(gate + '.waiting'));
+      assert.ok(fs.existsSync(gate + '.waiting'), 'the fixture CLI received the request and is still waiting to reply');
+      const restart = await c.call('runner.restart', { when: 'idle', reason: 'Isolated Bot handover verification' });
+      assert.ok(restart.handover?.keeps.includes(target.threadId));
+      const { c: primary } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      try {
+        const status = await primary.call('runner.status');
+        assert.ok(status.draining?.some((peer: { threads: string[] }) => peer.threads.includes(target.threadId)), 'the new primary should see the old process keeping the receiving thread');
+        assert.equal((await primary.call('bots.requests.get', read)).result, undefined);
+        fs.writeFileSync(gate, '');
+        const requests = path.join(home, 'bots', 'requests.json');
+        await patiently(() => fs.readFileSync(requests, 'utf8').includes('"status":"returned"'));
+        const reply = (await primary.call('bots.requests.get', read)).result;
+        assert.ok(reply?.whole && reply.text === BOT_FIXTURE_REPLY);
+        assert.deepEqual(await primary.call('bots.requests.send', params), accepted);
+        const { events } = await primary.call('threads.events', { threadId: target.threadId, limit: 100 });
+        assert.equal(events.filter((event: { type: string; text?: string }) => event.type === 'user.message' && event.text === params.text).length, 1);
+      } finally {
+        primary.close();
+      }
+    } finally {
+      c.close();
+    }
+    run.proc.kill('SIGTERM');
+    assert.equal(await run.exited, 0);
+  } catch (error) {
+    throw new Error(`Isolated Bot handover failed:\n${run.out()}`, { cause: error });
+  } finally {
+    if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
+  }
+});
+
+test('a kept Bot uses its original tools to save a note and send a new request through the primary', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpDir();
+  const id = '20261127T000000Z-abc1234';
+  makeRelease(home, id);
+  const launch = installLaunch(home, id);
+  const socket = createServer().listen(0, '127.0.0.1');
+  await once(socket, 'listening');
+  const address = socket.address();
+  assert.ok(address && typeof address === 'object');
+  const { port } = address;
+  await new Promise<void>((resolve, reject) => socket.close(error => error ? reject(error) : resolve()));
+  configureBotFixture(home, port);
+  const gate = path.join(home, 'handover-tools');
+  const trigger = 'Use the tools after the handover';
+  const note = { name: 'bot_remember', arguments: { operationId: 'edit-style', text: '見出しは短くする' } };
+  const request = { name: 'message_bot', arguments: {
+    bot: 'Writer', request: 'handover-edit', text: '見出し案を一つください。', when: 'queue',
+  } };
+  const fake = installBotFixtureCli(home, gate, { trigger, calls: [note, note, request, request] });
+  const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_PORT: String(port), THREADBEAR_LOG_STDERR: '1' });
+  try {
+    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    try {
+      const { bot: editor } = await c.call('bots.create', { name: 'Editor' });
+      const { bot: writer } = await c.call('bots.create', { name: 'Writer' });
+      const { conversation: source } = await c.call('bots.conversations.create', { botId: editor.id, operationId: 'source' });
+      const { conversation: target } = await c.call('bots.conversations.create', { botId: writer.id, operationId: 'target' });
+      for (const threadId of [source.threadId, target.threadId]) await c.call('threads.update', { threadId, permissionMode: 'full' });
+      await c.call('threads.send', { threadId: source.threadId, text: trigger });
+      await patiently(() => fs.existsSync(gate + '.waiting'));
+      assert.ok(fs.existsSync(gate + '.waiting'), 'the kept CLI should hold its original tool bindings');
+      const restart = await c.call('runner.restart', { when: 'idle', reason: 'Isolated Bot tools handover' });
+      assert.ok(restart.handover?.keeps.includes(source.threadId));
+      const { c: primary } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      try {
+        const status = await primary.call('runner.status');
+        assert.ok(status.draining?.some((peer: { threads: string[] }) => peer.threads.includes(source.threadId)));
+        fs.writeFileSync(gate, '');
+        await patiently(() => fs.existsSync(gate + '.tools-result'));
+        assert.ok(fs.existsSync(gate + '.tools-result'), 'the old CLI should get all tool responses');
+        const responses: { response?: { mcp_response?: { result?: { content?: { text: string }[]; isError?: boolean } } } }[] =
+          JSON.parse(fs.readFileSync(gate + '.tools-result', 'utf8'));
+        const results = responses.map(reply => reply.response?.mcp_response?.result);
+        assert.ok(results.every(result => result && !result.isError), JSON.stringify(responses));
+        const texts = results.map(result => result!.content?.[0]?.text);
+        assert.match(texts[0] ?? '', /Saved note/);
+        assert.equal(texts[0], texts[1]);
+        assert.match(texts[2] ?? '', /Request /);
+        assert.equal(texts[2], texts[3]);
+        const { notes } = await primary.call('bots.memory.read', { botId: editor.id, threadId: source.threadId });
+        assert.deepEqual(notes.map((note: { text: string }) => note.text), ['見出しは短くする']);
+        const requests = path.join(home, 'bots', 'requests.json');
+        await patiently(() => fs.readFileSync(requests, 'utf8').includes('"status":"returned"'));
+        const { requests: rows } = await primary.call('bots.requests.list', { threadId: source.threadId });
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].state.status, 'returned');
+        const { events } = await primary.call('threads.events', { threadId: target.threadId, limit: 100 });
+        assert.equal(events.filter((event: { type: string; text?: string }) =>
+          event.type === 'user.message' && event.text === request.arguments.text).length, 1);
+      } finally {
+        primary.close();
+      }
+    } finally {
+      c.close();
+    }
+    run.proc.kill('SIGTERM');
+    assert.equal(await run.exited, 0);
+  } catch (error) {
+    throw new Error(`Isolated Bot tools handover failed:\n${run.out()}`, { cause: error });
   } finally {
     if (run.proc.exitCode === null && run.proc.signalCode === null) run.proc.kill('SIGTERM');
   }

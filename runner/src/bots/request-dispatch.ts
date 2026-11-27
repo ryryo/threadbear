@@ -4,7 +4,7 @@ import type { DeliveryReceipt, RequestReceipts } from './request-receipts.ts';
 import type { RequestRow, RequestStateStore } from './request-state.ts';
 
 export type RequestLink = { botId: string; threadId: string; conversationId: string; privateBotId?: string };
-export type RequestActor = { kind: 'owner'; source: RequestLink } | { kind: 'bot'; source: RequestLink };
+export type RequestActor = { kind: 'owner'; source: RequestLink } | { kind: 'bot'; source: RequestLink; keptTurnId?: string };
 export type RequestDraft = { to: string; conversationId?: string; name: string; text: string; when: 'queue' | 'now'; parentRequestId?: string; rerunOf?: string };
 type Dispatch = (row: RequestRow, text: string, actor: RequestActor) => Pick<DeliveryReceipt, 'turnId' | 'when'>;
 type Ports = {

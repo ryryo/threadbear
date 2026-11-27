@@ -85,6 +85,11 @@ import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { checkBotDataFormat, supervisorGuardsBotData } from './bots/format.ts';
 import { BOT_EXPERIMENT, BotRuntime } from './bots/runtime.ts';
+import { keptGroupCall } from './bots/group-rpc.ts';
+import { acceptKeptBotRequest, BotRequestHandover } from './bots/request-handover.ts';
+import type { PublicDraft, RequestApproval } from './bots/request-service.ts';
+import { keptRemember, type RememberInput } from './bots/memory-tool.ts';
+import { method as botMethod } from './bots/rpc.ts';
 import { botConversationSchedules, botScheduleMethods } from './bots/schedule-rpc.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
@@ -456,12 +461,43 @@ async function main(): Promise<void> {
     const s = experimentOn(cfg.home, ARCHIVE_EXPERIMENT) && !bots.hasPrivateBots() ? archiveMcpServer() : undefined;
     return s ? { [ARCHIVE_MCP_NAME]: s } : {};
   };
+  const botRequestHandover = new BotRequestHandover();
+  const memoryTool = (threadId: string) => {
+    const link = runner.threads.get(threadId)?.rec.botLink;
+    if (box || !link || link.taskId || !experimentOn(cfg.home, BOT_EXPERIMENT)) return undefined;
+    return async (input: RememberInput) => {
+      const turnId = runner.threads.get(threadId)?.rt.turn?.turnId;
+      if (!turnId) throw new RpcError(ErrorCode.moved, 'The Bot no longer has that active turn.');
+      if (!draining) return bots.rememberFromTurn(threadId, turnId, input);
+      if (!primaryLink || !runner.keeping()?.includes(threadId)) throw new RpcError(ErrorCode.busy, 'The primary Runner is not ready to save Bot notes.');
+      return primaryLink.call<ReturnType<BotRuntime['rememberFromTurn']>>('drain.bots.remember', { threadId, turnId, input });
+    };
+  };
   const requestTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
-    return bots.requestsAvailable() && link && !link.groupId ? bots.requests() : undefined;
+    return bots.requestsAvailable() && link && !link.groupId ? {
+      sendBot: (id: string, input: PublicDraft, authorize: RequestApproval) => {
+        if (!draining) return bots.requests().sendBot(id, input, authorize);
+        const turnId = runner.threads.get(id)?.rt.turn?.turnId;
+        if (!primaryLink || !turnId || !runner.keeping()?.includes(id)) {
+          throw new RpcError(ErrorCode.busy, 'The primary Runner is not ready to take Bot requests.');
+        }
+        return botRequestHandover.send(primaryLink, id, turnId, input, authorize, () => {
+          if (runner.threads.get(id)?.rt.turn?.turnId !== turnId) throw new RpcError(ErrorCode.moved, 'The kept Bot turn has ended.');
+          return runner.accessOf(id);
+        });
+      },
+    } : undefined;
   };
   const groupTools = (threadId: string) => bots.groupsAvailable() && runner.threads.get(threadId)?.rec.botLink?.groupId
-    ? bots.groups() : undefined;
+    ? { delegate: async (id: string, operationId: string, members: string[], note: string) => {
+        if (!draining) return bots.groups().delegate(id, operationId, members, note);
+        const turn = runner.threads.get(id)?.rt.turn;
+        if (!primaryLink || !turn) throw new RpcError(ErrorCode.busy, 'The primary Runner is not ready to take Group calls.');
+        return primaryLink.call<{ key: string; count: number }>('drain.bots.delegate', {
+          threadId: id, turnId: turn.turnId, operationId, members, note,
+        });
+      } } : undefined;
   const taskTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
     return bots.tasksAvailable() && link && !link.taskId ? bots.tasks() : undefined;
@@ -480,7 +516,7 @@ async function main(): Promise<void> {
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
-        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId), teamTools(threadId), groupTools(threadId)),
+        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId), teamTools(threadId), groupTools(threadId), memoryTool(threadId)),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -502,6 +538,7 @@ async function main(): Promise<void> {
       botTasks: taskTools(threadId),
       botTeams: teamTools(threadId),
       botGroups: groupTools(threadId),
+      botMemory: memoryTool(threadId),
     });
   };
   // One app-server per live Codex thread, each starting what E says is
@@ -568,7 +605,12 @@ async function main(): Promise<void> {
     guarded: () => supervisorGuardsBotData(cfg.home),
     owns: () => !box && !draining,
     canChangePrivacy: () => !draining && peers.status().length === 0,
+    peerOwns: id => peers.owns(id),
     archiveExporting: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT),
+    withdrawDeviceProfile: async id => {
+      if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json'))) return sync.withdrawBotProfile(id);
+      return () => {};
+    },
     withdrawShared: async ids => {
       if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json')) || fs.existsSync(path.join(cfg.home, 'sync-sent.json'))) {
         await sync.removeForBotPrivacy(ids);
@@ -673,7 +715,10 @@ async function main(): Promise<void> {
       publish: (n) => runner.publish(n),
     },
     usage: (accountId, reading) => usage.record(accountId, reading),
-    onChange: () => publishUpdates(),
+    onChange: () => {
+      publishUpdates();
+      bots.reconcileGroups();
+    },
     sweep: async (pid) => {
       const theirs = new ProcessRegistry(paths.run(cfg.home), log, drainChildrenName(pid));
       const n = await theirs.sweepOrphans();
@@ -1005,8 +1050,17 @@ async function main(): Promise<void> {
     },
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.
+    ...(box ? {} : {
+      botWorkspace: (scrub: (text: string) => string, excluded?: ReadonlySet<string>) => {
+        if (!bots.devicesAvailable()) return null;
+        const workspace = bots.devices().snapshot(scrub, excluded);
+        return workspace.profiles.length ? workspace : null;
+      },
+    }),
     commands: {
       ...phoneCommands(runner, peers, requireMirrorThread),
+      botProfileEdit: (input, scrub) => bots.devices().edit(input, scrub),
+      botDeviceAction: (input, scrub) => bots.applyDeviceAction(input, scrub),
       // A schedule's own runner gets its command, so the scheduler here is its.
       // Mike's, from his phone: resuming lifts a schedule's ceiling, as from the
       // app (schedules.ts, "Ceilings").
@@ -1431,6 +1485,19 @@ async function main(): Promise<void> {
   });
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...coordinatorMethods(coordinators), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...recipeMethods(recipes), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }), ...archiveMethods(agentArchive) };
   Object.assign(methods, bots.methods, botScheduleMethods(scheduler, () => bots.botSchedulesAvailable(), () => bots.scheduledTargets()));
+  Object.assign(methods, {
+    'drain.bots.request': acceptKeptBotRequest(() => bots.requests(), peers.call.bind(peers)),
+    'drain.bots.remember': botMethod(keptRemember, ({ threadId, turnId, input }) => bots.rememberFromTurn(threadId, turnId, input, true)),
+  });
+  Object.assign(methods, { 'drain.bots.delegate': (input: Record<string, unknown>) => {
+    const parsed = keptGroupCall.safeParse(input);
+    if (!parsed.success) throw new RpcError(ErrorCode.badParams, 'Invalid saved Group call.');
+    const { threadId, turnId, operationId, members, note } = parsed.data;
+    if (!peers.owns(threadId)) throw new RpcError(ErrorCode.notAllowed, 'That Thread is not kept by a draining Runner.');
+    const rec = runner.store.load(threadId);
+    if (!rec) throw new RpcError(ErrorCode.threadNotFound, 'The saved Group Thread is unavailable.');
+    return bots.groups().delegateKept(rec, turnId, operationId, members, note);
+  } });
   const updateSettings = methods['settings.update'];
   methods['settings.update'] = p => {
     if ((p.experiments as Record<string, unknown> | undefined)?.[ARCHIVE_EXPERIMENT] === true && bots.hasPrivateBots()) {
@@ -2138,6 +2205,7 @@ async function main(): Promise<void> {
         callerOf: (sock) => threadOfSocket(sock, { registry, known: (id) => runner.has(id), log, own, keyOf: (id) => makeThreadKey(token, id) }),
         methods: {
           ...scheduledSendMethods(runner),
+          'drain.bots.authorizeRequest': botRequestHandover.authorize,
           'drain.hello': () => {
             primaryHeard = true;
             // After this answer, so the primary has subscribed first.

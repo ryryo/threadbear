@@ -289,7 +289,9 @@ export type Harness = {
   restart(): Harness;
 };
 
-export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, depsExtra: Partial<RunnerDeps> = {}): Harness {
+export function makeHarness(
+  home = tmpDir(), cfgExtra: Partial<Config> = {}, depsExtra: Partial<RunnerDeps> = {}, start?: Parameters<Runner['start']>[0],
+): Harness {
   ensureHome(home);
   const cfg = testConfig(home, cfgExtra);
   const clock = new FakeClock();
@@ -325,7 +327,7 @@ export function makeHarness(home = tmpDir(), cfgExtra: Partial<Config> = {}, dep
   });
   const notes: Notification[] = [];
   runner.onNotification((n) => notes.push(n));
-  runner.start();
+  runner.start(start);
   return {
     home,
     cfg,

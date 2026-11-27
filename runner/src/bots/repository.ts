@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -24,6 +24,8 @@ const bot = z.looseObject({
   tidyEnabled: z.boolean().optional(),
   privacy: z.object({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
 });
+const deviceProfile = bot.pick({ id: true, name: true, role: true, instructions: true, revision: true });
+const profileReceipt = z.object({ id: botOperationId, fingerprint: z.string(), bot: deviceProfile });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
 });
@@ -32,6 +34,7 @@ const state = z.looseObject({
   workspaceId: id, ownerRunnerId: z.string().min(1), ownerEpoch: revision, formatVersion: z.literal(1),
   bots: z.array(bot), conversations: z.array(conversation), pendingConversations: z.array(pendingConversation),
   teams: z.array(teamRecord).optional(),
+  profileReceipts: z.array(profileReceipt).optional(),
   reviewOperations: z.array(z.object({ id: botOperationId, enabled: z.boolean(), setting: z.enum(['reviewEnabled', 'tidyEnabled']).optional(), bot })).optional(),
 });
 export type Bot = z.infer<typeof bot>;
@@ -100,6 +103,11 @@ export class BotRepository {
   }
 
   workspaceId(): string { return this.current.workspaceId; }
+
+  workspaceIdentity(): { workspaceId: string; ownerRunnerId: string; epoch: number } {
+    const { workspaceId, ownerRunnerId, ownerEpoch } = this.current;
+    return { workspaceId, ownerRunnerId, epoch: ownerEpoch };
+  }
 
   get(id: string): Bot {
     const entry = this.current.bots.find(item => item.id === id);
@@ -250,6 +258,36 @@ export class BotRepository {
 
   update(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
     return this.saveBot(this.editProfile(id, expectedRevision, settings));
+  }
+
+  updateWithReceipt(
+    id: string, expectedRevision: number, draft: Partial<BotSettings>, operationId: string,
+    protect?: () => void,
+  ): { outcome: 'saved'; bot: z.output<typeof deviceProfile> } |
+     { outcome: 'conflict'; current: z.output<typeof deviceProfile>; draft: Partial<BotSettings> } {
+    botOperationId.parse(operationId);
+    const current = this.get(id);
+    if (current.privacy || current.archivedAt) throw new Error('This Bot is not editable from a connected device.');
+    const fingerprint = createHash('sha256').update(JSON.stringify([
+      id, expectedRevision, draft.name, draft.role, draft.instructions,
+    ])).digest('hex');
+    const all = this.current.profileReceipts ?? [];
+    const known = all.find(receipt => receipt.id === operationId);
+    if (known) {
+      if (known.fingerprint !== fingerprint) throw new Error('That operation ID belongs to a different edit.');
+      return { outcome: 'saved', bot: structuredClone(known.bot) };
+    }
+    if (current.revision !== expectedRevision) return { outcome: 'conflict', current: deviceProfile.parse(current), draft };
+    const entry = this.editProfile(id, expectedRevision, draft);
+    entry.revision++;
+    const profile = deviceProfile.parse(entry);
+    protect?.();
+    this.save({
+      ...this.current,
+      bots: this.current.bots.map(item => item.id === id ? entry : item),
+      profileReceipts: [...all, { id: operationId, fingerprint, bot: profile }],
+    });
+    return { outcome: 'saved', bot: profile };
   }
 
   private editProfile(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {

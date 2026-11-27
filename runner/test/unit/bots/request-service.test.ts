@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotConversations } from '../../../src/bots/conversations.ts';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotRequests } from '../../../src/bots/request-service.ts';
+import { BotRuntime } from '../../../src/bots/runtime.ts';
+import { acceptKeptBotRequest, BotRequestHandover } from '../../../src/bots/request-handover.ts';
 import { makeHarness, tick, tmpDir } from '../../helpers/fakes.ts';
 import { buildThreadbearTools } from '../../../src/threadbear-mcp.ts';
-import { ThreadRouter } from '../../../src/handover.ts';
+import { PrimaryLink, ThreadRouter } from '../../../src/handover.ts';
 import { botRequestMethods } from '../../../src/bots/rpc.ts';
 import { CallerGate } from '../../../src/rpc-gate.ts';
 import { RpcServer } from '../../../src/rpc.ts';
@@ -69,6 +72,141 @@ test('a delegated result goes once to the originating Bot conversation and keeps
 });
 
 
+test('the primary returns a saved reply from a kept Bot recipient exactly once', async t => {
+  const fixture = setup();
+  const { h: old, source, target, writer, requests } = fixture;
+  const accepted = await requests.sendBot(source.threadId, {
+    to: writer.id, text: 'Check the heading', name: 'kept-reply', when: 'queue',
+  }, async () => 'full');
+  await tick();
+  const keptSession = old.adapter.last;
+  keptSession.init();
+  const root = join(old.home, 'bots');
+  let current: BotRequests;
+  const next = makeHarness(old.home, {}, {
+    botContext: rec => fixture.conversations.context(rec),
+    botRequestQueue: (id, ref) => current.queue(id, ref),
+  }, { skip: new Set([target.threadId]) });
+  old.runner.threads.delete(source.threadId);
+  assert.ok(!next.runner.threads.has(target.threadId));
+  // Even if the primary had opened an earlier copy of the log, the completed
+  // output is read from the live peer's saved events.
+  next.store.log(target.threadId);
+  let kept = false;
+  const peerOwns = (id: string) => kept && id === target.threadId;
+  current = new BotRequests({
+    root, runner: next.runner, repo: new BotRepository(root, 'runner'),
+    owns: () => true, protect: () => {}, warn: () => assert.fail('The kept result could not be reconciled'),
+    peerOwns,
+  });
+  const runtime = new BotRuntime({
+    home: old.home, runner: () => next.runner, owner: () => 'runner',
+    enabled: () => true, owns: () => true, guarded: () => true, peerOwns,
+  });
+  t.mock.method(runtime, 'requestsAvailable', () => true);
+  t.mock.method(runtime, 'requests', () => current);
+  runtime.startRequests();
+  t.after(() => runtime.stopRequests());
+  const text = '日本語の確定した見出し案。'.repeat(360);
+  keptSession.text('answer', text);
+  keptSession.result();
+  await tick();
+  const log = old.store.log(target.threadId).file;
+  appendFileSync(log, '{"seq":');
+  const before = readFileSync(log);
+  const completion = old.notes.find(n => n.method === 'thread.event' && n.params.threadId === target.threadId &&
+    n.params.event.type === 'turn.completed');
+  assert.ok(completion);
+  next.runner.publish(completion);
+  await tick();
+  assert.equal(current.ownerRead(source.threadId, accepted.requestId).result, undefined);
+  kept = true;
+  next.runner.publish(completion);
+  await tick();
+  const result = current.ownerRead(source.threadId, accepted.requestId).result;
+  assert.ok(result?.whole, 'the primary should read the complete reply');
+  assert.equal(result.text === text, true, 'the original Japanese reply should stay intact');
+  assert.deepEqual(readFileSync(log), before, 'the primary must not trim a peer’s partial append');
+  next.runner.publish(completion);
+  await tick();
+  const messages = next.store.log(source.threadId).read(1, next.store.log(source.threadId).lastSeq);
+  assert.equal(messages.filter(event => event.type === 'user.message' && event.botInput?.request?.role === 'result').length, 1);
+});
+
+test('a kept Bot source authorizes and records a request on the new primary, then receives its reply after adoption', async t => {
+  const { h: old, source, target, writer, conversations } = setup();
+  const root = join(old.home, 'bots');
+  old.runner.update({ threadId: source.threadId, permissionMode: 'ask' });
+  old.runner.send(source.threadId, 'Prepare a heading');
+  await tick();
+  const sourceSession = old.adapter.last;
+  sourceSession.init();
+  const turnId = old.runner.threads.get(source.threadId)!.rt.turn!.turnId;
+  let current: BotRequests;
+  const next = makeHarness(old.home, {}, {
+    botContext: rec => conversations.context(rec),
+    botRequestQueue: (id, ref) => current.queue(id, ref),
+  }, { skip: new Set([source.threadId]) });
+  let kept = true;
+  current = new BotRequests({
+    root, runner: next.runner, repo: new BotRepository(root, 'runner'),
+    owns: () => true, protect: () => {}, warn: () => assert.fail('Could not reconcile the request'),
+    peerOwns: id => kept && id === source.threadId,
+  });
+  const draft = { to: writer.id, text: '見出し案をください。', name: 'new-on-primary', when: 'queue' as const };
+  let checks = 0;
+  const authorize = async (destination: { threadId: string }, text: string) => {
+    checks++;
+    assert.equal(destination.threadId, target.threadId);
+    assert.equal(text, draft.text);
+    return 'full' as const;
+  };
+  const bridge = new BotRequestHandover();
+  const token = 'isolated-bot-owner';
+  const drain = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: old.runner, log: nullLogger, onlyOwn: true,
+    gate: new CallerGate({ runner: old.runner }), methods: { 'drain.bots.authorizeRequest': bridge.authorize } });
+  const oldAddress = await drain.listen();
+  const peer = await RunnerClient.connect(`ws://127.0.0.1:${oldAddress.port}/rpc`, token, { server: 'drain' });
+  const primary = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: next.runner, log: nullLogger,
+    gate: new CallerGate({ runner: next.runner }),
+    methods: { 'drain.bots.request': acceptKeptBotRequest(() => current, (_id, method, params) => peer.call(method, params)) } });
+  const primaryAddress = await primary.listen();
+  const main = new PrimaryLink('127.0.0.1', primaryAddress.port, token);
+  t.after(async () => {
+    main.close();
+    peer.close();
+    await Promise.all([primary.close(), drain.close()]);
+  });
+  const route = (turn: string, approve = authorize) => bridge.send(main, source.threadId, turn, draft, approve, () => 'ask');
+  await assert.rejects(route('wrong-turn'), /active turn/);
+  await assert.rejects(route(turnId, async () => { throw new Error('Owner declined the request'); }), /Owner declined/);
+  assert.equal(next.adapter.sessions.length, 0);
+  const receipt = await route(turnId);
+  assert.deepEqual(await route(turnId), receipt);
+  assert.equal(checks, 1);
+  await tick();
+  const targetSession = next.adapter.last;
+  assert.equal(targetSession.sent.length, 1);
+  targetSession.init();
+  targetSession.text('answer', '新しい見出し');
+  targetSession.result();
+  await tick();
+  current.recover();
+  assert.equal(sourceSession.sent.length, 1);
+  sourceSession.result();
+  await tick();
+  kept = false;
+  next.runner.adopt(source.threadId);
+  current.recover();
+  await tick();
+  current.recover();
+  assert.equal(current.ownerRead(source.threadId, receipt.requestId).row.state.status, 'returned');
+  const journal = next.store.log(source.threadId);
+  const results = journal.read(1, journal.lastSeq).filter(event => event.type === 'user.message' &&
+    event.botInput?.request?.id === receipt.requestId && event.botInput.request.role === 'result');
+  assert.equal(results.length, 1);
+});
+
 function setup() {
   const home = tmpDir();
   const root = join(home, 'bots');
@@ -103,6 +241,8 @@ test('only the owner uses request RPCs and a JSON caller cannot insert a Bot req
   t.after(async () => { owner.close(); agent.close(); await server.close(); });
   const params = { threadId: source.threadId, botId: writer.id, name: 'a', text: 'Summarize this', when: 'queue' };
   await assert.rejects(agent.call('bots.requests.send', params), /owner/);
+  await assert.rejects(agent.call('drain.bots.request', params), /owner/);
+  await assert.rejects(agent.call('drain.bots.authorizeRequest', params), /owner/);
   const receipt = await owner.call<{ requestId: string }>('bots.requests.send', params);
   await tick();
   await assert.rejects(agent.call('bots.requests.list', { threadId: source.threadId }), /owner/);

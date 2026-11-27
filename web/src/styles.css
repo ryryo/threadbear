@@ -595,3 +595,10 @@ a.lab-review-head:hover { color: var(--muted); }
   flex: 1;
   min-height: 0;
 }
+
+.bot-device-page { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
+.bot-device-profile + .bot-device-profile { border-top: 1px solid currentColor; margin-top: 1.5rem; }
+.bot-device-profile form, .bot-device-profile label { display: grid; gap: .4rem; }
+.bot-device-profile form { gap: .75rem; }
+.bot-device-profile input, .bot-device-profile textarea { width: 100%; font: inherit; padding: .45rem; }
+.bot-device-profile button { justify-self: start; }

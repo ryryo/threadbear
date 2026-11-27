@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { ErrorCode, RpcError, type PermissionMode } from '../protocol.ts';
 import { raises } from '../access.ts';
 import type { Runner } from '../runner.ts';
+import type { ThreadRecord } from '../store.ts';
 import { isIdleRelayText, normalizeRelayBody } from './group-idle.ts';
 import { range } from './group-ledger.ts';
 import { groupMentions } from './group-mentions.ts';
@@ -148,7 +149,7 @@ export class BotGroups {
     return { group: book.group, stopped, tasksStopped };
   }
 
-  taskOrigin(rec: import('../store.ts').ThreadRecord): GroupInput | undefined {
+  taskOrigin(rec: ThreadRecord): GroupInput | undefined {
     const book = this.threads.check(rec);
     const turnId = this.runner.threads.get(rec.id)?.rt.turn?.turnId;
     const slot = book.round?.slots.find(slot => slot.status === 'speaking' && slot.threadId === rec.id && slot.turnId === turnId);
@@ -218,11 +219,22 @@ export class BotGroups {
   delegate(threadId: string, operationId: string, to: string[], note: string): { key: string; count: number } {
     const st = this.runner.threads.get(threadId);
     if (!this.owns() || !st || !st.rt.turn || st.rt.deleted) throw new Error('Only a speaking member can call its Group.');
-    const { group, round, frozen } = this.threads.check(st.rec);
-    const origin = round?.slots.find(slot => slot.status === 'speaking' && slot.threadId === threadId && slot.turnId === st.rt.turn?.turnId);
+    return this.delegateFrom(st.rec, st.rt.turn.turnId, operationId, to, note);
+  }
+
+  delegateKept(record: ThreadRecord, turnId: string, operationId: string, to: string[], note: string) {
+    return this.delegateFrom(record, turnId, operationId, to, note, true);
+  }
+
+  private delegateFrom(record: ThreadRecord, turnId: string, operationId: string, to: string[], note: string, kept?: true) {
+    if (!this.owns()) throw new RpcError(ErrorCode.busy, 'Wait for the primary Runner to take the Group.');
+    const { group, round, frozen } = this.threads.check(record);
+    const origin = round?.slots.find(slot => slot.status === 'speaking' && slot.threadId === record.id && slot.turnId === turnId);
     if (frozen || !origin || origin.summary || round?.status !== 'running') throw new Error('This Group call cannot delegate.');
-    const accepted = this.store.change(group.id, book => this.register(book, origin, operationId, to, note));
-    this.recover();
+    const accepted = this.store.change(group.id, book => this.register(book, origin, operationId, to, note), kept);
+    // A kept turn can leave a durable batch, but cannot start other work
+    // while the primary is still taking the execution Threads.
+    if (!kept) this.recover();
     return accepted;
   }
 

@@ -635,9 +635,21 @@ restart wait for busy threads. It hands over instead:
 - The runner's notice when it hands over starts "The runner is restarting
   onto a new release", which clients already read as a restart under way.
 
+When a Bot's turn is kept during a handover, its `message_bot` tool passes
+the original brief and current turn ID to the primary. The primary checks
+the saved turn and runs the ordinary Bot request admission. If it needs to
+authorize a new request, the primary asks the old Runner to run the tool's
+existing permission check for the chosen conversation. The old Runner
+answers only for that outstanding tool call. The primary keeps the receipt
+and starts the recipient. A reply for a source that is still kept waits
+until the primary takes its conversation. An unavailable peer or primary
+leaves the old Runner's Bot workspace read-only.
+
 The methods between runners (`drain.hello`, `drain.openCards`,
-`drain.stop`) and
-`drain.handedOver`, `drain.usage` and `drain.projects` are for runners only.
+`drain.stop`, `drain.projects`, `drain.bots.request`,
+`drain.bots.authorizeRequest`, `drain.bots.remember` and
+`drain.bots.delegate`) and notifications `drain.handedOver` and
+`drain.usage` are for runners only.
 
 ### Stopped background work
 

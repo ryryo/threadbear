@@ -35,6 +35,7 @@ struct InboxView: View {
     @State private var query = ""
     @State private var olderArchived: [PhoneThread] = []
     @State private var pocketOpen = false
+    @State private var hasBotWorkspace = false
     /// Settings pushed at launch (`-ThreadbearSettings`, for screenshots).
     @State private var settingsOpen = false
     @State private var afterPocket: PocketView.Next?
@@ -109,6 +110,17 @@ struct InboxView: View {
                 .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
                 // The phone has only the newest 100 archived threads, so Convex
                 // looks through the rest, once typing pauses.
+                .task(id: model.apiVersion) {
+                    hasBotWorkspace = false
+                    guard (model.apiVersion ?? 0) >= botWorkspaceAPIVersion, let backend = model.backend else { return }
+                    do {
+                        for try await available in backend.botWorkspaceAvailable() {
+                            hasBotWorkspace = available
+                        }
+                    } catch {
+                        hasBotWorkspace = false
+                    }
+                }
                 .task(id: query) {
                     olderArchived = []
                     let text = query.trimmingCharacters(in: .whitespaces)
@@ -126,6 +138,10 @@ struct InboxView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             NavigationLink { SettingsView() } label: { Label("Settings", systemImage: "gear") }
+                            if hasBotWorkspace {
+                                NavigationLink { DeviceBotsView() } label: { Label("Bots", systemImage: "person.2") }
+                            }
+
                             if model.isFake {
                                 Button { model.leaveDemo() } label: {
                                     Label("Leave the demo", systemImage: "rectangle.portrait.and.arrow.right")

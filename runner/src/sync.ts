@@ -173,8 +173,9 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 105;
+export const BACKEND_API_VERSION = 106;
 export const BOT_SCHEDULE_API_VERSION = 105;
+export const BOT_WORKSPACE_API_VERSION = 106;
 export const INDEX_POOL_API_VERSION = 101;
 export const COORDINATORS_API_VERSION = 102;
 export const NEXT_PICK_API_VERSION = 103;
@@ -506,6 +507,7 @@ export type ThreadDoc = {
   threadId: string;
   runnerId: string;
   title: string;
+  botLink?: ThreadSummary['botLink'];
   cwd: string;
   accountId: string;
   provider: string;
@@ -677,6 +679,8 @@ type Host = {
 // A thread's commands may go on to a draining runner (handover.ts's
 // phoneCommands), so they can answer later; apply() waits for each.
 export type CommandHost = {
+  botProfileEdit?: (input: Record<string, unknown>, scrub: (text: string) => string) => unknown;
+  botDeviceAction?: (input: Record<string, unknown>, scrub: (text: string) => string) => unknown;
   // origin: absent for a message Mike sent from the main Mac (a command `from: "mac"`).
   send(threadId: string, text: string, images: ImageRef[], opts: { origin?: 'phone'; answers?: AskAnswer[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string>; remote?: boolean }): unknown;
@@ -746,6 +750,7 @@ export type SyncDeps = {
   cachePath?: string;
   runner: Host;
   commands?: CommandHost;
+  botWorkspace?: (scrub: (text: string) => string, excluded?: ReadonlySet<string>) => ReturnType<import('./bots/device-workspace.ts').DeviceBotWorkspace['snapshot']> | null;
   // The runner's key pair for secrets the phone answers (secrets.ts).
   // Absent in small tests: then a secret card isn't mirrored.
   secretBox?: { publicKey(): string; open(sealed: Sealed, approvalId: string): string };
@@ -1061,6 +1066,7 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
     view: threadView(t, now),
   };
   if (t.model) doc.model = t.model;
+  if (t.botLink && !t.privateBotId) doc.botLink = { ...t.botLink };
   if (t.snoozedUntil) doc.snoozedUntil = t.snoozedUntil;
   if (t.snoozedUntilRestart) doc.snoozedUntilRestart = true;
   // What it waits for, when it's more than a time (wake-note.ts): the row says it.
@@ -1201,7 +1207,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= NEXT_PICK_API_VERSION || (!d.nextPick && d.nextSuggested === undefined)) && (v >= COORDINATORS_API_VERSION || !d.coordinatorProjectId) && (v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= OPTION_NOTES_API_VERSION || !d.asks?.some((a) => a.optionNotes)) && (v >= LOOSE_ENDS_API_VERSION || !d.looseEnds) && (v >= RELAY_CARDS_API_VERSION || (!d.review && !d.cardTurn)) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= KEYWORDS_API_VERSION || !d.keywords) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= WAIT_STATE_API_VERSION || !d.waitState) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined) && (v >= PLAN_API_VERSION || d.pendingApproval?.kind !== 'approval' || d.pendingApproval.planSeq === undefined)) return d;
+  if ((v >= BOT_WORKSPACE_API_VERSION || !d.botLink) && (v >= NEXT_PICK_API_VERSION || (!d.nextPick && d.nextSuggested === undefined)) && (v >= COORDINATORS_API_VERSION || !d.coordinatorProjectId) && (v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= OPTION_NOTES_API_VERSION || !d.asks?.some((a) => a.optionNotes)) && (v >= LOOSE_ENDS_API_VERSION || !d.looseEnds) && (v >= RELAY_CARDS_API_VERSION || (!d.review && !d.cardTurn)) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= KEYWORDS_API_VERSION || !d.keywords) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= WAIT_STATE_API_VERSION || !d.waitState) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined) && (v >= PLAN_API_VERSION || d.pendingApproval?.kind !== 'approval' || d.pendingApproval.planSeq === undefined)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -1209,6 +1215,7 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
     delete out.waitingForRoom;
   }
   if (v < SHARE_API_VERSION) delete out.share;
+  if (v < BOT_WORKSPACE_API_VERSION) delete out.botLink;
   if (v < NETWORK_WAIT_API_VERSION) delete out.waitingForNetwork;
   if (v < SECRETS_API_VERSION && out.pendingApproval?.kind === 'secret') delete out.pendingApproval;
   if (v < RELAY_API_VERSION && out.pendingApproval?.seq !== undefined) {
@@ -4399,6 +4406,7 @@ export class ConvexSync {
         this.notePushFailing(asPushFailing((r as { pushFailing?: unknown } | null)?.pushFailing));
         this.lookForReplyImages();
         this.retryCommands();
+        this.publishBotWorkspace();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
         if ((this.backendApiVersion ?? 0) >= MEMORY_API_VERSION && this.running) this.deps.memory?.attach(this.memoryBackend());
@@ -5049,6 +5057,57 @@ export class ConvexSync {
     return out;
   }
 
+  private botProjection?: string;
+  private botProjectionInFlight?: Promise<void>;
+  private readonly botProfilesWithdrawing = new Map<string, number>();
+
+  private async writeBotWorkspace(): Promise<void> {
+    if (!this.running) throw new Error('The Runner must reach sync to withdraw the shared Bot profile.');
+    const visible = this.deps.botWorkspace?.(text => this.scrubber.safeText(text), new Set(this.botProfilesWithdrawing.keys())) ?? null;
+    const signature = JSON.stringify(visible);
+    if (signature === this.botProjection) return;
+    await this.post('mutation', 'sync:setBotWorkspace', {
+      key: this.deps.key, runnerId: this.runnerId, startedAt: this.deps.startedAt, workspace: visible,
+    });
+    this.botProjection = signature;
+  }
+
+  private writeBotWorkspaceOrdered(): Promise<void> {
+    const before = this.botProjectionInFlight;
+    const write = (before ? before.catch(() => undefined) : Promise.resolve()).then(() => this.writeBotWorkspace());
+    this.botProjectionInFlight = write;
+    return write.finally(() => {
+      if (this.botProjectionInFlight === write) this.botProjectionInFlight = undefined;
+    });
+  }
+
+  private publishBotWorkspace(): void {
+    if (!this.running || this.botProjectionInFlight || !this.deps.botWorkspace ||
+        (this.backendApiVersion ?? 0) < BOT_WORKSPACE_API_VERSION) return;
+    this.writeBotWorkspaceOrdered().catch(() => this.deps.log.debug('could not mirror Bot workspace'));
+  }
+
+  async withdrawBotProfile(botId: string): Promise<() => void> {
+    if ((this.backendApiVersion ?? 0) < BOT_WORKSPACE_API_VERSION) {
+      if (this.backendHeard) return () => {};
+      throw new Error('The Runner must confirm the sync service before making this Bot private.');
+    }
+    this.botProfilesWithdrawing.set(botId, (this.botProfilesWithdrawing.get(botId) ?? 0) + 1);
+    const resume = () => {
+      const left = (this.botProfilesWithdrawing.get(botId) ?? 1) - 1;
+      if (left === 0) this.botProfilesWithdrawing.delete(botId);
+      else this.botProfilesWithdrawing.set(botId, left);
+      this.publishBotWorkspace();
+    };
+    try {
+      await this.writeBotWorkspaceOrdered();
+      return resume;
+    } catch (error) {
+      resume();
+      throw error;
+    }
+  }
+
   // Applies one command through the runner; returns the new thread's id
   // for a create or a quickAsk. Throws with a readable message for the phone.
   private async apply(c: Command): Promise<{ threadId?: string; result?: unknown } | undefined> {
@@ -5063,6 +5122,14 @@ export class ConvexSync {
       return threadId;
     };
     switch (c.kind) {
+      case 'botProfileEdit':
+      case 'botDeviceAction': {
+        const apply = c.kind === 'botProfileEdit' ? host.botProfileEdit : host.botDeviceAction;
+        if (!apply) throw new Error('This Runner does not support editing Bots from a connected device.');
+        const result = await apply(a, value => this.scrubber.safeText(value));
+        this.publishBotWorkspace();
+        return { result };
+      }
       case 'send': {
         const text = commandText(a);
         await this.withPhoneImages(a.images, (images) => host.send(needThread(), text, images, { ...origin, ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) }));

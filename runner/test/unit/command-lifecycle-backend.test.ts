@@ -10,6 +10,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { BotRepository } from '../../src/bots/repository.ts';
+import { DeviceBotWorkspace } from '../../src/bots/device-workspace.ts';
+import { BotRuntime } from '../../src/bots/runtime.ts';
+import { ScopedMemory } from '../../src/bots/scoped-memory.ts';
+import { makeHarness, tmpDir } from '../helpers/fakes.ts';
 import { call, load, memoryBackend, outcome, THREAD_BASICS } from '../helpers/convex-memory.ts';
 
 const OWNER = 'owner-key';
@@ -453,4 +458,121 @@ test('during the stepping stone, a request is answered and closed as before, kee
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('device edits survive reply loss, compare revisions, and stay with the active owner through handover', async () => {
+  const s = await setup();
+  const home = path.join(tmpDir(), 'bots');
+  const repo = new BotRepository(home, MINI);
+  const bot = repo.create({ name: 'Editor', role: 'Review' });
+  let owns = true;
+  const primary = new DeviceBotWorkspace(repo, () => owns, () => {});
+  const workspace = primary.snapshot(value => value);
+  const publish = (key: string, startedAt: string, next = workspace) => call(s.ctx, sync.setBotWorkspace, {
+    key, runnerId: MINI, startedAt, workspace: next,
+  });
+  assert.equal(await outcome(publish(CLOUD_KEY, 'x')), 'forbidden');
+  await publish(MINI_KEY, 'x');
+  assert.deepEqual(await call(s.ctx, phone.botWorkspaces, { token: TOKEN }), [workspace]);
+  assert.equal(await outcome(call(s.ctx, phone.botWorkspaces, { token: 'unpaired' })), 'auth');
+  const edit = {
+    workspaceId: workspace.workspaceId, epoch: workspace.epoch, botId: bot.id, expectedRevision: bot.revision,
+    operationId: 'device-edit', settings: { role: 'Japanese copy desk' },
+  };
+  const queue = (input = edit) => call(s.ctx, phone.editBotProfile, { token: TOKEN, runnerId: MINI, edit: input });
+  const first = await queue();
+  const second = await queue({ ...edit, operationId: 'offline-edit', settings: { role: 'Editing desk' } });
+  assert.equal(s.row(first).runnerId, MINI);
+  assert.equal(await outcome(call(s.ctx, sync.takeCommand, { key: CLOUD_KEY, commandId: first, attempt: ATTEMPT })), 'forbidden');
+  assert.equal(await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId: first, attempt: ATTEMPT }), true);
+  assert.equal(await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId: first, attempt: ATTEMPT }), true);
+  const saved = primary.edit(s.row(first).args);
+  assert.equal(saved.outcome, 'saved');
+  // The first release saved the change but stopped before reporting to Convex.
+  owns = false;
+  const runner = s.rows('runners').find(row => row.runnerId === MINI)!;
+  await s.ctx.db.patch('runners', runner._id, { startedAt: 'new-release' });
+  assert.throws(() => primary.edit(edit), /primary/);
+  assert.equal(await outcome(publish(MINI_KEY, 'x')), 'forbidden');
+  const reopened = new DeviceBotWorkspace(new BotRepository(home, MINI), () => true, () => {});
+  const retry = await queue();
+  assert.equal(await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId: retry, attempt: ATTEMPT }), true);
+  const recovered = reopened.edit(s.row(retry).args);
+  assert.deepEqual(recovered, saved);
+  await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId: retry, ok: true, result: JSON.stringify(recovered) });
+  assert.deepEqual(await s.seen(retry), { state: 'done', result: saved });
+  assert.equal(await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId: second, attempt: ATTEMPT }), true);
+  const conflict = reopened.edit(s.row(second).args);
+  assert.equal(conflict.outcome, 'conflict');
+  await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId: second, ok: true, result: JSON.stringify(conflict) });
+  assert.deepEqual(await s.seen(second), { state: 'done', result: conflict });
+  const next = { ...reopened.snapshot(value => value), epoch: workspace.epoch + 1, profiles: [] };
+  await publish(MINI_KEY, 'new-release', next);
+  assert.equal(await outcome(publish(MINI_KEY, 'new-release')), 'forbidden');
+  assert.equal(await outcome(queue()), 'notFound');
+  assert.deepEqual(await call(s.ctx, phone.botWorkspaces, { token: TOKEN }), [next]);
+});
+
+test('two paired devices keep a note deletion receipt through a lost reply and a Runner update', async t => {
+  const s = await setup();
+  const webToken = 'paired-web-fixture';
+  await s.ctx.db.insert('tokens', {
+    hash: await sha256(webToken), name: 'web', kind: 'phone', expiresAt: Date.now() + 1e9, createdAt: Date.now(),
+  });
+  const h = makeHarness(tmpDir());
+  const root = path.join(h.home, 'bots');
+  const repo = new BotRepository(root, MINI);
+  const bot = repo.create({ name: 'Editor' });
+  const scope = { kind: 'bot' as const, id: bot.id };
+  const memory = new ScopedMemory({ root, repo }).open(scope, { kind: 'owner' }, 'write');
+  const keep = memory.add('Keep the headline short', {}, h.runner.isoNow());
+  const before = memory.revision();
+  let owns = true;
+  const service = (owner: () => boolean) => {
+    const repository = new BotRepository(root, MINI);
+    const devices = new DeviceBotWorkspace(repository, owner, () => {}, () => ({
+      notes: [{ scope: 'bot', scopeId: bot.id, revision: before, rows: [{ id: keep.id, text: keep.text, pinned: false }] }],
+      tasks: [], requests: [], groups: [],
+    }));
+    const runtime = new BotRuntime({
+      home: h.home, runner: () => h.runner, owner: () => MINI, enabled: () => true,
+      guarded: () => true, owns: owner, canChangePrivacy: owner,
+    });
+    // The test supplies the supervisor guard; commands use the real workspace authorization and memory journal.
+    t.mock.method(runtime, 'devices', () => devices);
+    return { devices, runtime };
+  };
+  const first = service(() => owns);
+  const workspace = first.devices.snapshot(String);
+  await call(s.ctx, sync.setBotWorkspace, { key: MINI_KEY, runnerId: MINI, startedAt: 'x', workspace });
+  for (const token of [TOKEN, webToken]) {
+    assert.deepEqual(await call(s.ctx, phone.botWorkspaces, { token }), [workspace]);
+  }
+  const remove = {
+    workspaceId: workspace.workspaceId, epoch: workspace.epoch, operationId: 'remove-on-phone',
+    action: { kind: 'note.remove', scope, entryId: keep.id, expectedRevision: before },
+  };
+  const edit = {
+    ...remove, operationId: 'offline-web-edit',
+    action: { kind: 'note.edit', scope, entryId: keep.id, expectedRevision: before, text: 'Never omit the date' },
+  };
+  const send = (token: string, input: typeof remove | typeof edit) =>
+    call(s.ctx, phone.actOnBotWorkspace, { token, runnerId: MINI, input });
+  const take = async (id: string) => {
+    assert.equal(await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId: id, attempt: ATTEMPT }), true);
+    return s.row(id).args;
+  };
+  const removeCommand = await send(TOKEN, remove);
+  const editCommand = await send(webToken, edit);
+  const deletion = await first.runtime.applyDeviceAction(await take(removeCommand), String);
+  assert.equal(deletion.outcome, 'saved');
+  owns = false;
+  await assert.rejects(first.runtime.applyDeviceAction(remove, String), /primary/);
+  const reopened = service(() => true);
+  const retry = await send(TOKEN, remove);
+  assert.deepEqual(await reopened.runtime.applyDeviceAction(await take(retry), String), deletion);
+  const conflict = await reopened.runtime.applyDeviceAction(await take(editCommand), String);
+  assert.deepEqual(conflict, { outcome: 'conflict', revision: deletion.revision, rows: [], draft: 'Never omit the date' });
+  assert.deepEqual(memory.list(h.runner.isoNow().slice(0, 10)), []);
+  assert.equal(memory.history().filter(row => row.op === 'remove').length, 1);
 });
