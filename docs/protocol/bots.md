@@ -516,3 +516,10 @@ and permission ceilings. A reservation with an unsettled run prevents
 the move. A reservation cannot start or be edited during the claim.
 The authority also remembers a cancellation issued before the offer
 arrives. A late copy of the cancelled offer cannot freeze the workspace.
+
+For a claimed move the authority keeps the source Runner, workspace, move
+ID and retiring epoch. These records survive later moves and contain no
+note text. Staged and cancelled moves do not add a retired source. The
+most recent claim from an older backend is recorded before starting a
+new move. Claims already replaced by the older backend are outside this
+record; absence of earlier sources is not proof that old copies are gone.

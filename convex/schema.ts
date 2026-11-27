@@ -851,6 +851,10 @@ export const appSchema = defineSchema({
     workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), targetRunnerId: v.string(), epoch: v.number(),
   }).index('by_move', ['workspaceId', 'moveId']),
 
+  botWorkspaceRetiredSources: defineTable({
+    workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), epoch: v.number(),
+  }).index('by_workspace_epoch', ['workspaceId', 'epoch']),
+
   botWorkspaces: defineTable({
     runnerId: v.string(),
     workspace: botWorkspaceProjection,

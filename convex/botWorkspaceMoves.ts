@@ -13,6 +13,7 @@ import { isThreadId } from './runnerAccess';
 import { syncWake } from './wakes';
 
 type Authority = Doc<'botWorkspaceOwners'>;
+type Transfer = NonNullable<Authority['transfer']>;
 
 const PART_BYTES = 192 * 1024;
 const MAX_SEALED_BYTES = 100 * 1024 * 1024;
@@ -70,6 +71,18 @@ function cancelledMove(ctx: BotWorkspaceRead, workspaceId: string, moveId: strin
 function cancelledReceipt(move: Omit<Doc<'botWorkspaceMoveCancellations'>, '_id' | '_creationTime'>) {
   return { state: 'cancelled' as const, moveId: move.moveId, workspaceId: move.workspaceId,
     ownerRunnerId: move.sourceRunnerId, epoch: move.epoch };
+}
+
+async function rememberRetiredSource(ctx: MutationCtx, workspaceId: string, { epoch, moveId, sourceRunnerId }: Transfer) {
+  const prior = await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_workspace_epoch',
+    q => q.eq('workspaceId', workspaceId).eq('epoch', epoch)).unique();
+  if (prior) {
+    if (prior.moveId !== moveId || prior.sourceRunnerId !== sourceRunnerId) {
+      throw new ConvexError({ kind: 'conflict', message: 'The retiring Bot workspace owner does not match its recorded move.' });
+    }
+    return;
+  }
+  await ctx.db.insert('botWorkspaceRetiredSources', { workspaceId, moveId, sourceRunnerId, epoch });
 }
 
 function verifyNoteErasureRevision(row: Authority, revision: number | undefined): void {
@@ -146,6 +159,7 @@ export const begin = mutation({
       q => q.eq('workspaceId', workspaceId).eq('state', 'queued').gt('expiresAt', Date.now())).first();
     if (running || waiting) throw new ConvexError({ kind: 'busy', message: 'The Bot workspace still has worker requests.' });
     await scheduleRows(ctx, runnerId, revisions);
+    if (prior?.state === 'claimed') await rememberRetiredSource(ctx, workspaceId, prior);
     await ctx.db.patch('botWorkspaceOwners', row._id, {
       transfer: { moveId, sourceRunnerId: runnerId, targetRunnerId, epoch, checksum, sealedChecksum, bytes, parts, stored: 0, threadIds: ids, schedules: revisions, state: 'staged' },
     });
@@ -155,7 +169,6 @@ export const begin = mutation({
   },
 });
 
-type Transfer = NonNullable<Authority['transfer']>;
 const partArgs = { ...runnerArgs, index: v.number() };
 
 function transferPart(ctx: BotWorkspaceRead, workspaceId: string, moveId: string, index: number) {
@@ -259,7 +272,10 @@ export const claim = mutation({
     if (!row || !move || move.moveId !== moveId || move.targetRunnerId !== runnerId || move.checksum !== checksum) {
       throw forbidden('claim this Bot workspace');
     }
-    if (move.state === 'claimed') return receipt(row, moveId, 'claimed');
+    if (move.state === 'claimed') {
+      await rememberRetiredSource(ctx, workspaceId, move);
+      return receipt(row, moveId, 'claimed');
+    }
     verifyNoteErasureRevision(row, noteErasureRevision);
     if (move.state !== 'staged' || row.ownerRunnerId !== move.sourceRunnerId || row.epoch !== move.epoch ||
         await ownedWorkspace(ctx, runnerId)) throw forbidden('claim a Bot workspace whose saved owner has changed');
@@ -276,6 +292,7 @@ export const claim = mutation({
       await syncWake(ctx, { ...schedule, runnerId });
     }
     const next = { ownerRunnerId: runnerId, epoch: row.epoch + 1 };
+    await rememberRetiredSource(ctx, workspaceId, move);
     await ctx.db.patch('botWorkspaceOwners', row._id, { ...next, transfer: { ...move, state: 'claimed' } });
     return receipt({ ...row, ...next }, moveId, 'claimed');
   },

@@ -124,6 +124,37 @@ test('the saved owner can freeze a move and only the staged target can claim it 
   assert.equal(await outcome(t.publish(SOURCE, 1)), 'forbidden');
   await t.publish(TARGET, 2);
   assert.deepEqual((await t.deviceList()).map((row: { ownerRunnerId: string; epoch: number }) => [row.ownerRunnerId, row.epoch]), [[TARGET, 2]]);
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources').map(
+    ({ workspaceId, moveId, sourceRunnerId, epoch }) => ({ workspaceId, moveId, sourceRunnerId, epoch }),
+  ), [{ workspaceId: WORKSPACE, moveId: 'move-1', sourceRunnerId: SOURCE, epoch: 1 }]);
+});
+
+test('the last legacy claim and later retired sources persist across repeated moves', async () => {
+  const t = await fixture();
+  await t.begin();
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
+  await t.upload();
+  await t.claim();
+  // Simulate a claim made before this version recorded the retiring source.
+  for (const row of t.rows('botWorkspaceRetiredSources')) await t.ctx.db.delete('botWorkspaceRetiredSources', row._id);
+  const next = { workspaceId: WORKSPACE, moveId: 'move-2', epoch: 2, targetRunnerId: OTHER, checksum: DIGEST,
+    bytes: Buffer.byteLength('sealed fixture'), parts: 1, sealedChecksum: digest(Buffer.from('sealed fixture')),
+    threadIds: [] };
+  assert.equal(await outcome(t.invoke(SOURCE, 'botWorkspaceMoves:begin', next)), 'forbidden');
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
+  assert.equal((await t.invoke(TARGET, 'botWorkspaceMoves:begin', next)).state, 'staged');
+  const sources = () => t.rows('botWorkspaceRetiredSources').map(({ sourceRunnerId, epoch }) => [sourceRunnerId, epoch]);
+  assert.deepEqual(sources(), [[SOURCE, 1]]);
+  const locator = { workspaceId: WORKSPACE, moveId: next.moveId };
+  await t.invoke(TARGET, 'botWorkspaceMoves:putPart', { ...locator, index: 0, data: Buffer.from('sealed fixture').toString('base64') });
+  const claim = () => t.invoke(OTHER, 'botWorkspaceMoves:claim', { ...locator, checksum: DIGEST });
+  assert.equal((await claim()).state, 'claimed');
+  assert.equal((await claim()).state, 'claimed');
+  assert.deepEqual(sources(), [[SOURCE, 1], [TARGET, 2]]);
+  const cancelled = { ...next, moveId: 'move-3', epoch: 3, targetRunnerId: TARGET };
+  await t.invoke(OTHER, 'botWorkspaceMoves:begin', cancelled);
+  await t.invoke(OTHER, 'botWorkspaceMoves:cancel', { workspaceId: WORKSPACE, moveId: cancelled.moveId });
+  assert.deepEqual(sources(), [[SOURCE, 1], [TARGET, 2]]);
 });
 
 test('a cancelled staged move releases only the source with its existing epoch', async () => {
@@ -136,6 +167,7 @@ test('a cancelled staged move releases only the source with its existing epoch',
   assert.equal(await outcome(t.publish(TARGET, 2)), 'forbidden');
   await t.publish(SOURCE, 1);
   assert.deepEqual((await t.deviceList()).map((row: { ownerRunnerId: string; epoch: number }) => [row.ownerRunnerId, row.epoch]), [[SOURCE, 1]]);
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
 });
 
 test('public Bot reservations retain their identity and next run when the workspace claims a new owner', async () => {
