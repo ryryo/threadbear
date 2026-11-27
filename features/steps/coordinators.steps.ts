@@ -9,6 +9,11 @@ type Coordinator = {
   tab: string;
   state: string | null;
   tasks: { title: string; state: string }[] | null;
+  taskDetailsBounds?: [number, number, number, number];
+  taskBoard?: {
+    workItems: { id: string; collapsed: boolean; done: number; total: number }[];
+    tasks: { id: string; title: string; state: string }[];
+  };
   loops: { id: string; kind: string; state: string; title: string }[] | null;
   openLoopsCount: number | null;
   agentMemoryOpen: boolean;
@@ -215,4 +220,73 @@ Then('Open loops shows the decision without answer buttons', async function (thi
 
 When('I click the decision in Open loops', async function (this: ThreadbearWorld) {
   await this.app.do({ cmd: 'click', tip: 'Answer this on the Needs you card' });
+});
+
+
+When('the coordinator publishes a task board', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'mock', method: 'coordinatorTaskBoard', params: {} });
+  await this.until('canonical task board', (d) => Boolean(coordinator(d)?.taskBoard?.tasks.length));
+});
+
+When('I press the task button {string}', async function (this: ThreadbearWorld, title: string) {
+  // On the Tasks tab the same action can be visible in Highlights too.
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string; x: number; y: number }[];
+  const button = labels.filter((control) => control.label === title).sort((a, b) => a.x - b.x)[0];
+  assert.ok(button, `No visible task button for ${title}`);
+  await this.app.do({ cmd: 'click-at', x: button.x, y: button.y });
+});
+
+When('I collapse the {string} work item', async function (this: ThreadbearWorld, title: string) {
+  await this.app.do({ cmd: 'click', tip: `Collapse ${title}` });
+});
+
+When('I expand the {string} work item', async function (this: ThreadbearWorld, title: string) {
+  await this.app.do({ cmd: 'click', tip: `Expand ${title}` });
+  await this.until('Getting there expanded', (d) => coordinator(d)?.taskBoard?.workItems.some((i) => !i.collapsed));
+});
+
+When('I select the task {string}', async function (this: ThreadbearWorld, title: string) {
+  const label = `Show task ${title}`;
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+  const row = labels.find((control) => control.label === label || control.label.startsWith(`${label} ·`));
+  assert.ok(row, `No visible task row for ${title}`);
+  await this.app.do({ cmd: 'click', tip: row.label });
+});
+
+Then('the task {string} is {string}', async function (this: ThreadbearWorld, id: string, state: string) {
+  await this.until(`task ${id} in ${state}`, (d) => coordinator(d)?.taskBoard?.tasks.some((t) => t.id === id && t.state === state));
+});
+
+Then('the task board saves {string} collapsed with {int} of {int} done', async function (this: ThreadbearWorld, id: string, done: number, total: number) {
+  await this.until(`collapsed group ${id}`, (d) => coordinator(d)?.taskBoard?.workItems.some((i) => i.id === id && i.collapsed && i.done === done && i.total === total));
+});
+
+Then('Highlights has no link to {string}', async function (this: ThreadbearWorld, title: string) {
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+  assert.equal(labels.some((control) => control.label === `Open ${title} in Tasks`), false);
+});
+
+
+Then('the Conversation decision card is open', async function (this: ThreadbearWorld) {
+  await this.until('an open Conversation decision card', (d) => d.composer.card?.[0] === 'Needs you');
+});
+
+Then('the Conversation decision card is gone', async function (this: ThreadbearWorld) {
+  await this.until('Conversation cleared the resolved decision card', (d) => !d.composer.card?.length);
+});
+
+When('I scroll the Tasks details down', async function (this: ThreadbearWorld) {
+  const bounds = coordinator(await this.app.dump())?.taskDetailsBounds;
+  assert.ok(bounds, 'The Tasks details must be drawn');
+  const [left, top, right, bottom] = bounds;
+  assert.ok(bottom > top && right > left, 'The details pane has visible space');
+  await this.app.do({ cmd: 'point', x: (left + right) / 2, y: (top + bottom) / 2, scrollY: -2000 });
+});
+
+Then('the Tasks details show {string}', async function (this: ThreadbearWorld, label: string) {
+  const bounds = coordinator(await this.app.dump())?.taskDetailsBounds;
+  assert.ok(bounds, 'The Tasks details must be drawn');
+  const [left, top, right, bottom] = bounds;
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string; x: number; y: number }[];
+  assert.ok(labels.some((control) => control.label === label && control.x >= left && control.x < right && control.y >= top && control.y < bottom), `No visible Tasks details control ${label}`);
 });

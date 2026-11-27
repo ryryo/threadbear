@@ -498,9 +498,20 @@
 // 103: thread rows can carry nextPick ("one") and nextSuggested (index into
 //    next) for mutually exclusive done-card follow-ups. A runner sends them
 //    only to a backend of 103 or later; older apps ignore them.
-// 104: phone:registerDevice accepts an optional locale for push notifications.
-// 105: native Bot schedule targets and compare-and-save for owned Bot schedules.
-// 106: owner-readable Bot workspace projection and commands.
-// 107: Bot workspace ownership, destination Project preview, staged Thread
+// 104: an accounts row can carry `resetHint` (why a usage reset is worth
+//    using now, how many are left, when the soonest expires) and
+//    `usage.resets` with its `readAt`, so other runners merge the newest read
+//    of a login's resets and the phone, the website and another Mac draw the
+//    hint. relay:queueCommand's `call` takes accounts.useReset, the Mac's Use
+//    a reset for a login only that runner has. A runner sends the fields only
+//    to a backend of 104 or later.
+// 105: relay:queueCommand's `call` takes logins.sealKey and logins.share,
+//    the Runners panel's Use this Mac's Claude logins (docs/protocol/settings.md,
+//    "This Mac's logins on another runner"): owner key only, and a share
+//    carries each login sealed to that runner's key, never in the clear.
+// 106: phone:registerDevice accepts an optional locale for push notifications.
+// 107: native Bot schedule targets and compare-and-save for owned Bot schedules.
+// 108: owner-readable Bot workspace projection and commands.
+// 109: Bot workspace ownership, destination Project preview, staged Thread
 //    and schedule claim, and scoped worker grants.
-export const API_VERSION = 107;
+export const API_VERSION = 109;

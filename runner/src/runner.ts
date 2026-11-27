@@ -63,7 +63,7 @@ import type {
   ToolApprovalAnswer,
   TurnResult,
 } from './adapters/types.ts';
-import { SessionNotFoundError } from './adapters/types.ts';
+import { MODEL_LIST_TIMEOUT_MS, SessionNotFoundError } from './adapters/types.ts';
 import type { UseResetOutcome } from './adapters/types.ts';
 import type { EventLog, ThreadRecord, ThreadStore, QueuedSend, SubagentRecord } from './store.ts';
 import { cutOut } from './store.ts';
@@ -117,7 +117,7 @@ import { CARRY_ON_BACK, CARRY_ON_MOVED, CARRY_ON_NETWORK, CARRY_ON_RESTART, CARR
 export { CARRY_ON_BACK, CARRY_ON_MOVED, CARRY_ON_NETWORK, CARRY_ON_RESTART, CARRY_ON_SIGNED_OUT, CARRY_ON_TOKEN, NET_CARRY_ON_MAX, NET_PROBE_FIRST_MS, NET_PROBE_MAX_MS, NET_WAIT_MAX_MS, STOPPED_CARRY_ON_MAX_AGE_MS, STOPPED_WORK_WAKES, STOPPED_WORK_WAKE_MAX_AGE_MS, WROTE_INSTEAD, isCarryOn, stoppedWorkMessage };
 import { TITLE_PROMPT, askedLine, checkImages, cleanTitle, fromMike, isAutomaticInput, matchAnswers, oneLine, scheduledMessageId, titleFrom, userMessage } from './runner/messages.ts';
 export { TITLE_PROMPT, askedLine, checkImages, cleanTitle, fromMike, isAutomaticInput, matchAnswers, oneLine, scheduledMessageId, titleFrom, userMessage };
-import { effortTitle, isClaudeModel, modelRow, modelTitle } from './runner/models.ts';
+import { effortTitle, explicitModelKind, isClaudeModel, modelAccounts, modelRow, modelTitle, ModelListsPending } from './runner/models.ts';
 export { effortTitle, isClaudeModel, modelRow, modelTitle };
 import { newRuntime } from './runner/runtime.ts';
 export { newRuntime };
@@ -538,6 +538,13 @@ export type Runtime = {
   // it's in and opens none, so once the wake grace passes with no turn
   // (or the CLI exits) it finishes after all (settlePendingFinish).
   finishPending?: { seq: number; turnId: string; lastText?: string; next: boolean; owed?: { turnId: string; seq?: number; reply?: string } };
+  // A coordinator's helper whose turn ended with background work still
+  // going (a shell, a monitor, a subagent), which the CLI wakes for: the
+  // run isn't over, so its coordinator hears when the turn that wake opens
+  // ends, or this turn's result once nothing more is coming
+  // (settleHelperPending).
+  // Not evicted for room meanwhile (makeRoomForCli): that would end it.
+  helperPending?: { outcome: 'completed'; text: string; turnId: string };
   activeAt: number; // last turn start or end, for picking which CLI to release
   approvals: Map<string, PendingApproval>;
   // Calls the card reviewer is deciding on (runner/card-review.ts), which
@@ -867,6 +874,7 @@ export class Runner {
   unvouchedSettled = false;
   // Accounts whose CLI has been asked for its models (or is being asked).
   probed = new Set<string>();
+  private modelProbes = new Map<string, Promise<void>>();
   rescanTimer?: TimerHandle;
   landRecheckAt = 0;
   liveTimer?: TimerHandle;
@@ -1089,24 +1097,63 @@ export class Runner {
     this.armRescan();
   }
 
-  // Asks each account's CLI for its model list, one account at a time so
-  // startup doesn't spawn three CLIs at once. Clients hear through
-  // accounts.updated; a failure just leaves the list unknown. `only` picks
-  // some accounts: a login that has just appeared, or every Codex account
-  // after a Codex update (a new version can change the list).
-  async probeModels(only?: (a: Account) => boolean): Promise<void> {
+  // Each login has an independent, bounded read. Concurrent callers
+  // share the same in-flight read for that login.
+  async probeModels(only?: (a: Account) => boolean, refresh = false): Promise<void> {
     const targets = this.safeAccounts().filter((a) => !only || only(a));
-    for (const a of targets) this.probed.add(a.id);
-    for (const account of targets) {
-      if (this.stopping) return;
-      const adapter = this.adapters[account.provider];
-      if (!adapter?.models) continue;
+    await Promise.all(targets.map(async (account) => {
+      // A CLI upgrade still needs a fresh read if its old CLI was probing.
+      if (refresh) await this.modelProbes.get(account.id);
+      await this.probeModel(account);
+    }));
+  }
+
+  private probeModel(account: Account): Promise<void> {
+    const pending = this.modelProbes.get(account.id);
+    if (pending) return pending;
+    this.probed.add(account.id);
+    const adapter = this.adapters[account.provider];
+    const models = adapter?.models?.bind(adapter);
+    if (this.stopping || !models) return Promise.resolve();
+
+    const probe = Promise.resolve().then(async () => {
+      if (this.stopping) {
+        this.modelProbes.delete(account.id);
+        return;
+      }
+      const abort = new AbortController();
+      let timer: TimerHandle | undefined;
       try {
-        const models = await adapter.models(account);
-        this.learnAccount(account.id, { models });
+        const deadline = new Promise<never>((_, reject) => {
+          timer = this.clock.setTimeout(() => {
+            const error = new Error('the model probe timed out');
+            reject(error);
+            abort.abort(error);
+          }, MODEL_LIST_TIMEOUT_MS);
+        });
+        const list = await Promise.race([models(account, abort.signal), deadline]);
+        this.learnAccount(account.id, { models: list });
       } catch (e) {
         this.log.warn('could not read the model list', { accountId: account.id, error: String(e) });
+      } finally {
+        timer?.cancel();
+        this.modelProbes.delete(account.id);
       }
+    });
+    this.modelProbes.set(account.id, probe);
+    return probe;
+  }
+
+  // The routing exception comes from drafting, before a thread or its
+  // first turn exists. Re-read account and pool state after the probes.
+  async createAfterModelProbe(params: Parameters<NewThreadsPart['create']>[0]): Promise<ReturnType<NewThreadsPart['create']>> {
+    try {
+      return this.create(params);
+    } catch (e) {
+      if (!(e instanceof ModelListsPending)) throw e;
+      const pending = new Set(e.accountIds);
+      await this.probeModels((a) => pending.has(a.id) && a.models === undefined);
+      return this.create(params);
     }
   }
 
@@ -1284,6 +1331,9 @@ export class Runner {
   // one. Else Send again after New token… runs on the old token, and its
   // refusal marks the new one out (Codex's review, 17 Nov).
   private tokenKeys = new Map<string, string>();
+  // Told after each change to the login list goes out (a token made or
+  // renewed, a login added, hidden or noted): login-share.ts sends again.
+  onAccountsChanged?: () => void;
   renewTokens(accounts: Account[]): void {
     for (const a of accounts) {
       if (a.provider !== 'claude') continue;
@@ -1320,6 +1370,7 @@ export class Runner {
     this.accountsShown = key;
     this.accountsSentAt = this.clock.now();
     this.notify({ method: 'accounts.updated', params: { accounts } });
+    this.onAccountsChanged?.();
   }
 
   // A thread folder whose thread.json can't be read: rebuild what can be
@@ -1415,9 +1466,16 @@ export class Runner {
       }
       rec.pendingApprovals = [];
       rec.queue = [];
-      // Its coordinator reconciles it now, so no carry-on of its own.
+      // Its coordinator's registry carries it on (coordinators.ts,
+      // carryOnAfterRestart), so no carry-on of its own: not the network's,
+      // and not carryOnStopped's, which a clean stop's stopTurn asks for.
+      // That one ran outside the registry's run, and its result went nowhere
+      // (Codex's review, 26 Nov 2026).
       delete rec.waitingForNetwork;
       delete rec.netCarryOn;
+      delete rec.stoppedMidTurn;
+      // Nor tellStoppedWork's message: the carry-on says to check what's done.
+      delete rec.stoppedWork;
       this.markDirty(st);
       return false;
     }
@@ -2202,12 +2260,15 @@ export class Runner {
       this.withholdMessage(st, { text, origin: opts.origin, scheduleId: opts.scheduleId });
       return opts.messageId ?? crypto.randomUUID();
     }
-    if (opts.answers?.length && fromMike(text, opts) && this.answered) {
-      const open = rec.needs?.needs === 'you' && rec.needs.seq === rec.lastTurnCompletedSeq ? rec.needs.asks : undefined;
-      try {
-        this.answered(rec.id, opts.answers, open);
-      } catch (e) {
-        this.log.warn('acting on an answer failed', { threadId: rec.id, error: String((e as Error)?.message ?? e) });
+    if (opts.answers?.length && fromMike(text, opts)) {
+      this.coordinators?.checkCardAnswers(rec, opts.answers);
+      if (this.answered) {
+        const open = rec.needs?.needs === 'you' && rec.needs.seq === rec.lastTurnCompletedSeq ? rec.needs.asks : undefined;
+        try {
+          this.answered(rec.id, opts.answers, open);
+        } catch (e) {
+          this.log.warn('acting on an answer failed', { threadId: rec.id, error: String((e as Error)?.message ?? e) });
+        }
       }
     }
     // He has had his say: a wait's checks at its latest time count from here
@@ -2915,7 +2976,7 @@ export class Runner {
     const live = [...this.threads.values()].filter((t) => t !== starting && runningSession(t.rt));
     if (live.length < this.cfg.maxLive) return;
     const idle = live
-      .filter((t) => !t.rt.turn && t.rt.approvals.size === 0 && t.rec.queue.length === 0 && t.rt.tasks.length === 0)
+      .filter((t) => !t.rt.turn && t.rt.approvals.size === 0 && t.rec.queue.length === 0 && t.rt.tasks.length === 0 && !t.rt.helperPending)
       .sort((a, b) => a.rt.activeAt - b.rt.activeAt);
     for (const t of idle.slice(0, live.length - this.cfg.maxLive + 1)) {
       this.log.info('releasing the longest-idle CLI to stay under the cap', { threadId: t.rec.id, maxLive: this.cfg.maxLive });
@@ -3356,8 +3417,12 @@ export class Runner {
       rt.wakeTimer = undefined;
       rt.finished = [];
       this.markDirty(st);
-      // No turn came to read the result: a done card held back for one stands.
-      if (!rt.turn) this.settlePendingFinish(st);
+      // No turn came to read the result: a done card held back for one
+      // stands, and a helper's held turn ends its run.
+      if (!rt.turn) {
+        this.settlePendingFinish(st);
+        this.settleHelperPending(st);
+      }
       // Mike's turn is running: the CLI may read the result after it, so it
       // counts as ended in that turn, and the grace starts again at its end
       // (Codex's review, 22 Nov 2026).
@@ -3497,8 +3562,8 @@ export class Runner {
       if (said) {
         rec.needs = {
           seq: ev.seq,
-          needs: said.needs,
-          ...(said.asks ? { asks: said.asks } : {}),
+          needs: body.needs ?? said.needs,
+          ...(body.asks ? { asks: body.asks } : {}),
           ...(said.next?.length ? { next: said.next } : {}),
           ...(said.nextPick ? { nextPick: said.nextPick } : {}),
           ...(said.nextSuggested !== undefined ? { nextSuggested: said.nextSuggested } : {}),
@@ -3594,7 +3659,15 @@ export class Runner {
           this.armRoomTimer();
           this.markDirty(st);
         }
-        this.coordinators?.onHelperTurn(rec.id, outcome, turn.lastText || r.error || '', turn.turnId);
+        // Background work the CLI will wake for: the helper said it's
+        // waiting on it, and finishing the run now refused every tool call
+        // of the turn that read its result, whose words never reached the
+        // coordinator (the Convex AI guidance coordinator, 26 Nov 2026).
+        if (outcome === 'completed' && this.wakes(st) && runningSession(rt) && !this.stopping && (rt.tasks.length > 0 || rt.wakeTimer)) {
+          rt.helperPending = { outcome, text: turn.lastText || r.error || '', turnId: turn.turnId };
+        } else {
+          this.coordinators?.onHelperTurn(rec.id, outcome, turn.lastText || r.error || '', turn.turnId);
+        }
       }
       return;
     }
@@ -3879,7 +3952,22 @@ export class Runner {
   // coordinator never dispatched, whose end it otherwise threw away as
   // stale, leaving the run "running" for good (Codex's review, 26 Nov 2026).
   private noteHelperStart(st: ThreadState, turnId: string): void {
-    if (st.rec.coordinatorHelperFor) this.coordinators?.noteHelperTurn(st.rec.id, turnId);
+    if (!st.rec.coordinatorHelperFor) return;
+    // The turn its background work woke carries the run on.
+    st.rt.helperPending = undefined;
+    this.coordinators?.noteHelperTurn(st.rec.id, turnId);
+  }
+
+  // A helper turn held for its background work (helperPending): once no
+  // turn has come for it (the grace passed, or the CLI went), the run ends
+  // on that turn's result, as it would have then.
+  settleHelperPending(st: ThreadState): void {
+    const { rec, rt } = st;
+    const p = rt.helperPending;
+    if (!p || rt.turn || this.stopping) return;
+    if (runningSession(rt) && (rt.tasks.length > 0 || rt.wakeTimer)) return;
+    rt.helperPending = undefined;
+    this.coordinators?.onHelperTurn(rec.id, p.outcome, p.text, p.turnId);
   }
 
   failTurn(st: ThreadState, message: string): void {
@@ -3961,13 +4049,16 @@ export class Runner {
     const pool = this.poolById(rec.poolId);
     if (!pool) return;
     const accounts = this.usableAccounts();
+    const eligible = this.poolTurnAccounts(rec, pool, accounts);
     const current = accounts.find((a) => a.id === rec.accountId);
     const inPool = pool.accountIds.includes(rec.accountId);
-    if (current && inPool && loginOk(current)) return;
+    if (current && eligible.includes(current) && inPool && loginOk(current)) return;
     const now = this.clock.now();
-    const next = nextLogin(pool, accounts, rec, now);
+    const next = nextLogin(pool, eligible, rec, now);
     if ('waitUntil' in next) return;
-    const why = !current ? `${rec.accountId} isn't on this Mac` : !inPool ? `${current.title} isn't in ${pool.title}` : current.planEnded ? `${current.title}'s plan has ended` : current.signedOut ? `${current.title} is signed out` : `${current.title} ${limitWhy(current, now)}`;
+    const why = !current ? `${rec.accountId} isn't on this Mac` : !inPool ? `${current.title} isn't in ${pool.title}`
+      : !eligible.includes(current) ? `${current.title} no longer lists the selected model`
+        : current.planEnded ? `${current.title}'s plan has ended` : current.signedOut ? `${current.title} is signed out` : `${current.title} ${limitWhy(current, now)}`;
     this.moveLogin(st, accounts.find((a) => a.id === next.accountId)!, why);
   }
 
@@ -3999,8 +4090,11 @@ export class Runner {
     rt.wakeTimer?.cancel();
     rt.wakeTimer = undefined;
     // No CLI to open a turn reading a background result: a done card held
-    // back for one stands.
-    if (!rt.turn) this.settlePendingFinish(st);
+    // back for one stands, and a helper's held turn ends its run.
+    if (!rt.turn) {
+      this.settlePendingFinish(st);
+      this.settleHelperPending(st);
+    }
     rt.idleTimer?.cancel();
     rt.idleTimer = undefined;
     this.log.info('session ended', { threadId: rec.id, error: err?.message });
@@ -4027,7 +4121,12 @@ export class Runner {
       // wrote the transcript but before its init reached the runner, so
       // sessionUsed never got set. Resume it instead, once (4 Nov 2026).
       const inUse = Boolean(err && !rt.resumed && /Session ID \S+ is already in use/i.test(err.message));
-      if (((notFound && rt.resumed) || inUse) && !rt.retriedFresh) {
+      // Not a coordinator's helper: a fresh session would have only the
+      // message resuming it (a restart's carry-on, a resumeHelper), not its
+      // brief. Its turn fails instead and its coordinator hears, to start a
+      // new helper from the checkpoint (Codex's review, 26 Nov 2026).
+      const freshOk = !(notFound && rec.coordinatorHelperFor);
+      if (((notFound && rt.resumed) || inUse) && freshOk && !rt.retriedFresh) {
         this.cli(st, { kind: 'retryFresh' });
         if (inUse) {
           rec.sessionUsed = true;
@@ -4233,20 +4332,23 @@ export class Runner {
     // when moving pools or picking a model from another provider in the same pool.
     const activePool = pool ?? (params.accountId === undefined && params.poolId === undefined && rec.poolId ? this.poolById(rec.poolId) : undefined);
     let toAccountId = params.accountId;
-    // The provider the call asks for, when it says (or its model does): in
-    // a pool with both, a Codex or Antigravity model picked from the menu goes
-    // to that provider's login, even when the thread's current login is in that pool too.
-    const wanted = params.provider ?? (params.model ? this.modelProvider(params.model) : undefined);
+    const accounts = activePool ? this.usableAccounts() : [];
+    const modelMembers = activePool && params.model
+      ? modelAccounts(poolAccounts(activePool, accounts).filter((a) => !params.provider || a.provider === params.provider), params.model)
+      : [];
+    const wanted = params.provider ?? modelMembers.find((a) => a.provider === rec.provider)?.provider ?? modelMembers[0]?.provider;
     const otherProvider = wanted !== undefined && wanted !== rec.provider && activePool?.accountIds.some((id) => this.accounts.get(id)?.provider === wanted);
-    if (activePool && (pool ? !activePool.accountIds.includes(rec.accountId) || otherProvider : otherProvider)) {
-      const accounts = this.usableAccounts();
+    const needsModelLogin = modelMembers.length > 0 && !modelMembers.some((a) => a.id === rec.accountId);
+    if (activePool && (otherProvider || needsModelLogin || (pool && !pool.accountIds.includes(rec.accountId)))) {
       const provider = otherProvider ? wanted : rec.provider;
-      let id = pickInPool(activePool, accounts, { provider });
-      if (!id && !otherProvider) {
+      const candidates = modelMembers.length ? modelMembers : accounts;
+      let id = pickInPool(activePool, candidates, { provider });
+      if (!id && !otherProvider && !modelMembers.length) {
         const next = nextLogin(activePool, accounts, rec, this.clock.now());
         if (!('waitUntil' in next)) id = next.accountId;
       }
-      toAccountId = id ?? poolAccounts(activePool, accounts).find((a) => !otherProvider || a.provider === wanted)?.id ?? poolAccounts(activePool, accounts)[0]?.id;
+      const members = poolAccounts(activePool, candidates);
+      toAccountId = id ?? members.find((a) => a.provider === provider)?.id ?? members[0]?.id;
     }
     if (params.title !== undefined) {
       rec.title = cutSafely(params.title.trim(), 200) || rec.title;
@@ -4343,6 +4445,10 @@ export class Runner {
       model = checked.model;
       effort = checked.effort;
       for (const text of checked.notes) this.emit(st, { type: 'system.note', text }, rt.turn?.turnId);
+    }
+    if (params.model !== undefined || providerChanged || model !== rec.model) {
+      if (account && model && model === params.model) rec.explicitModel = explicitModelKind(account, model);
+      else delete rec.explicitModel;
     }
     if (model !== rec.model) {
       if (model) rec.model = model;
@@ -4615,17 +4721,39 @@ export class Runner {
     const card = rec.needs;
     if (!card?.asks || card.seq !== asksSeq || card.seq !== rec.lastTurnCompletedSeq) throw new RpcError(ErrorCode.badParams, "That isn't the thread's open card of asks.");
     if (!Number.isInteger(index) || index < 0 || index >= card.asks.length) throw new RpcError(ErrorCode.badParams, 'No such ask.');
+    if (card.resolved?.includes(index)) throw new RpcError(ErrorCode.badParams, 'That decision was already handled on the task board.');
     const set = new Set(card.ticked);
     if (ticked) set.add(index);
     else set.delete(index);
     card.ticked = [...set].sort((a, b) => a - b);
-    // Ticking means Mike is looking at it, so the tick doesn't make the
-    // thread unread.
+    this.publishAskTicks(st, card);
+    return { thread: this.summary(st) };
+  }
+
+  resolveCoordinatorAsks(st: ThreadState, indexes: number[]): void {
+    const card = st.rec.needs;
+    if (!card?.asks || card.seq !== st.rec.lastTurnCompletedSeq) return;
+    const resolved = new Set(card.resolved);
+    const count = resolved.size;
+    for (const index of indexes) resolved.add(index);
+    if (resolved.size === count) return;
+    const previous = card.resolved;
+    card.resolved = [...resolved].sort((a, b) => a - b);
+    try {
+      this.publishAskTicks(st, card);
+    } catch (error) {
+      card.resolved = previous;
+      throw error;
+    }
+  }
+
+  private publishAskTicks(st: ThreadState, card: NonNullable<ThreadRecord['needs']>): void {
+    const { rec } = st;
+    const ticked = [...new Set([...(card.ticked ?? []), ...(card.resolved ?? [])])].sort((a, b) => a - b);
     const caughtUp = rec.lastSeenSeq >= rec.lastSeq;
-    const ev = this.emit(st, { type: 'asks.ticked', asksSeq, ticked: card.ticked });
+    const ev = this.emit(st, { type: 'asks.ticked', asksSeq: card.seq, ticked, ...(card.resolved?.length ? { resolved: card.resolved } : {}) });
     if (caughtUp) rec.lastSeenSeq = ev.seq;
     this.markDirty(st);
-    return { thread: this.summary(st) };
   }
 
   // A quiet wake (HibernationPart.wake) wants Mike once no schedule will
@@ -4917,6 +5045,11 @@ export class Runner {
   // one started. One that can't be written (disk full) stays at the front.
   kickQueue(st: ThreadState): boolean {
     if (this.stopping || st.rt.editing || st.rt.moving || st.rt.holds?.size || this.botWorkspaceBlocked?.(st.rec)) return false;
+    // A paused, stopping or turned-off coordinator (or its helper) keeps
+    // its queue: popping a message only to fail it at dispatch lost helper
+    // reports on a pause or handover (Gemini's review, 26 Nov 2026). Resume
+    // and turning coordinators back on kick it again.
+    if (this.coordinators?.dispatchRefusal(st.rec.id)) return false;
     try {
       this.prepareQueue(st);
     } catch (e) {
@@ -5071,6 +5204,17 @@ export class Runner {
     if (st.rt.deleted) throw new Error('The thread was deleted.');
     this.flushDeltas(st);
     const log = this.store.log(st.rec.id);
+    if (body.type === 'turn.completed' && body.outcome === 'completed' && this.coordinators) {
+      const pending = body.needs === 'you' ? body.asks ?? [] : [];
+      const asks = this.coordinators.bindAsks(st.rec.id, pending, log.lastSeq + 1);
+      if (pending.length) {
+        if (asks.length) body.asks = asks;
+        else {
+          delete body.asks;
+          body.needs = 'nothing';
+        }
+      }
+    }
     const event = { seq: log.lastSeq + 1, ts: this.isoNow(), threadId: st.rec.id, ...(turnId ? { turnId } : {}), ...body } as PersistedEvent;
     log.append(event);
     st.rec.lastSeq = event.seq;
@@ -5229,6 +5373,11 @@ export class Runner {
     const afterJobs = this.asksHeld(st);
     const unfinished = running || (this.coordinators?.forThread(rec.id) ? afterJobs : agentsStillWorking(background, afterJobs));
     const privateBotId = rec.privateBotId ?? this.pendingBotPrivacy?.(rec.id);
+    const card = rec.needs?.seq === rec.lastTurnCompletedSeq ? rec.needs : undefined;
+    const asks = card?.asks;
+    const active = card && asks && this.coordinators?.activeAsks(rec.id, asks, card.seq);
+    const cleared = Boolean(asks?.length && active?.length === 0);
+    const pendingReviews = rec.reviews?.filter((review) => review.status === 'pending' && this.coordinators?.reviewAskVisible(rec.id, review.id) !== false).length;
     const s: ThreadSummary = {
       id: rec.id,
       ...(rec.botLink && !rec.botWorker ? { botLink: rec.botLink } : {}),
@@ -5244,7 +5393,7 @@ export class Runner {
       // (docs/protocol/needs-you.md, "Needs you"). A pending design review only
       // counts once the turn ends: show_options doesn't block, and Mike
       // didn't want a "Needs you" (or a phone push) mid-turn.
-      needsYou: (!unfinished && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || this.quietWakeShows(rec) || (!unfinished && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
+      needsYou: (!unfinished && Boolean(pendingReviews)) || rec.status === 'waiting' || Boolean(rec.forceUnread) || this.quietWakeShows(rec) || (!unfinished && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !cleared && !this.saidNothing(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -5258,16 +5407,15 @@ export class Runner {
     if (rec.waitingForRoom) s.waitingForRoom = { ...rec.waitingForRoom };
     if (rec.carryOnAtReset === false) s.carryOnAtReset = false;
     if (rec.waitingForNetwork) s.waitingForNetwork = { since: rec.waitingForNetwork.since };
-    if (rec.needs && rec.needs.seq === rec.lastTurnCompletedSeq) {
-      s.needs = rec.needs.needs;
-      if (afterJobs) s.asksAfterJobs = true;
-      if (rec.needs.asks) {
-        const ticked = new Set(rec.needs.ticked);
-        s.asks = rec.needs.asks.map((a, i) => (ticked.has(i) ? { ...a, ticked: true as const } : a));
-        s.asksSeq = rec.needs.seq;
+    if (card) {
+      s.needs = cleared ? 'nothing' : card.needs;
+      if (afterJobs && !cleared) s.asksAfterJobs = true;
+      if (asks && !cleared) {
+        const ticked = new Set([...(card.ticked ?? []), ...(card.resolved ?? [])]);
+        s.asks = asks.map((a, i) => (ticked.has(i) || (active && !active.includes(a)) ? { ...a, ticked: true as const } : a));
+        s.asksSeq = card.seq;
       }
     }
-    const pendingReviews = rec.reviews?.filter(r => r.status === 'pending').length;
     if (pendingReviews) s.pendingReviews = pendingReviews;
     if (rec.model) s.model = rec.model;
     if (rec.effort) s.effort = rec.effort;

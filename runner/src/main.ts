@@ -78,6 +78,7 @@ import { UsageHistory } from './usage-history.ts';
 import { TokenTally } from './token-tally.ts';
 import { usageStatsMethods } from './usage-stats.ts';
 import { Relay } from './relay.ts';
+import { applyShared, LoginSharer, mergedList, openShared, type SharedLogin } from './login-share.ts';
 import { VirtualRunners } from './virtual-runners.ts';
 import { RpcServer } from './rpc.ts';
 import { AppSeen } from './app-seen.ts';
@@ -100,7 +101,7 @@ import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
 import { SelfProfiler, profileMethods, watchStalls } from './self-profile.ts';
 import { TrustOffThread } from './trust-off-thread.ts';
 import { InstructionsStore, instructionsMethods } from './instructions.ts';
-import { ConvexSync, convexPoster, convexUploader, defaultRunnerName, ensureRunnerId, keyRejected, readSyncKey } from './sync.ts';
+import { ConvexSync, convexPoster, convexUploader, defaultRunnerName, ensureRunnerId, keyRejected, readSyncKey, SHARE_LOGINS_API_VERSION } from './sync.ts';
 import { BOX_NO_SCHEDULES, BoxFolderBroken, bootBox, readBoxSecrets, enterBoxEnv, markSetUp, prepareBoxFolder, readBoxBoot, repoFolderName, setBaseline, setSaveHold, type ActionPost, type BoxSecrets } from './box-mode.ts';
 import { BoxProcesses } from './box-procs.ts';
 import { asSave, closeSpawns, installSpawnGate, openSpawns } from './spawn-gate.ts';
@@ -758,6 +759,41 @@ async function main(): Promise<void> {
   bootStep('threads');
   // Answers to ask_secret go after a day (docs/protocol/threads.md, "Secrets").
   runner.secrets.startSweeping((e) => log.warn('secret sweep failed', { error: String(e) }));
+  // The main Mac's logins, one share at a time (login-share.ts applyShared).
+  let sharing: Promise<unknown> = Promise.resolve();
+  const takeSharedLogins = (entries: { email: unknown; box: unknown }[]): Promise<unknown> => {
+    const go = async () => {
+      const wanted: SharedLogin[] = [];
+      const failed: { email: string; message: string }[] = [];
+      for (const e of entries.slice(0, 20)) {
+        try {
+          wanted.push(openShared((b, info) => runner.secrets.openBytes(b, info), syncRunnerId, e));
+        } catch (err) {
+          if (typeof e.email === 'string') failed.push({ email: e.email.toLowerCase(), message: (err as Error).message });
+        }
+      }
+      accounts.rescanNow();
+      const answer = await applyShared(
+        {
+          accountsDir: cfg.accountsDir ?? path.join(cfg.home, 'accounts'),
+          tokenStatsAccountsDir: cfg.tokenStatsAccountsDir,
+          claudeMainDir: cfg.claudeMainDir,
+          claudeMainJson: cfg.claudeMainJson,
+          makePrivate: (dir) => makePrivate(dir),
+        },
+        wanted,
+        failed,
+        runner.safeAccounts(),
+      );
+      accounts.rescanNow();
+      runner.rescanAccounts();
+      log.info('took logins from the main Mac', { logins: answer.logins.map((l) => `${l.email} ${l.state}`), removed: answer.removed.map((r) => r.accountId) });
+      return answer;
+    };
+    const p = sharing.then(go, go);
+    sharing = p.catch(() => undefined);
+    return p;
+  };
   // When this process started: the heartbeat sends it, and runners.list
   // gives it for this runner too (the app's Runners panel says "up 3h").
   const startedAt = new Date().toISOString();
@@ -1091,12 +1127,18 @@ async function main(): Promise<void> {
       // The Mac's Runners panel's Year-long token… (year-token-maker.ts); a
       // box's login is its cloud token, so not there.
       ...(box ? {} : { yearToken: (accountId: string, p: { code?: string; check?: boolean; cancel?: boolean }) => runner.yearToken(accountId, p) }),
+      // The main Mac's Use a reset for a login here that it has no twin of.
+      useReset: (accountId: string) => runner.useReset(accountId),
+      // The main Mac's Use this Mac's Claude logins (login-share.ts): its
+      // logins sealed to this runner's secrets key, set up in accounts/.
+      // A box's login is its cloud token, so not there.
+      ...(box ? {} : { loginsSealKey: () => runner.secrets.publicKey(), loginsShare: (logins: { email: unknown; box: unknown }[]) => takeSharedLogins(logins) }),
       // A box's one thread, under its own id, in its clone, on its one login.
       ...(box
         ? {
             create: (p: Parameters<typeof runner.create>[0]) => {
               if (box.broken) throw new Error(`This box can't start its thread: ${box.broken}`);
-              return runner.create({ ...p, id: box.secrets.threadId, cwd: box.cwd, accountId: 'claude-main' });
+              return runner.createAfterModelProbe({ ...p, id: box.secrets.threadId, cwd: box.cwd, accountId: 'claude-main' });
             },
             save: saveBox,
           }
@@ -1627,6 +1669,66 @@ async function main(): Promise<void> {
     clock: realClock,
     log,
   }));
+  // Use this Mac's Claude logins on another runner (login-share.ts): the
+  // Runners panel's switches, the main Mac's key only.
+  const loginSharer = new LoginSharer({
+    file: path.join(cfg.home, 'login-share.json'),
+    accounts: () => runner.safeAccounts(),
+    pools: () => runner.pools(),
+    claudeMainJson: cfg.claudeMainJson,
+    blocked: () => {
+      const src = sync.relaySource();
+      if (!src) return 'Sharing logins needs sync on.';
+      if (!sync.ownerKey()) return "Only the main Mac's runner shares its logins.";
+      if (src.apiVersion < SHARE_LOGINS_API_VERSION) return `Sharing logins needs backend API ${SHARE_LOGINS_API_VERSION}; it's on ${src.apiVersion}. Deploy it from the main Mac.`;
+      return undefined;
+    },
+    runner: (id) => {
+      if (id === syncRunnerId) return { name: 'this Mac', online: true, self: true };
+      const r = sync.remoteNow().runners.find((x) => x.id === id);
+      return r ? { name: r.name, online: r.online, ...(r.box ? { box: true } : {}) } : undefined;
+    },
+    sealKey: (id) => relay.loginsSealKey(id),
+    // Checked in LoginSharer (cleanAnswer): only what's that runner's word.
+    share: async (id, logins) => (await relay.shareLogins(id, logins)) as never,
+    online: async () => {
+      const rows = (await sync.ownerCall('query', 'sync:runnersList', {})) as { runnerId: string; lastSeenAt: number }[] | null;
+      return rows ? new Set(rows.filter((r) => Date.now() - r.lastSeenAt < 3 * 60_000).map((r) => r.runnerId)) : undefined;
+    },
+    setShared: async (id, add, remove) => {
+      const rows = ((await sync.ownerCall('query', 'sync:runnerLogins', {})) ?? []) as { runnerId: string; live: boolean; shared: { provider: string; email: string }[] }[];
+      const row = rows.find((r) => r.runnerId === id && r.live);
+      // A runner on the main key needs no list.
+      if (!row) return;
+      const next = mergedList(row.shared, add, remove);
+      // Handed over while that was read: the new runner writes it now.
+      if (loginSharer.isStopped()) throw new Error('This runner handed over.');
+      if (next) await sync.ownerCall('mutation', 'sync:setRunnerLogins', { runnerId: id, logins: next });
+    },
+    known: async (id) => {
+      const rows = (await sync.ownerCall('query', 'sync:runnersList', {})) as { runnerId: string }[] | null;
+      return rows ? rows.some((r) => r.runnerId === id) : undefined;
+    },
+    clock: realClock,
+    log,
+  });
+  if (!copyOfReal) {
+    runner.onAccountsChanged = () => void loginSharer.check();
+    loginSharer.start();
+  }
+  methods['runners.sharedLogins'] = () => {
+    const blocked = loginSharer.blocked();
+    return { runners: loginSharer.list(), ...(blocked ? { blocked } : {}) };
+  };
+  methods['runners.shareLogins'] = async (p) => {
+    const { runnerId, on } = (p ?? {}) as { runnerId?: unknown; on?: unknown };
+    if (typeof runnerId !== 'string' || !runnerId || typeof on !== 'boolean') throw new RpcError(ErrorCode.badParams, 'runnerId and on, please');
+    try {
+      return await loginSharer.set(runnerId, on);
+    } catch (e) {
+      throw new RpcError(ErrorCode.badParams, (e as Error).message);
+    }
+  };
   // Virtual runners from the Mac (virtual-runners.ts): a thread started on
   // one, and a login's cloud token for its boxes, on the main Mac's key.
   const virtualRunners = new VirtualRunners({
@@ -2102,6 +2204,8 @@ async function main(): Promise<void> {
   step('resume after restart', () => restarter.resumeAfterRestart());
   step('tell stopped work', () => runner.tellStoppedWork());
   step('carry on stopped', () => runner.carryOnStopped());
+  // Coordinators' hidden helpers a restart cut off (coordinators.ts).
+  if (!copyOfReal && !box) step('carry on coordinator helpers', () => coordinators.carryOnAfterRestart());
   // A thread waited on may have finished while the runner was down. Only
   // now: waking one starts its CLI, whose tools need what's set up above.
   runner.holdWaits = false;
@@ -2139,6 +2243,7 @@ async function main(): Promise<void> {
     if (leavingAfterError) armStopDeadline();
     cancelMarkGood();
     clockJumps.stop();
+    loginSharer.stop();
     updater.stop();
     reinstaller.stop();
     upstream.stop();
@@ -2167,7 +2272,9 @@ async function main(): Promise<void> {
     keepAwake.stop();
     connectors.stop();
     projects.stop();
-    coordinators.stop();
+    // Not after an uncaught error, which may have been a helper's doing
+    // (coordinators.ts, start()).
+    coordinators.stop({ graceful: !leavingAfterError });
     usage.stop();
     spareWeek.stop();
     mailWatch.stop();
@@ -2229,8 +2336,11 @@ async function main(): Promise<void> {
     draining = true;
     log.info('starting the handover', { keeps });
     try {
-      await coordinators.handover();
+      await coordinators.handover({ afterError: leavingAfterError });
       cancelMarkGood();
+      // The new runner sends shared logins from here on, from the same file.
+      loginSharer.stop();
+      runner.onAccountsChanged = undefined;
       updater.stop();
       reinstaller.stop();
       upstream.stop();

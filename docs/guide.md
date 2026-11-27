@@ -1265,16 +1265,20 @@ with a charter, starting to-dos and a note on where things stand (a thread that
 asks before edits puts up a card first). It runs on this Mac; its
 conversation stays in a Coordinators section below Starred by default, while routine helpers
 run as hidden sessions out of the inbox and appear on the Activity tab.
-The project home has Conversation, Activity, To-dos and Threads tabs. To-dos
-lists everything still open on the project, not just helpers' jobs: steps only
-you can take and decisions you still have to make are on it too. The
-Highlights pane beside the chat has three parts: sticky **Open loops** at
-the top (questions you asked it, staying until you close them, plus a line for
-each decision on its Needs you card; you answer those on the card, and clicking
-the line takes you there), the scrollable **Project brief** (state,
-goals, active work and links), and a collapsed **Agent memory** drawer at the
-bottom for technical notes read and written by the coordinator and its helpers.
-You can edit the brief or open Agent memory to edit the raw notes directly; if
+The project home has **Conversation**, **Activity**, **Tasks** and **Threads**
+tabs. On a narrow window the tabs move below the bar. Tasks shows the
+coordinator's work items, their progress and any ungrouped tasks. Select a task
+to see what's happening, what counts as done and where the work came from.
+Use the Add box to send the coordinator a request.
+
+Highlights shows the same tasks under **Needs you**, **In flight** and
+**Ready to close**. Answer a decision or mark your step done from either view.
+**Not now** can bring a decision back tomorrow at 9 a.m., on a date you pick
+or once another task is done. **Got it, close** confirms that work is finished,
+and **Undo** reopens it.
+
+The **Project brief** holds state, goals and links. Open the **Agent memory**
+drawer to see and edit the raw notes the coordinator and its helpers use. If
 another thread changed a field while you were editing, your draft stays open so
 you can merge it. Helpers report to the coordinator, which checks their results
 and brings you decisions it cannot settle. Ask it for a side job that isn't part of the
@@ -1305,17 +1309,18 @@ It looks after a thread's first message and when a turn ends, then catches
 up at most every 20 minutes while the thread keeps going. A catch-up after
 only a quick reply is skipped without asking anything.
 
-Each look is one short call to Haiku, Claude's small, cheap model, rather
-than the model your threads run on. When it wants to file a thread in a
-project the thread hasn't touched the folders of, one more short call, to
-Opus, checks the thread is really working on that project and doesn't just
-share a subject with it. They run on one of your own Claude
-logins: the one the pool would pick next in the pool chosen under Runs on (the
-same pool that writes thread titles, also in Settings › Models), and they
-count towards that login's usage like any other call. When every login in
-the pool is out of room it waits, and with only Codex logins it doesn't
-run at all. Threads in a private folder (Settings › Models) are never sent
-to it.
+Each look is one short call to a small, cheap model (Haiku on Claude),
+rather than the model your threads run on. When it wants to file a thread
+in a project the thread hasn't touched the folders of, one more short call
+(Opus on Claude) checks the thread is really working on that project and
+doesn't just share a subject with it. They run on the pool chosen under
+Runs on (the same pool that writes thread titles, also in Settings ›
+Models), trying Claude first, then Codex, then Grok or OpenCode logins in
+that pool (or your custom provider order in Settings › Models), and they
+count towards that login's usage like any other call. When every supported
+login in the pool is out of room it waits, and with no pool picked or no
+supported login in it, it doesn't run. Threads in a private folder
+(Settings › Models) are never sent to it.
 
 The Librarian view lists what it did and what it will look at next. Click a
 project name in its log to open that project's page. Hover
@@ -1605,8 +1610,8 @@ If a login stops working (you signed out, or its sign-in ended), the
 thread's turn fails and a line above its messages says so, naming the login
 and its email ("claude-1 (you@example.com) is signed out."). Sign in… opens Terminal on that login's own sign-in, and Send
 again sends your last message again once you're done. A thread in a pool
-doesn't wait for you: it moves to another login in the pool and carries on,
-and the pool leaves the signed-out login alone until you sign it back in.
+moves and carries on if another login can run it. If you picked a
+specific model, the other login has to offer it.
 A schedule pinned to a signed-out login runs on another login in a pool
 that login is in, and its thread says which. If no pool has another login
 for it (a login kept apart for work, say), the run fails once with the
@@ -1643,6 +1648,17 @@ on claude.ai's page for it; click Authorize, then Copy code on the page it
 ends on, and Paste code back in the panel. That machine makes the token and
 keeps it, and it never leaves there. It needs `python3` on that machine,
 and your main Mac's app (it goes through your Convex backend).
+
+Or skip signing in there at all: a year-long token works on any machine, so
+that machine's card in the Runners panel also has Use this Mac's Claude
+logins. Switch it on and your main Mac sends its Claude logins that have
+year-long tokens there, each sealed so only that machine can open it, and
+they show in its list of logins straight away. A renewed token goes again
+by itself. Logins that are hidden, have a note (like "Convex work only"), or
+are only in pools tied to folders stay on your main Mac. A login already
+signed in on that machine with the same email is left as it is. Switch it
+off and that machine removes the logins it got this way, and nothing else.
+A machine that's offline gets them when it's back.
 
 The sign-in command comes from the runner's provider list, so Cursor opens
 `agent login`, for example. Sign in… is offered only when the login's own
@@ -1702,8 +1718,9 @@ do anything. A folder you've trusted in Grok runs its own Grok hooks, which
 could act before anything asks you, so there (and in your home folder, which
 Grok always trusts) Grok threads need Full access;
 take the folder out of Grok's trusted folders (`/hooks-untrust`) to use Ask
-or Auto. Denying a card ends Grok's turn, as it does in Grok's own app. Grok's models each list their effort levels (low to extra
-high), and the effort you pick is the one it runs at. Small jobs (titles,
+or Auto. Denying a card ends Grok's turn, as it does in Grok's own app. Grok,
+Gemini and OpenCode models that support effort levels each list theirs in the
+model picker, and the effort you pick is the one the thread runs at. Small jobs (titles,
 summaries, the librarian and fuzzy Wake when…) run on the pool you pick in
 Settings > Models, trying Claude first, then Codex, then Grok or OpenCode
 logins in that same pool when a provider is out of room, or in any custom
@@ -1725,7 +1742,8 @@ none picked or no supported login in the pool, threads keep the first line
 of their first message as their title.
 
 Logins are grouped into pools, one for Claude and one for Codex to begin
-with (Settings > Pools). A new thread in a pool starts on the login with room whose
+with (Settings > Pools). Picking a model starts the thread on a login
+that offers it. A new thread in a pool starts on the login with room whose
 weekly limit resets soonest, so a week's leftover gets spent before it's
 lost rather than draining the login with the most room. A login is used
 until it's all but out (under 1% left), so none of a week goes to waste. When
@@ -1734,9 +1752,10 @@ another login in the pool with room, and carries on from where it was. A
 quiet line in the conversation says so each time: the login it moved to,
 the one that ran out, and when that one is back (for a thread on another
 of your machines too, and on the phone and the website). When
-none has room, the thread waits and carries on by itself once a limit
-resets, and the line says when that is. With only one login, that means it waits for that login's limit to
-reset. A thread pinned to one login does the same on that login. Either
+no eligible login has room, the thread waits for a limit to reset. If
+you picked a specific model, the thread only moves automatically to
+another login on the same provider that offers that model. A pinned
+thread waits for its own login's limit to reset. Either
 way, the box at the top of the message field says what happened and offers
 Switch to another login now; set its Carry on by itself to No and the
 thread waits for your next message instead.
@@ -1745,6 +1764,19 @@ gives out free ones, listed under Usage limit resets in its settings), the
 box also offers Use a reset: it restores that login's 5-hour and weekly
 limits at once, spending the reset that expires soonest, and the thread
 carries on. Threadbear never uses one by itself.
+You don't have to wait for a thread to stop to hear about one, though.
+When a login with a reset left is out of room, or its soonest reset
+expires within 3 days while it has used more than 30% of its week (so
+using it still buys something back), Threadbear says so quietly where you
+already look: the Usage button gets a dot and its tooltip names the login,
+the login's row in Usage says how many resets it has and offers Use a
+reset (even when the row is shut), and the login lists in the message
+box (the login picker, and the Login line in the model menu) say "2
+resets left" beside it with Use a reset. It's one subscription however
+many machines it's signed in on, so the count is the newest from any of
+them, and a reset used on one counts on all. No notification and no new
+thread; the hint goes once you use the reset, the login's room comes
+back, or the reset expires. `tb accounts` and `list_accounts` say it too.
 A Codex login that reads as used up is asked for its limits again every
 10 minutes (free, no turn), so a reset you use in Codex itself shows up
 here within minutes and that login is used again.
@@ -2316,9 +2348,16 @@ Other changes are done on the Mac or by asking an agent. The gear
 has the appearance and Sign out. Pictures you paste show there too: they go to
 your Convex deployment as they are, so nothing can scrub a secret from one, and
 `"sync": { "pastedPictures": false }` in `runner.json` keeps them on the Mac. A tool line opens to what the tool did if its runner has full sync on (it starts off; `tb settings full on|off` changes it, and docs/on-your-mac.md says what it sends), and its screenshots show when you tap them. The pencil beside the search starts a new
-thread on a runner's default folder and login. On your Mac,
+thread in the runner's default folder, with pickers for runner, model and
+effort (or Default for each). On your Mac,
 `threadbear://thread/<id>` opens a thread in the app instead (the Open
-thread button on a tab BrowserBear has marked for an agent uses it). With
+thread button on a tab BrowserBear has marked for an agent uses it). Another
+app can start a thread for you with `threadbear://new?text=<words>`, plus
+`project=<id>` and `folder=<one of its folders>` on the Mac: the new-thread
+box opens with the words in it, in that project and folder if this Mac has
+them, and nothing is sent until you press Send. The iPhone app takes the same
+link and opens its New thread sheet with the words (Earshot's Ask Claude
+button uses it to start a thread that works out who a voice was). With
 the new desktop app installed beside the Mac app, those links open the new
 one; `desktop/scripts/thread-links.sh swift` sends them back to the Mac app.
 
