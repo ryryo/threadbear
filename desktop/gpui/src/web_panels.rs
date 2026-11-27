@@ -2285,12 +2285,13 @@ pub(crate) fn fill_pane_dump(
 
 // ---------------------------------------------------------------- automation
 
-/// `{"cmd":"webPanel","do":"eval"|"click"|"drop"|"focus"|"wait"|"choose", "key"?, "js"?, "selector"?, "times"?, "file"?, "title"?, "deployment"?, "wait"?}`:
+/// `{"cmd":"webPanel","do":"eval"|"click"|"pointer"|"drop"|"focus"|"wait"|"choose", "key"?, "js"?, "selector"?, "times"?, "file"?, "title"?, "deployment"?, "wait"?}`:
 /// a script's way into a panel's page, the one shown last unless `key` names
 /// another. `eval` runs `js` in the page and answers its value; `click`
 /// clicks the element `selector` finds with a person's gesture behind it
 /// (DevTools' `userGesture`, which is what decides whether a link leaves the
-/// panel; `times` clicks again straight after); `drop` drops the file at
+/// panel; `times` clicks again straight after); `pointer` sends a click or drag
+/// in CSS viewport points; `drop` drops the file at
 /// `file` on it as the Finder
 /// would; `focus` gives the page
 /// the keyboard, as a click in it does; `wait` waits until it's done loading
@@ -2366,6 +2367,28 @@ pub(crate) async fn automation(cmd: &Value, cx: &mut AsyncApp) -> Result<Value, 
             return Ok(
                 json!({ "value": answer["result"]["value"], "page": cx.update(|cx| dump_page(&key, cx)) }),
             );
+        }
+        "pointer" => {
+            let x = cmd["x"].as_f64().ok_or("pointer needs x")?;
+            let y = cmd["y"].as_f64().ok_or("pointer needs y")?;
+            let to_x = cmd["toX"].as_f64().unwrap_or(x);
+            let to_y = cmd["toY"].as_f64().unwrap_or(y);
+            for (kind, at_x, at_y, button, buttons) in [
+                ("mouseMoved", x, y, "none", 0),
+                ("mousePressed", x, y, "left", 1),
+                ("mouseMoved", to_x, to_y, "none", 1),
+                ("mouseReleased", to_x, to_y, "left", 0),
+            ] {
+                page.devtools(
+                    "Input.dispatchMouseEvent",
+                    json!({
+                        "type": kind, "x": at_x, "y": at_y, "button": button, "buttons": buttons,
+                        "clickCount": i32::from(button == "left"),
+                    }),
+                )
+                .await
+                .map_err(|_| "the page went away".to_owned())??;
+            }
         }
         "click" => {
             let selector = cmd["selector"].as_str().ok_or("click needs selector")?;

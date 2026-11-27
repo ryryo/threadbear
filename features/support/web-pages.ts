@@ -82,7 +82,10 @@ document.getElementById('late-link').onclick = () => {
   navigation.addEventListener('navigate', () => { open('${other}/video?0'); wait(6000); }, { once: true });
   link(1, '');
 };
-</script>`,
+</script>
+<div style="height:900px"></div>
+<button id="colored-pick" type="button" style="appearance:none;display:block;width:144px;height:48px;padding:0;border:0;background:rgb(24,167,85);color:white" onclick="this.dataset.activations = String(1 + Number(this.dataset.activations || 0))">Colored button</button>
+<div style="height:400px"></div>`,
     '/second': '<!doctype html><title>Second page</title><p>The site\'s second page.</p>',
     // Buttons at known places, and every press the page gets with where it
     // landed, for features/tools/panel-hits.ts.

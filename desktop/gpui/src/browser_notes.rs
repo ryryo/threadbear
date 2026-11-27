@@ -1,24 +1,23 @@
-// Capture a visible CEF page, then select on its still in GPUI. The page never
-// receives the pointer events used to mark it.
+// T3 Code's picker runs in the live page. GPUI owns the comment and the
+// review, so a site never receives the comment's keystrokes or the draft ID.
 
 mod geometry;
+mod live;
 
 use crate::highlights::{palette, SidePane};
 use crate::push_button::PushButton;
 use crate::style::px;
-use geometry::{clean_url, Rect};
+use geometry::clean_url;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{h_flex, v_flex, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
+use live::{Capture, LivePicker};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::Arc;
 use threadbear_core::reducer::ImageRef;
 use threadbear_core::tr;
-use threadbear_web::PanelPage;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct PageNote {
@@ -42,144 +41,44 @@ impl PageNote {
     }
 }
 
-struct Still {
-    preview: Arc<Image>,
-    width: f64,
-    height: f64,
-}
-
 pub(crate) struct Pick {
     thread: String,
-    page: Rc<PanelPage>,
+    live: Rc<LivePicker>,
     loads: u32,
     address: String,
     title: String,
-    still: Option<Still>,
-    bounds: Rc<Cell<Bounds<Pixels>>>,
-    drag: Option<(f64, f64)>,
-    rect: Option<Rect>,
+    ready: bool,
     element: bool,
-    locating: bool,
-    committing: bool,
     target: Option<String>,
     comment: Entity<InputState>,
-    keep_image: bool,
+    phase: Phase,
+}
+
+enum Phase {
+    Selecting,
+    Capturing,
+    Review {
+        capture: Option<Capture>,
+        keep: bool,
+    },
+    Saving,
 }
 
 impl Pick {
     fn valid(&self, thread: &str, cx: &App) -> bool {
         self.thread == thread
-            && self.page.loads() == self.loads
-            && self.page.address() == self.address
+            && !self.live.page.loading()
+            && self.live.page.loads() == self.loads
+            && self.live.page.address() == self.address
             && crate::web_panels::browser_page(thread, cx)
-                .is_some_and(|page| Rc::ptr_eq(&page, &self.page))
-    }
-
-    fn point(&self, position: Point<Pixels>) -> (f64, f64) {
-        let bounds = self.bounds.get();
-        let relative = position - bounds.origin;
-        let convert = |offset: Pixels, edge: Pixels| {
-            (f64::from(f32::from(offset)) / f64::from(f32::from(edge)).max(1.)).clamp(0., 1.)
-        };
-        (
-            convert(relative.x, bounds.size.width),
-            convert(relative.y, bounds.size.height),
-        )
+                .is_some_and(|page| Rc::ptr_eq(&page, &self.live.page))
     }
 }
 
-async fn devtools(page: &PanelPage, method: &str, params: Value, cx: &AsyncApp) -> Option<Value> {
-    let response = page.devtools(method, params);
-    let timeout = cx
-        .background_executor()
-        .timer(std::time::Duration::from_secs(5));
-    futures::pin_mut!(timeout);
-    match futures::future::select(response, timeout).await {
-        futures::future::Either::Left((Ok(Ok(result)), _)) => Some(result),
-        _ => None,
+impl Drop for Pick {
+    fn drop(&mut self) {
+        self.live.stop();
     }
-}
-
-async fn freeze(page: &PanelPage, cx: &AsyncApp) -> Option<Still> {
-    let metrics = devtools(page, "Page.getLayoutMetrics", json!({}), cx).await?;
-    let width = metrics["cssVisualViewport"]["clientWidth"].as_f64()?;
-    let height = metrics["cssVisualViewport"]["clientHeight"].as_f64()?;
-    if width <= 0. || height <= 0. {
-        return None;
-    }
-    let screenshot = devtools(page, "Page.captureScreenshot", json!({"format":"png"}), cx).await?;
-    let data = screenshot["data"].as_str()?;
-    if data.len() > 28 * 1024 * 1024 {
-        return None;
-    }
-    let image = threadbear_core::folders::base64_decode(data)?;
-    Some(Still {
-        preview: Arc::new(Image::from_bytes(ImageFormat::Png, image)),
-        width,
-        height,
-    })
-}
-
-async fn find_element(
-    page: &PanelPage,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    cx: &AsyncApp,
-) -> Option<(String, Rect)> {
-    let node = devtools(
-        page,
-        "DOM.getNodeForLocation",
-        json!({"x": x.floor(), "y": y.floor()}),
-        cx,
-    )
-    .await?;
-    let id = node["backendNodeId"].as_i64()?;
-    let desc = devtools(page, "DOM.describeNode", json!({"backendNodeId":id}), cx).await?;
-    let model = devtools(page, "DOM.getBoxModel", json!({"backendNodeId":id}), cx).await?;
-    let quad = model["model"]["border"].as_array()?;
-    let mut points = quad
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|xy| Some((xy[0].as_f64()? / w, xy[1].as_f64()? / h)));
-    let first = points.next()??;
-    let ((left, top), (right, bottom)) = points.try_fold((first, first), |(a, b), p| {
-        let (x, y) = p?;
-        Some(((a.0.min(x), a.1.min(y)), (b.0.max(x), b.1.max(y))))
-    })?;
-    let rect = Rect::between(
-        (left.clamp(0., 1.), top.clamp(0., 1.)),
-        (right.clamp(0., 1.), bottom.clamp(0., 1.)),
-    );
-    if rect.w == 0.
-        || rect.h == 0.
-        || !(rect.x..=rect.x + rect.w).contains(&(x / w))
-        || !(rect.y..=rect.y + rect.h).contains(&(y / h))
-    {
-        return None;
-    }
-    let tag: String = desc["node"]["localName"]
-        .as_str()?
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .take(64)
-        .collect();
-    Some((format!("Element: <{tag}>"), rect))
-}
-
-fn crop_png(still: Option<Arc<Image>>, rect: Option<Rect>) -> Option<Vec<u8>> {
-    let bytes = still?;
-    let picture =
-        image::load_from_memory_with_format(&bytes.bytes, image::ImageFormat::Png).ok()?;
-    let (x, y, w, h) = rect?.pixels(picture.width(), picture.height())?;
-    let mut out = std::io::Cursor::new(Vec::new());
-    picture
-        .crop_imm(x, y, w, h)
-        .write_to(&mut out, image::ImageFormat::Png)
-        .ok()?;
-    Some(out.into_inner())
 }
 
 impl SidePane {
@@ -201,47 +100,85 @@ impl SidePane {
         comment.update(cx, |s, cx| {
             s.set_placeholder(tr!("Describe what to change"), window, cx)
         });
-        // The actual browser stays painted until a capture is ready.
+        let live = Rc::new(LivePicker::new(page.clone()));
         self.browser_pick = Some(Pick {
             thread: thread.id,
             loads: page.loads(),
             address: page.address(),
             title: page.title(),
-            page: page.clone(),
-            still: None,
-            bounds: Rc::default(),
-            drag: None,
-            rect: None,
+            live: live.clone(),
+            ready: false,
             element,
-            locating: false,
-            committing: false,
             target: None,
             comment,
-            keep_image: true,
+            phase: Phase::Selecting,
         });
-        let ticket = self.browser_pick.as_ref().map(|p| p.bounds.clone());
-        cx.spawn(async move |this, cx| {
-            let picture = freeze(&page, cx).await;
-            let _ = this.update(cx, |this, cx| {
-                let Some(pick) = this
-                    .browser_pick
-                    .as_mut()
-                    .filter(|p| ticket.as_ref().is_some_and(|t| Rc::ptr_eq(&p.bounds, t)))
-                else {
+        cx.spawn_in(window, async move |this, cx| {
+            let ready = live.start(element, cx).await.is_some();
+            let _ = this.update_in(cx, |this, _, cx| {
+                let Some(pick) = this.pick_for(&live) else {
                     return;
                 };
-                if let Some(picture) = picture {
-                    pick.still = Some(picture);
+                if ready {
+                    pick.ready = true;
                 } else {
-                    this.browser_pick = None;
-                    this.browser_note_error =
-                        Some("Couldn't capture the page. Try again after it loads.");
+                    this.cancel_browser_note();
+                    this.browser_note_error = Some("Couldn't start selection on this page.");
                 }
                 cx.notify();
+            });
+            if !ready {
+                return;
+            }
+
+            while let Some(selection) = live.next().await {
+                let updated = this.update_in(cx, |this, window, cx| {
+                    let Some(pick) = this.pick_for(&live) else {
+                        return false;
+                    };
+                    if !matches!(pick.phase, Phase::Selecting) {
+                        return true;
+                    }
+                    let target = selection.label();
+                    if target.is_some() && !selection.frame && !selection.small {
+                        crate::web_panels::keyboard_to_app(window);
+                        pick.comment.update(cx, |s, cx| s.focus(window, cx));
+                    }
+                    pick.target = target;
+                    this.browser_note_error = if selection.frame {
+                        Some("Use Select area to mark something inside a frame.")
+                    } else if selection.small {
+                        Some("Drag a larger area to mark it.")
+                    } else if selection.lost {
+                        Some("The page moved. Choose the area again.")
+                    } else {
+                        None
+                    };
+                    cx.notify();
+                    true
+                });
+                if !matches!(updated, Ok(true)) {
+                    return;
+                }
+            }
+            let _ = this.update_in(cx, |this, _, cx| {
+                if this
+                    .pick_for(&live)
+                    .is_some_and(|p| matches!(p.phase, Phase::Selecting))
+                {
+                    this.cancel_browser_note();
+                    cx.notify();
+                }
             });
         })
         .detach();
         cx.notify();
+    }
+
+    fn pick_for(&mut self, live: &LivePicker) -> Option<&mut Pick> {
+        self.browser_pick
+            .as_mut()
+            .filter(|p| std::ptr::eq(p.live.as_ref(), live))
     }
 
     pub(crate) fn cancel_browser_note(&mut self) {
@@ -249,8 +186,18 @@ impl SidePane {
         self.browser_note_error = None;
     }
 
+    pub(crate) fn sync_browser_note(&mut self, thread: &str, cx: &mut Context<Self>) {
+        if self
+            .browser_pick
+            .as_ref()
+            .is_some_and(|p| !p.valid(thread, cx))
+        {
+            self.cancel_browser_note();
+        }
+    }
+
     #[cfg(feature = "automation")]
-    pub(crate) fn browser_note_dump(&self, thread: &str) -> Value {
+    pub(crate) fn browser_note_dump(&self, thread: &str, cx: &App) -> Value {
         let Some(pick) = self
             .browser_pick
             .as_ref()
@@ -258,63 +205,46 @@ impl SidePane {
         else {
             return Value::Null;
         };
-        let b = pick.bounds.get();
+        let Phase::Review { capture, .. } = &pick.phase else {
+            return json!({
+                "ready": pick.ready,
+                "target": pick.target,
+                "comment": pick.comment.read(cx).value().to_string(),
+            });
+        };
         json!({
-            "ready": pick.still.is_some(),
+            "ready": true,
             "target": pick.target,
-            "bounds": [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)],
+            "comment": pick.comment.read(cx).value().to_string(),
+            "review": true,
+            "crop": capture.as_ref().map(|capture| &capture.proof),
         })
     }
 
-    fn browser_select(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let Some(pick) = self.browser_pick.as_mut() else {
+    fn review_browser_note(&mut self, cx: &mut Context<Self>) {
+        let Some(pick) = self
+            .browser_pick
+            .as_mut()
+            .filter(|p| p.target.is_some() && matches!(p.phase, Phase::Selecting))
+        else {
             return;
         };
-        if pick.locating || pick.committing || pick.target.is_some() {
-            return;
-        }
-        let point = pick.point(position);
-        let Some(start) = pick.drag.take() else {
-            return;
-        };
-        if !pick.element {
-            let rect = Rect::between(start, point);
-            if rect.w < 0.005 || rect.h < 0.005 {
-                pick.rect = None;
-            } else {
-                pick.target = Some("Selected region".to_owned());
-                pick.rect = Some(rect);
-            }
-            cx.notify();
-            return;
-        }
-        let Some(still) = pick.still.as_ref() else {
-            return;
-        };
-        let (w, h) = (still.width, still.height);
-        let page = pick.page.clone();
-        let ticket = pick.bounds.clone();
-        pick.locating = true;
+        pick.phase = Phase::Capturing;
+        self.browser_note_error = None;
+        let live = pick.live.clone();
         cx.spawn(async move |this, cx| {
-            let element = find_element(&page, point.0 * w, point.1 * h, w, h, cx).await;
+            let capture = live.capture(cx).await;
             let _ = this.update(cx, |this, cx| {
                 let Some(pick) = this
-                    .browser_pick
-                    .as_mut()
-                    .filter(|p| Rc::ptr_eq(&p.bounds, &ticket))
+                    .pick_for(&live)
+                    .filter(|p| matches!(p.phase, Phase::Capturing))
                 else {
                     return;
                 };
-                pick.locating = false;
-                if let Some((target, rect)) = element {
-                    pick.target = Some(target);
-                    pick.rect = Some(rect);
-                } else {
-                    pick.element = false;
-                    this.browser_note_error = Some(tr!(
-                        "That element couldn't be selected. Drag a region instead."
-                    ));
-                }
+                pick.phase = Phase::Review {
+                    keep: capture.is_some(),
+                    capture,
+                };
                 cx.notify();
             });
         })
@@ -326,14 +256,14 @@ impl SidePane {
         let Some(thread) = self.thread(cx) else {
             return;
         };
-        if !self
+        let Some(pick) = self
             .browser_pick
-            .as_ref()
-            .is_some_and(|p| p.valid(&thread.id, cx) && !p.committing)
-        {
+            .as_mut()
+            .filter(|p| p.valid(&thread.id, cx))
+        else {
             return;
-        }
-        let Some(pick) = self.browser_pick.as_mut() else {
+        };
+        let Phase::Review { capture, keep } = &pick.phase else {
             return;
         };
         let Some(target) = pick.target.clone() else {
@@ -346,30 +276,28 @@ impl SidePane {
             comment: pick.comment.read(cx).value().trim().to_owned(),
             image: None,
         };
-        let still = pick
-            .still
+        let image = capture
             .as_ref()
-            .filter(|_| pick.keep_image)
-            .map(|s| s.preview.clone());
-        let wants_image = still.is_some();
-        let rect = pick.rect;
-        let ticket = pick.bounds.clone();
+            .filter(|_| *keep)
+            .map(|capture| capture.image.clone());
+        let wants_image = image.is_some();
         let client = self.client.clone();
         let Some(app) = self.app.upgrade() else {
             return;
         };
         let composer = app.update(cx, |app, cx| app.composer_for(&thread.id, window, cx));
-        pick.committing = true;
+        let live = pick.live.clone();
+        live.stop();
+        pick.phase = Phase::Saving;
         cx.spawn(async move |this, cx| {
-            if wants_image {
+            if let Some(image) = image {
                 let staged = cx
                     .background_executor()
                     .spawn(async move {
-                        let bytes = crop_png(still, rect)?;
                         crate::composer::stage_private(
                             &crate::composer::paste_base(),
                             "page-comment.png",
-                            &bytes,
+                            &image.bytes,
                         )
                     })
                     .await;
@@ -386,12 +314,8 @@ impl SidePane {
             let failed = wants_image && note.image.is_none();
             let _ = this.update(cx, |this, cx| {
                 composer.update(cx, |composer, cx| composer.add_page_note(note, cx));
-                if this
-                    .browser_pick
-                    .as_ref()
-                    .is_some_and(|p| Rc::ptr_eq(&p.bounds, &ticket))
-                {
-                    this.browser_pick = None;
+                if this.pick_for(&live).is_some() {
+                    this.cancel_browser_note();
                     if failed {
                         this.browser_note_error =
                             Some(tr!("The comment was added without an image."));
@@ -404,145 +328,183 @@ impl SidePane {
         cx.notify();
     }
 
-    pub(crate) fn render_browser_note(
-        &mut self,
-        thread: &str,
+    pub(crate) fn render_browser_note_controls(
+        &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self
-            .browser_pick
-            .as_ref()
-            .is_some_and(|p| !p.valid(thread, cx))
-        {
-            self.cancel_browser_note();
-        }
         let pick = self.browser_pick.as_ref()?;
-        let still = pick.still.as_ref()?;
         let p = palette(cx);
-        let bounds = pick.bounds.clone();
-        let down = cx.listener(|this, event: &MouseDownEvent, _, cx| {
-            if let Some(pick) = this
-                .browser_pick
-                .as_mut()
-                .filter(|p| p.target.is_none() && !p.locating)
-            {
-                pick.drag = Some(pick.point(event.position));
-                pick.rect = None;
-                cx.notify();
+        let summary = self.browser_note_error.unwrap_or(match &pick.phase {
+            Phase::Selecting if !pick.ready => "Starting selection…",
+            Phase::Selecting => pick.target.as_deref().unwrap_or(if pick.element {
+                "Click an element to select it."
+            } else {
+                "Drag over the area to select it."
+            }),
+            Phase::Capturing => "Capturing the selected area…",
+            Phase::Review { capture: None, .. } => {
+                "No image was captured. You can still add the comment."
             }
+            Phase::Review { .. } => "Review the image and comment.",
+            Phase::Saving => "Adding the comment to the draft…",
         });
-        let moved = cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-            if let Some(pick) = this.browser_pick.as_mut().filter(|p| !p.element) {
-                if let Some(start) = pick.drag {
-                    pick.rect = Some(Rect::between(start, pick.point(event.position)));
-                    cx.notify();
-                }
-            }
-        });
-        let up = cx
-            .listener(|this, event: &MouseUpEvent, _, cx| this.browser_select(event.position, cx));
-        let selected = pick.rect;
-        let view = div()
-            .id("browser-note-still")
-            .relative()
-            .flex_1()
-            .min_h_0()
-            .overflow_hidden()
-            .cursor(CursorStyle::Crosshair)
-            .child(
-                img(crate::fit_picture::bytes_source(still.preview.clone()))
-                    .size_full()
-                    .object_fit(ObjectFit::Fill),
-            )
-            .child(
-                canvas(
-                    move |bounds_at, _, _| {
-                        bounds.set(bounds_at);
-                        bounds_at
-                    },
-                    move |b, _, window, _| {
-                        if let Some(r) = selected {
-                            let area = Bounds::new(
-                                b.origin
-                                    + point(b.size.width * r.x as f32, b.size.height * r.y as f32),
-                                size(b.size.width * r.w as f32, b.size.height * r.h as f32),
-                            );
-                            window.paint_quad(fill(area, p.accent.opacity(0.30)));
-                        }
-                    },
-                )
-                .absolute()
-                .inset_0(),
-            )
-            .on_mouse_down(MouseButton::Left, down)
-            .on_mouse_move(moved)
-            .on_mouse_up(MouseButton::Left, up);
         let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
             this.cancel_browser_note();
             cx.notify();
         });
-        let attach =
-            cx.listener(|this, _: &ClickEvent, window, cx| this.attach_browser_note(window, cx));
-        let image = cx.listener(|this, _: &ClickEvent, _, cx| {
-            if let Some(pick) = &mut this.browser_pick {
-                pick.keep_image = !pick.keep_image;
-                cx.notify();
-            }
-        });
-        let mut controls = h_flex().gap(px(5.)).child(
+        let mut controls = h_flex().flex_wrap().gap(px(5.)).child(
             PushButton::new(
                 "browser-note-cancel",
                 tr!("Cancel"),
                 tr!("Cancel page comment"),
             )
             .small()
+            .disabled(matches!(pick.phase, Phase::Saving))
             .render(cx, cancel),
         );
-        let summary = pick.target.as_deref().unwrap_or(if pick.locating {
-            tr!("Finding the element…")
-        } else if pick.element {
-            tr!("Click an element to mark it.")
-        } else {
-            tr!("Drag over the area to mark.")
-        });
-        let mut editor = v_flex()
-            .p(px(6.))
-            .gap(px(4.))
-            .child(div().text_color(p.secondary).child(summary.to_owned()));
-        if pick.target.is_some() {
-            controls = controls
-                .child(
-                    PushButton::new(
-                        "browser-note-image",
-                        if pick.keep_image {
-                            tr!("Skip image")
-                        } else {
-                            tr!("Include image")
-                        },
-                        tr!("Choose whether the cutout is attached"),
-                    )
-                    .small()
-                    .disabled(pick.committing)
-                    .render(cx, image),
-                )
-                .child(
-                    PushButton::new(
-                        "browser-note-add",
-                        tr!("Add to draft"),
-                        tr!("Attach to this thread's draft"),
-                    )
-                    .small()
-                    .busy(pick.committing)
-                    .render(cx, attach),
+        match &pick.phase {
+            Phase::Selecting | Phase::Capturing => {
+                let review =
+                    cx.listener(|this, _: &ClickEvent, _, cx| this.review_browser_note(cx));
+                controls = controls.child(
+                    PushButton::new("browser-note-review", "Review", "Review selected page area")
+                        .small()
+                        .busy(matches!(pick.phase, Phase::Capturing))
+                        .disabled(pick.target.is_none())
+                        .render(cx, review),
                 );
-            editor = editor.child(Input::new(&pick.comment).small().disabled(pick.committing));
+                let mode = cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Some(pick) = &mut this.browser_pick {
+                        pick.element = !pick.element;
+                        pick.target = None;
+                        pick.live.switch_mode(pick.element);
+                        this.browser_note_error = None;
+                        cx.notify();
+                    }
+                });
+                controls = controls.child(
+                    PushButton::new(
+                        "browser-note-switch",
+                        if pick.element {
+                            tr!("Select area")
+                        } else {
+                            tr!("Pick element")
+                        },
+                        "Switch selection mode without clearing the comment",
+                    )
+                    .small()
+                    .disabled(!pick.ready || !matches!(pick.phase, Phase::Selecting))
+                    .render(cx, mode),
+                );
+            }
+            Phase::Review { keep, capture } => {
+                let retry = cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Some(pick) = &mut this.browser_pick {
+                        pick.live.resume();
+                        pick.phase = Phase::Selecting;
+                        cx.notify();
+                    }
+                });
+                let image = cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Some(Pick {
+                        phase: Phase::Review { keep, .. },
+                        ..
+                    }) = &mut this.browser_pick
+                    {
+                        *keep = !*keep;
+                        cx.notify();
+                    }
+                });
+                let attach = cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.attach_browser_note(window, cx)
+                });
+                controls = controls
+                    .child(
+                        PushButton::new(
+                            "browser-note-retry",
+                            "Choose again",
+                            "Return to page selection",
+                        )
+                        .small()
+                        .render(cx, retry),
+                    )
+                    .when(capture.is_some(), |controls| {
+                        controls.child(
+                            PushButton::new(
+                                "browser-note-image",
+                                if *keep {
+                                    tr!("Skip image")
+                                } else {
+                                    tr!("Include image")
+                                },
+                                tr!("Choose whether the cutout is attached"),
+                            )
+                            .small()
+                            .render(cx, image),
+                        )
+                    })
+                    .child(
+                        PushButton::new(
+                            "browser-note-add",
+                            tr!("Add to draft"),
+                            tr!("Attach to this thread's draft"),
+                        )
+                        .small()
+                        .render(cx, attach),
+                    );
+            }
+            Phase::Saving => {}
         }
         Some(
             v_flex()
-                .size_full()
-                .child(view)
-                .child(editor.child(controls))
+                .p(px(6.))
+                .gap(px(4.))
+                .flex_none()
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape"
+                        && this
+                            .browser_pick
+                            .as_ref()
+                            .is_some_and(|p| !matches!(p.phase, Phase::Saving))
+                    {
+                        this.cancel_browser_note();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }))
+                .child(
+                    div()
+                        .text_color(p.secondary)
+                        .truncate()
+                        .child(summary.to_owned()),
+                )
+                .child(
+                    Input::new(&pick.comment)
+                        .small()
+                        .disabled(matches!(pick.phase, Phase::Saving)),
+                )
+                .child(controls)
                 .into_any_element(),
         )
+    }
+
+    pub(crate) fn render_browser_note_review(&self, cx: &App) -> Option<AnyElement> {
+        match &self.browser_pick.as_ref()?.phase {
+            Phase::Review {
+                capture: Some(capture),
+                keep: true,
+            } => Some(
+                img(crate::fit_picture::bytes_source(capture.image.clone()))
+                    .size_full()
+                    .object_fit(ObjectFit::Contain)
+                    .into_any_element(),
+            ),
+            Phase::Review { .. } => Some(
+                crate::files::pane_note("No image will be attached.", palette(cx))
+                    .into_any_element(),
+            ),
+            Phase::Saving => Some(div().into_any_element()),
+            _ => None,
+        }
     }
 }

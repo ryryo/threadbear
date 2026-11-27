@@ -72,23 +72,96 @@ When('I press the browser control {string}', async function (this: ThreadbearWor
   await this.app.do({ cmd: 'click', title });
 });
 
-type BrowserPick = { ready?: boolean; bounds?: [number, number, number, number]; target?: string | null };
+type BrowserPick = {
+  ready?: boolean;
+  target?: string | null;
+  comment?: string;
+  review?: boolean;
+  crop?: { width: number; height: number; pixel: number[] } | null;
+};
 const pick = (dump: Dump) => (pane(dump) as { pick?: BrowserPick } | undefined)?.pick;
-async function selectionBounds(world: ThreadbearWorld) {
-  await world.until('browser snapshot', (dump) => pick(dump)?.ready === true && (pick(dump)?.bounds?.[2] ?? 0) > 100, LOADED_MS);
-  const bounds = pick(await world.app.dump())?.bounds;
-  assert.ok(bounds);
-  return bounds;
+
+async function browserKey(world: ThreadbearWorld): Promise<string> {
+  await world.until('live picker ready in the shown browser', (d) =>
+    pick(d)?.ready === true && pages(d).some((p) => p.key.startsWith('browser:') && p.hidden === false),
+  LOADED_MS);
+  const page = pages(await world.app.dump()).find((p) => p.key.startsWith('browser:') && p.hidden === false);
+  assert.ok(page);
+  return page.key;
 }
-When('I select the first link on the browser snapshot', async function (this: ThreadbearWorld) {
-  const [x, y] = await selectionBounds(this);
-  await this.app.do({ cmd: 'click-at', x: x + 45, y: y + 49 });
-  await this.until('first marked element', (dump) => pick(dump)?.target === 'Element: <a>', LOADED_MS);
+
+async function browserEval<T>(world: ThreadbearWorld, key: string, js: string): Promise<T> {
+  return (JSON.parse(okValue(await world.app.do({ cmd: 'webPanel', do: 'eval', key, js }))) as { value: T }).value;
+}
+
+async function selectLive(world: ThreadbearWorld, selector: string, target: string, scroll = false) {
+  const key = await browserKey(world);
+  const at = await browserEval<{ x: number; y: number; scrollY: number }>(world, key, `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (${scroll}) el.scrollIntoView({block:'center'});
+    const r = el.getBoundingClientRect();
+    return {x:r.x+r.width/2,y:r.y+r.height/2,scrollY};
+  })()`);
+  if (scroll) assert.ok(at.scrollY > 0, 'test must scroll before picking');
+  okValue(await world.app.do({ cmd: 'webPanel', do: 'pointer', key, x: at.x, y: at.y }));
+  await world.until('live selected target and focus in Threadbear', (d) =>
+    pick(d)?.target === target && (d as { keyboard?: string }).keyboard === 'app', LOADED_MS);
+}
+
+When('I select the first link on the live browser page', async function (this: ThreadbearWorld) {
+  await selectLive(this, '#other', 'Element: <a>');
 });
-When('I draw a box on the browser snapshot', async function (this: ThreadbearWorld) {
-  const [x, y] = await selectionBounds(this);
-  await this.app.do({ cmd: 'point', x: x + 30, y: y + 30, toX: x + 90, toY: y + 90, holdMs: 100 });
-  await this.until('marked region', (dump) => pick(dump)?.target === 'Selected region', LOADED_MS);
+When('I select the colored button after scrolling', async function (this: ThreadbearWorld) {
+  await selectLive(this, '#colored-pick', 'Element: <button>', true);
+});
+When('I draw a box on the live browser page', async function (this: ThreadbearWorld) {
+  const key = await browserKey(this);
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'pointer', key, x: 90, y: 90, toX: 30, toY: 30 }));
+  await this.until('marked region', (d) => pick(d)?.target === 'Selected region', LOADED_MS);
+});
+When('I enter the page comment {string}', async function (this: ThreadbearWorld, value: string) {
+  await this.app.do({ cmd: 'native-keys', text: value });
+  await this.until('comment in the focused input', (d) => pick(d)?.comment === value, LOADED_MS);
+});
+When('I resize the window with a browser element selected', async function (this: ThreadbearWorld) {
+  const key = await browserKey(this);
+  const original = await browserEval<number>(this, key, 'innerHeight');
+  await this.app.do({ cmd: 'resize', w: 1180, h: 640 });
+  const end = Date.now() + LOADED_MS;
+  while (await browserEval<number>(this, key, 'innerHeight') === original) {
+    assert.ok(Date.now() < end, 'the browser viewport must resize');
+    await this.app.dump();
+    await sleep(100);
+  }
+});
+When('I review the selected page area', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'click', title: 'Review selected page area' });
+  await this.until('crop review', (d) => pick(d)?.review === true, LOADED_MS);
+});
+Then('no page selection is in progress', async function (this: ThreadbearWorld) {
+  assert.ok(!pick(await this.app.dump()));
+});
+Then('the reviewed crop contains the selected button', async function (this: ThreadbearWorld) {
+  const crop = pick(await this.app.dump())?.crop;
+  assert.ok(crop, 'a real crop should be shown');
+  const scale = Math.round(crop.width / 144);
+  assert.ok(scale >= 1 && scale <= 4);
+  assert.ok(Math.abs(crop.width - 144 * scale) <= 2, `paint width: ${crop.width}`);
+  assert.ok(Math.abs(crop.height - 48 * scale) <= 2, `paint height: ${crop.height}`);
+  assert.deepEqual(crop.pixel, [24, 167, 85, 255], 'image pixel at the top left of the button');
+});
+Then('my draft includes the page comment text {string}', async function (this: ThreadbearWorld, value: string) {
+  await this.until('the typed page comment in the draft', (d) => d.composer.text.includes(value), LOADED_MS);
+});
+Then('my page comment describes a button without a picture', async function (this: ThreadbearWorld) {
+  const d = await this.app.dump();
+  assert.ok(d.composer.text.includes('Element: <button>'));
+  assert.equal(d.composer.images ?? 0, 0);
+});
+Then("the page's colored button was never activated", async function (this: ThreadbearWorld) {
+  const page = pages(await this.app.dump()).find((p) => p.key.startsWith('browser:'));
+  assert.ok(page);
+  assert.equal(await browserEval<number>(this, page.key, "Number(document.getElementById('colored-pick').dataset.activations || 0)"), 0);
 });
 Then('my draft contains a page comment about {string} with a picture', async function (this: ThreadbearWorld, target: string) {
   await this.until('page comment in the draft', (dump) =>

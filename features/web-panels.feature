@@ -97,6 +97,7 @@ Feature: Web pages in a thread's panels
     And I select the first link on the live browser page
     And I enter the page comment "このボタンを青に"
     And I select the colored button after scrolling
+    And I resize the window with a browser element selected
     And I review the selected page area
     Then the reviewed crop contains the selected button
     And my draft has no page comment
@@ -105,6 +106,23 @@ Feature: Web pages in a thread's panels
     Then my draft includes the page comment text "このボタンを青に"
     And my page comment describes a button without a picture
     And the page's colored button was never activated
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Switching threads discards a comment awaiting review
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "Discard this draft"
+    And I review the selected page area
+    And I open the thread "Add dark mode to the dashboard"
+    Then my draft has no page comment
+    When I open the thread "Morning brief"
+    Then my draft has no page comment
+    And no page selection is in progress
 
   @panel.web @swift-pending
   Scenario: The globe is available without BrowserBear

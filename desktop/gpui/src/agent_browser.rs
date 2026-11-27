@@ -897,7 +897,9 @@ impl SidePane {
     }
 
     pub(crate) fn browser_show_agents(&mut self, thread: &str) {
-        self.browser.agent_tabs.insert(thread.to_owned());
+        if self.browser_pick.is_none() {
+            self.browser.agent_tabs.insert(thread.to_owned());
+        }
     }
 
     pub(crate) fn render_browser_panel(
@@ -921,7 +923,8 @@ impl SidePane {
                 let thread = thread.id.clone();
                 let switch = cx.listener(move |this, _: &ClickEvent, _, cx| {
                     if agent {
-                        this.browser.agent_tabs.insert(thread.clone());
+                        this.cancel_browser_note();
+                        this.browser_show_agents(&thread);
                     } else {
                         this.browser.agent_tabs.remove(&thread);
                         this.browser.urls.entry(thread.clone()).or_default();
@@ -1050,7 +1053,10 @@ impl SidePane {
             .app
             .upgrade()
             .is_some_and(|app| app.read(cx).main_window == window.window_handle());
-        let marked = self.render_browser_note(&thread.id, cx);
+        self.sync_browser_note(&thread.id, cx);
+        let marked = self.render_browser_note_review(cx);
+        let note_controls = self.render_browser_note_controls(cx);
+        let note_error = self.browser_note_error.filter(|_| note_controls.is_none());
         let note_buttons =
             if page.as_ref().is_some_and(|p| !p.loading()) && self.browser_pick.is_none() {
                 let element = cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -1103,7 +1109,8 @@ impl SidePane {
             .child(bar)
             .child(buttons)
             .children(note_buttons)
-            .when_some(self.browser_note_error, |d, error| {
+            .children(note_controls)
+            .when_some(note_error, |d, error| {
                 d.child(div().px(px(6.)).text_color(p.failed).child(error))
             })
             .child(div().flex_1().min_h_0().child(body))
@@ -1349,7 +1356,7 @@ impl SidePane {
                 "browserUrl".into(),
                 json!(self.browser.urls.get(&thread.id)),
             );
-            pane.insert("pick".into(), self.browser_note_dump(&thread.id));
+            pane.insert("pick".into(), self.browser_note_dump(&thread.id, cx));
             return;
         }
         let Some(model) = model(cx) else { return };
