@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color as AndroidColor
@@ -142,7 +144,7 @@ private fun RichBlockSheet(kind: MarkdownBlock.RichKind, source: String, close: 
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = close) { Icon(Line.Close, "Close", Modifier.size(20.dp)) }
+                IconButton(onClick = close) { Icon(Line.Close, stringResource(R.string.close), Modifier.size(20.dp)) }
                 Spacer(Modifier.weight(1f))
                 Switch2(if (kind == MarkdownBlock.RichKind.MERMAID) "Diagram" else "Preview", "Source", showSource) { showSource = it }
                 Spacer(Modifier.weight(1f))

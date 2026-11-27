@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -45,7 +47,7 @@ fun HibernateDialog(thread: PhoneThread, dismiss: () -> Unit) {
     }
     AlertDialog(
         onDismissRequest = dismiss,
-        title = { Text("Hibernate until") },
+        title = { Text(stringResource(R.string.hibernate_until)) },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 for (p in presets) {
@@ -54,12 +56,12 @@ fun HibernateDialog(thread: PhoneThread, dismiss: () -> Unit) {
                     }
                 }
                 TextButton(onClick = { pick(ThreadChange.SnoozeUntilRestart) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Until the runner restarts", Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(R.string.until_the_runner_restarts), Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurface)
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
@@ -73,14 +75,14 @@ fun RenameDialog(thread: PhoneThread, dismiss: () -> Unit) {
     var text by remember { mutableStateOf(model.shown(thread, model.commands.entries.value).title) }
     AlertDialog(
         onDismissRequest = dismiss,
-        title = { Text("Rename thread") },
-        text = { OutlinedTextField(text, { text = it }, singleLine = true, label = { Text("Title") }, modifier = Modifier.fillMaxWidth()) },
+        title = { Text(stringResource(R.string.rename_thread)) },
+        text = { OutlinedTextField(text, { text = it }, singleLine = true, label = { Text(stringResource(R.string.title)) }, modifier = Modifier.fillMaxWidth()) },
         confirmButton = {
             TextButton(onClick = { dismiss(); model.change(thread.threadId, ThreadChange.Rename(text)) }, enabled = text.isNotBlank()) {
-                Text("Rename")
+                Text(stringResource(R.string.rename))
             }
         },
-        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 

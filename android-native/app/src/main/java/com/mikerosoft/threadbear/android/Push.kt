@@ -133,7 +133,7 @@ object Push {
     fun start(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         // One channel: Threadbear's notifications are all "a thread wants you".
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Threads", NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.notification_channel_threads), NotificationManager.IMPORTANCE_HIGH))
         transport.start(context)
     }
 
@@ -172,11 +172,12 @@ object Push {
             .setIdentifier("thread:$threadId")
         // One per thread (its id as the request code and the tag): a newer one replaces it.
         val tap = PendingIntent.getActivity(context, threadId.hashCode(), open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val body = opened?.body ?: context.getString(R.string.notification_needs_you)
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(opened?.title ?: "Threadbear")
-            .setContentText(opened?.body ?: "A thread needs you")
-            .setStyle(NotificationCompat.BigTextStyle().bigText(opened?.body ?: "A thread needs you"))
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(tap)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

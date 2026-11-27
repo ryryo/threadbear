@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -131,9 +133,9 @@ fun PocketScreen(close: () -> Unit, openThread: (String) -> Unit, add: () -> Uni
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = close) { Icon(Line.Close, "Done", Modifier.size(22.dp)) } },
-                title = { Text("Pocket") },
-                actions = { IconButton(onClick = add) { Icon(Line.SquarePen, "Add a card", Modifier.size(21.dp)) } },
+                navigationIcon = { IconButton(onClick = close) { Icon(Line.Close, stringResource(R.string.done), Modifier.size(22.dp)) } },
+                title = { Text(stringResource(R.string.pocket)) },
+                actions = { IconButton(onClick = add) { Icon(Line.SquarePen, stringResource(R.string.add_a_card), Modifier.size(21.dp)) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -143,9 +145,9 @@ fun PocketScreen(close: () -> Unit, openThread: (String) -> Unit, add: () -> Uni
                 Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(Line.Wallet, null, Modifier.size(40.dp), tint = LocalSignals.current.faint)
                     Spacer(Modifier.size(12.dp))
-                    Text("Nothing in your pocket", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.nothing_in_your_pocket), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.size(4.dp))
-                    Text("Ask a thread to pop something in here.", style = MaterialTheme.typography.bodyMedium,
+                    Text(stringResource(R.string.ask_a_thread_to_pop_something_in_here), style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
@@ -183,12 +185,12 @@ fun PocketScreen(close: () -> Unit, openThread: (String) -> Unit, add: () -> Uni
                         .padding(start = 18.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Removed $title", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.removed_title, title), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     TextButton(onClick = {
                         goingTimer?.cancel()
                         goingTimer = null
                         going = null
-                    }) { Text("Undo", fontWeight = FontWeight.SemiBold) }
+                    }) { Text(stringResource(R.string.undo), fontWeight = FontWeight.SemiBold) }
                 }
             }
         }
@@ -336,12 +338,12 @@ private fun PocketBigCard(card: PocketCard, done: () -> Unit, openThread: (() ->
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 val blue = Color(0xFF007AFF)
-                TextButton(onClick = done) { Text("Done", color = blue) }
+                TextButton(onClick = done) { Text(stringResource(R.string.done), color = blue) }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { copyText(context, card.title, card.text) }) { Text("Copy", color = blue) }
+                TextButton(onClick = { copyText(context, card.title, card.text) }) { Text(stringResource(R.string.copy), color = blue) }
                 if (openThread != null) {
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = openThread) { Text("Open thread", color = blue) }
+                    TextButton(onClick = openThread) { Text(stringResource(R.string.open_thread), color = blue) }
                 }
             }
         }

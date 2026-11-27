@@ -1,5 +1,6 @@
 package com.mikerosoft.threadbear.android
 
+import androidx.compose.ui.res.stringResource
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -155,8 +156,8 @@ private fun Root(model: AppModel, openThread: MutableStateFlow<String?>) {
             onDismissRequest = { model.cancelPair() },
             title = { Text(breakable(request.title, request.host), style = MaterialTheme.typography.titleLarge) },
             text = { Text(breakable(request.message, request.host)) },
-            confirmButton = { TextButton(onClick = { model.acceptPair(request) }) { Text("Pair") } },
-            dismissButton = { TextButton(onClick = { model.cancelPair() }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { model.acceptPair(request) }) { Text(stringResource(R.string.pair)) } },
+            dismissButton = { TextButton(onClick = { model.cancelPair() }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }

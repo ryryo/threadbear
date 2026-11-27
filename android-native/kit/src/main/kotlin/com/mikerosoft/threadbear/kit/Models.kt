@@ -541,6 +541,7 @@ data class PhoneIdentity(val name: String, val expiresAt: Instant?, val apiVersi
 
 /** What the app relies on from the backend (BackendCompatibility). */
 object BackendApi {
+    const val NOTIFICATION_LOCALE = 104
     const val MESSAGE_PAGES = 2
     const val ASKS = 14
     const val SECRETS = 35

@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -239,8 +241,8 @@ private fun UserBubble(m: PhoneMessage) {
         for (draft in edited.drafts) EditedDraftChip(draft)
         when (m.origin) {
             "phone" -> PhoneMark()
-            "schedule" -> Text("Scheduled", style = MaterialTheme.typography.labelSmall, color = LocalSignals.current.faint)
-            "runner" -> Text("From the runner", style = MaterialTheme.typography.labelSmall, color = LocalSignals.current.faint)
+            "schedule" -> Text(stringResource(R.string.scheduled), style = MaterialTheme.typography.labelSmall, color = LocalSignals.current.faint)
+            "runner" -> Text(stringResource(R.string.from_the_runner), style = MaterialTheme.typography.labelSmall, color = LocalSignals.current.faint)
         }
     }
 }
@@ -335,9 +337,9 @@ private fun Chip(title: String, icon: androidx.compose.ui.graphics.vector.ImageV
 private fun PhoneMark() {
     val state = rememberTooltipState()
     val scope = rememberCoroutineScope()
-    TooltipBox(TooltipDefaults.rememberPlainTooltipPositionProvider(), { PlainTooltip { Text("Sent from the phone app") } }, state) {
+    TooltipBox(TooltipDefaults.rememberPlainTooltipPositionProvider(), { PlainTooltip { Text(stringResource(R.string.sent_from_the_phone_app)) } }, state) {
         Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Sent from the phone app") { scope.launch { state.show() } }.padding(4.dp)) {
-            Icon(Line.Phone, "Sent from the phone app", Modifier.size(12.dp), tint = LocalSignals.current.faint)
+            Icon(Line.Phone, stringResource(R.string.sent_from_the_phone_app), Modifier.size(12.dp), tint = LocalSignals.current.faint)
         }
     }
 }
@@ -546,7 +548,7 @@ fun WaitingMessageView(text: String, send: WaitingSend?, offlineRunner: String?,
                 } else {
                     // The one thing on the line to tap.
                     Text(
-                        "Cancel", style = MaterialTheme.typography.labelMedium, color = LocalSignals.current.accent,
+                        stringResource(R.string.cancel), style = MaterialTheme.typography.labelMedium, color = LocalSignals.current.accent,
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClickLabel = "Takes this message back before it's sent", onClick = cancel!!)
                             .padding(horizontal = 4.dp, vertical = 4.dp),
                     )
@@ -596,7 +598,7 @@ fun FullSheet(title: String, close: () -> Unit, actions: @Composable () -> Unit 
     androidx.compose.ui.window.Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = close, contentPadding = PaddingValues(horizontal = 12.dp)) { Text("Done") }
+                TextButton(onClick = close, contentPadding = PaddingValues(horizontal = 12.dp)) { Text(stringResource(R.string.done)) }
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 actions()
             }

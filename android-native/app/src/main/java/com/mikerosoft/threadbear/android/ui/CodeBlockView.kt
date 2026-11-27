@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -101,9 +103,9 @@ fun CodeBlockView(block: MarkdownBlock.Code, style: TextStyle) {
                     if (copied) {
                         Icon(Line.Check, null, Modifier.size(14.dp), tint = signals.done)
                         Spacer(Modifier.width(5.dp))
-                        Text("Copied", style = MaterialTheme.typography.labelMedium, color = signals.done, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.copied), style = MaterialTheme.typography.labelMedium, color = signals.done, fontWeight = FontWeight.SemiBold)
                     } else {
-                        Icon(Line.Copy, "Copy code", Modifier.size(15.dp), tint = colors.onSurfaceVariant)
+                        Icon(Line.Copy, stringResource(R.string.copy_code), Modifier.size(15.dp), tint = colors.onSurfaceVariant)
                     }
                 }
             }

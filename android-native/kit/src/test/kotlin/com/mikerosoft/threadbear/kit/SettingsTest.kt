@@ -87,5 +87,8 @@ class SettingsTest {
         // A Firebase registration is as before: no webPush field.
         b.registerDevice("fcm", "production", "android", "k")
         assertEquals(null, t.calls[2].second["webPush"])
+        assertEquals(null, t.calls[2].second["locale"])
+        b.registerDevice("fcm", "production", "android", "k", locale = "ja-JP")
+        assertEquals("\"ja-JP\"", t.calls[3].second["locale"].toString())
     }
 }

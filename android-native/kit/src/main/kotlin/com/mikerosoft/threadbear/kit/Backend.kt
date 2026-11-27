@@ -226,12 +226,13 @@ class PhoneBackend(private val transport: ConvexTransport, private val token: St
      * `platform` "android" for a Firebase token, or (API 93) "webpush" for a
      * UnifiedPush endpoint URL in `pushToken` with its `webPush` keys.
      */
-    suspend fun registerDevice(pushToken: String, environment: String, platform: String, pushKey: String?, webPush: WebPush.Keys? = null) {
+    suspend fun registerDevice(pushToken: String, environment: String, platform: String, pushKey: String?, webPush: WebPush.Keys? = null, locale: String? = null) {
         val a = mutableListOf<Pair<String, JsonElement>>(
             "apnsToken" to JsonPrimitive(pushToken), "environment" to JsonPrimitive(environment), "platform" to JsonPrimitive(platform),
         )
         pushKey?.let { a += "pushKey" to JsonPrimitive(it) }
         webPush?.let { a += "webPush" to buildJsonObject { put("p256dh", it.p256dh); put("auth", it.auth) } }
+        locale?.let { a += "locale" to JsonPrimitive(it) }
         transport.mutation("phone:registerDevice", args(*a.toTypedArray()))
     }
 

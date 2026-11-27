@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -206,11 +208,11 @@ fun InboxScreen(
                     actions = {
                         if (!connected && inbox != null) {
                             IconButton(onClick = { model.note("Not connected. Showing what came last; it catches up by itself.") }) {
-                                Icon(Line.CloudOff, "Not connected", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Line.CloudOff, stringResource(R.string.not_connected), Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         if (showsPocket) PocketButton(cards.size, shell.pocketHasNew(cards, seen), pocket)
-                        IconButton(onClick = newThread) { Icon(Line.SquarePen, "New thread", Modifier.size(21.dp)) }
+                        IconButton(onClick = newThread) { Icon(Line.SquarePen, stringResource(R.string.new_thread), Modifier.size(21.dp)) }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -334,9 +336,9 @@ private fun SearchResults(
                 Column(Modifier.fillMaxWidth().padding(vertical = 48.dp, horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Line.Search, null, Modifier.size(28.dp), tint = LocalSignals.current.faint)
                     Spacer(Modifier.height(10.dp))
-                    Text("No results for “$text”", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.no_results_for, text), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
-                    Text("Check the spelling or try a new search.", style = MaterialTheme.typography.bodyMedium,
+                    Text(stringResource(R.string.check_the_spelling_or_try_a_new_search), style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -393,7 +395,7 @@ private fun SearchField(query: String, change: (String) -> Unit) {
         Icon(Line.Search, null, Modifier.size(17.dp), tint = signals.faint)
         Spacer(Modifier.width(8.dp))
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) Text("Search", style = MaterialTheme.typography.bodyLarge, color = signals.faint)
+            if (query.isEmpty()) Text(stringResource(R.string.search), style = MaterialTheme.typography.bodyLarge, color = signals.faint)
             BasicTextField(
                 query, change, singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
@@ -403,7 +405,7 @@ private fun SearchField(query: String, change: (String) -> Unit) {
             )
         }
         if (query.isNotEmpty()) {
-            Icon(Line.Close, "Clear", Modifier.size(18.dp).clip(CircleShape).clickable { change("") }, tint = signals.faint)
+            Icon(Line.Close, stringResource(R.string.clear), Modifier.size(18.dp).clip(CircleShape).clickable { change("") }, tint = signals.faint)
         }
     }
 }
@@ -476,7 +478,7 @@ private fun OfflineNote(text: String) {
             Spacer(Modifier.width(8.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text("Anything you send waits until it's back.", style = MaterialTheme.typography.bodySmall, color = LocalSignals.current.faint,
+        Text(stringResource(R.string.anything_you_send_waits_until_it_s_back), style = MaterialTheme.typography.bodySmall, color = LocalSignals.current.faint,
             modifier = Modifier.padding(start = 24.dp, top = 2.dp))
     }
 }
@@ -501,9 +503,9 @@ private fun InboxZero(modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(vertical = 40.dp, horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Line.Check, null, Modifier.size(28.dp).scale(pop.value), tint = LocalSignals.current.faint)
         Spacer(Modifier.height(8.dp))
-        Text("Nothing in the inbox", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.nothing_in_the_inbox), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
-        Text("Threads that finish or need you turn up here.", style = MaterialTheme.typography.bodyMedium,
+        Text(stringResource(R.string.threads_that_finish_or_need_you_turn_up_here), style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -649,7 +651,7 @@ private fun StartingRow(row: StartingThread, runners: List<com.mikerosoft.thread
             Box(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(end = 24.dp),
                 contentAlignment = Alignment.CenterEnd,
-            ) { Icon(Line.Close, "Remove", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface) }
+            ) { Icon(Line.Close, stringResource(R.string.remove), Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface) }
         },
     ) {
         Row(
@@ -670,11 +672,11 @@ private fun StartingRow(row: StartingThread, runners: List<com.mikerosoft.thread
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
                     if (failed) {
-                        Text("Failed", style = MaterialTheme.typography.labelMedium, color = signals.failed)
+                        Text(stringResource(R.string.failed), style = MaterialTheme.typography.labelMedium, color = signals.failed)
                     } else {
                         CircularProgressIndicator(Modifier.size(10.dp), color = signals.accent, strokeWidth = 1.5.dp)
                         Spacer(Modifier.width(6.dp))
-                        Text("Starting", style = MaterialTheme.typography.labelMedium, color = signals.accent)
+                        Text(stringResource(R.string.starting), style = MaterialTheme.typography.labelMedium, color = signals.accent)
                     }
                 }
             }
@@ -707,7 +709,7 @@ fun ThreadRow(
         val needs = RowStatus.wantsMike(t)
         Box(Modifier.width(14.dp), contentAlignment = Alignment.Center) {
             when {
-                done -> Icon(Line.Check, "Done, unread", Modifier.size(10.dp), tint = signals.accent)
+                done -> Icon(Line.Check, stringResource(R.string.done_unread), Modifier.size(10.dp), tint = signals.accent)
                 needs -> Box(Modifier.size(7.dp).clip(CircleShape).background(signals.accent))
             }
         }
@@ -723,7 +725,7 @@ fun ThreadRow(
                 )
                 if (t.starredAt != null) {
                     Spacer(Modifier.width(4.dp))
-                    Icon(Line.StarFilled, "Starred", Modifier.size(12.dp), tint = signals.faint)
+                    Icon(Line.StarFilled, stringResource(R.string.starred), Modifier.size(12.dp), tint = signals.faint)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -758,7 +760,7 @@ fun ThreadRow(
                     }
                 }
                 if (asleep) {
-                    Icon(Line.Moon, "Hibernating", Modifier.size(12.dp), tint = faint)
+                    Icon(Line.Moon, stringResource(R.string.hibernating), Modifier.size(12.dp), tint = faint)
                     Spacer(Modifier.width(6.dp))
                 }
                 if (kind == RowStatus.Kind.WORKING) {

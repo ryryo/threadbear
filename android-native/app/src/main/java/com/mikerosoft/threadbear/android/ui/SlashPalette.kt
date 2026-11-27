@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -97,7 +99,7 @@ fun SlashPaletteList(threadId: String, provider: String, query: String, onPick: 
             else -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp, color = colors.onSurfaceVariant)
                 Spacer(Modifier.width(8.dp))
-                Text("Getting this thread's commands", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.getting_this_thread_s_commands), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -168,7 +170,7 @@ fun Composer(
                     if (photosOn) {
                         PhotoMenu(box) { open ->
                             IconButton(onClick = open, enabled = box.room > 0, modifier = Modifier.size(44.dp)) {
-                                Icon(ComposeLine.PlusCircle, "Add a photo", Modifier.size(24.dp), tint = colors.onSurfaceVariant)
+                                Icon(ComposeLine.PlusCircle, stringResource(R.string.add_a_photo), Modifier.size(24.dp), tint = colors.onSurfaceVariant)
                             }
                         }
                     } else {
@@ -177,7 +179,7 @@ fun Composer(
                     FieldBox(box, placeholder, photosOn, Modifier.weight(1f))
                     // Grey like Add a photo, as only Send has the accent.
                     IconButton(onClick = mic, modifier = Modifier.size(44.dp)) {
-                        Icon(ComposeLine.Mic, "Dictate", Modifier.size(22.dp), tint = colors.onSurfaceVariant)
+                        Icon(ComposeLine.Mic, stringResource(R.string.dictate), Modifier.size(22.dp), tint = colors.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.width(4.dp))
@@ -190,7 +192,7 @@ fun Composer(
                     when {
                         showStop && stopping -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = colors.onSurfaceVariant)
                         showStop -> IconButton(onClick = onStop, modifier = Modifier.size(40.dp).clip(CircleShape).border(1.dp, colors.outline, CircleShape)) {
-                            Icon(Line.Stop, "Stop", Modifier.size(16.dp), tint = colors.onSurface)
+                            Icon(Line.Stop, stringResource(R.string.stop), Modifier.size(16.dp), tint = colors.onSurface)
                         }
                         canSend -> IconButton(
                             onClick = {
@@ -200,7 +202,7 @@ fun Composer(
                             },
                             modifier = Modifier.size(40.dp).clip(CircleShape).background(signals.accent),
                         ) {
-                            Icon(Line.ArrowUp, "Send", Modifier.size(20.dp), tint = Color.White)
+                            Icon(Line.ArrowUp, stringResource(R.string.send), Modifier.size(20.dp), tint = Color.White)
                         }
                         else -> Icon(Line.ArrowUp, null, Modifier.size(20.dp), tint = signals.faint)
                     }
@@ -376,14 +378,14 @@ private fun PhotoTile(photo: PickedPhoto, enabled: Boolean, remove: () -> Unit) 
             PhotoUpload.State.FAILED -> Box(
                 Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(enabled = enabled) { model.retryUpload(photo) },
                 contentAlignment = Alignment.Center,
-            ) { Icon(ComposeLine.Retry, "Upload failed, try again", Modifier.size(22.dp), tint = Color.White) }
+            ) { Icon(ComposeLine.Retry, stringResource(R.string.upload_failed_try_again), Modifier.size(22.dp), tint = Color.White) }
             PhotoUpload.State.UP -> {}
         }
         if (enabled) {
             Box(
                 Modifier.align(Alignment.TopEnd).padding(3.dp).size(20.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)).clickable(onClick = remove),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Line.Close, "Remove photo", Modifier.size(12.dp), tint = Color.White) }
+            ) { Icon(Line.Close, stringResource(R.string.remove_photo), Modifier.size(12.dp), tint = Color.White) }
         }
     }
 }
@@ -434,7 +436,7 @@ fun ListeningBar(dictation: Dictation, modifier: Modifier = Modifier) {
         Spacer(Modifier.width(10.dp))
         if (dictation.isFinishing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = red)
         else Box(Modifier.size(24.dp).clip(CircleShape).background(red), contentAlignment = Alignment.Center) {
-            Icon(Line.Stop, "Stop dictating", Modifier.size(12.dp), tint = Color.White)
+            Icon(Line.Stop, stringResource(R.string.stop_dictating), Modifier.size(12.dp), tint = Color.White)
         }
     }
 }

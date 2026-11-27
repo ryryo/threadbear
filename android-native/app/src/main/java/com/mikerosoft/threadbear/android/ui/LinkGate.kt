@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -82,6 +84,6 @@ fun LinkGateDialog(gate: LinkGate) {
         confirmButton = {
             TextButton(onClick = { gate.dismiss(); ask.answer() }) { Text(ask.yes ?: "OK") }
         },
-        dismissButton = if (ask.yes == null) null else ({ TextButton(onClick = gate::dismiss) { Text("Cancel") } }),
+        dismissButton = if (ask.yes == null) null else ({ TextButton(onClick = gate::dismiss) { Text(stringResource(R.string.cancel)) } }),
     )
 }

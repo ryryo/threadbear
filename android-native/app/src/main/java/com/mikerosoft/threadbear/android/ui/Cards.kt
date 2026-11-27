@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -107,7 +109,7 @@ fun Pill(
                     Spacer(Modifier.width(6.dp))
                 }
                 if (star && !filled) {
-                    Icon(Line.StarFilled, "Recommended", Modifier.size(11.dp), tint = Color(0xFFDBB354))
+                    Icon(Line.StarFilled, stringResource(R.string.recommended), Modifier.size(11.dp), tint = Color(0xFFDBB354))
                     Spacer(Modifier.width(5.dp))
                 }
                 Text(text, style = MaterialTheme.typography.labelLarge, color = fg.copy(alpha = if (enabled) 1f else 0.4f),
@@ -155,7 +157,7 @@ private fun AnswerRow(label: String, note: String, onClick: () -> Unit, picked: 
                     Spacer(Modifier.width(6.dp))
                     Icon(Line.StarFilled, null, Modifier.size(11.dp), tint = Color(0xFFDBB354))
                     Spacer(Modifier.width(4.dp))
-                    Text("Recommended", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                    Text(stringResource(R.string.recommended), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                 }
             }
             if (note.isNotEmpty()) Text(note, style = MaterialTheme.typography.bodySmall, color = if (picked) Color.White.copy(alpha = 0.85f) else colors.onSurfaceVariant)
@@ -164,7 +166,7 @@ private fun AnswerRow(label: String, note: String, onClick: () -> Unit, picked: 
         Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
             when {
                 spinning -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp, color = Color.White)
-                picked -> Icon(Line.Check, "Picked", Modifier.size(16.dp), tint = Color.White)
+                picked -> Icon(Line.Check, stringResource(R.string.picked), Modifier.size(16.dp), tint = Color.White)
                 else -> Icon(Line.ChevronRight, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant.copy(alpha = 0.6f))
             }
         }
@@ -189,7 +191,11 @@ fun ApprovalCard(card: PendingApproval.Approval, tapped: String?, respond: (Appr
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (option in card.options) {
-                val label = when (option) { ApprovalOption.ALLOW -> "Allow"; ApprovalOption.ALLOW_ALWAYS -> "Always"; ApprovalOption.DENY -> "Deny" }
+                val label = stringResource(when (option) {
+                    ApprovalOption.ALLOW -> R.string.allow
+                    ApprovalOption.ALLOW_ALWAYS -> R.string.allow_always
+                    ApprovalOption.DENY -> R.string.deny
+                })
                 Pill(
                     label, { respond(option) }, Modifier.weight(1f),
                     filled = option == ApprovalOption.ALLOW,
@@ -300,7 +306,7 @@ fun AsksCard(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row {
                     if (ticked) {
-                        Icon(Line.Check, "Done", Modifier.size(16.dp).padding(top = 3.dp), tint = colors.onSurfaceVariant)
+                        Icon(Line.Check, stringResource(R.string.done), Modifier.size(16.dp).padding(top = 3.dp), tint = colors.onSurfaceVariant)
                         Spacer(Modifier.width(6.dp))
                     } else if (asks.size > 1) {
                         Text("${index + 1}.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
@@ -368,7 +374,7 @@ fun DoneCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Line.CheckCircle, null, Modifier.size(18.dp), tint = colors.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
-            Text("Done", style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
+            Text(stringResource(R.string.done), style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
             Pill("Archive", archive, icon = Line.Archive)
         }
@@ -426,7 +432,7 @@ fun DoneCard(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Line.StarFilled, null, Modifier.size(11.dp), tint = Color(0xFFDBB354))
                                 Spacer(Modifier.width(4.dp))
-                                Text("Recommended", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                                Text(stringResource(R.string.recommended), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                             }
                         }
                     }

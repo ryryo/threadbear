@@ -324,6 +324,7 @@ class AppModel(context: Context, private val scope: CoroutineScope) {
     /** The push address (Firebase token or UnifiedPush endpoint) the backend has for this phone, once registered (for Notify me). */
     private val _pushToken = MutableStateFlow<String?>(null)
     val pushToken: StateFlow<String?> = _pushToken
+    private var registeredPushLocale: String? = null
 
     /**
      * Hands the backend this phone's push address and push key, as the
@@ -337,10 +338,13 @@ class AppModel(context: Context, private val scope: CoroutineScope) {
     fun registerPush(fresh: PushAddress? = null) {
         val b = _backend.value ?: return
         if (!Push.available(appContext) || !Push.permitted(appContext)) return
-        // Already registered this run: the resume check costs nothing then.
-        if (fresh == null && _pushToken.value != null) return
         if (!Push.sentBy(_identity.value)) return
         val api = apiVersion
+        val locale = if (api >= BackendApi.NOTIFICATION_LOCALE)
+            appContext.resources.configuration.locales.get(0)?.toLanguageTag()
+        else null
+        // App language can change while the process stays alive.
+        if (fresh == null && _pushToken.value != null && registeredPushLocale == locale) return
         if (fresh?.platform == PushAddress.WEB_PUSH && api < BackendApi.WEB_PUSH) return
         val cacheKey = _pairing.value?.deploymentUrl ?: return
         val epoch = pairingEpoch
@@ -350,11 +354,13 @@ class AppModel(context: Context, private val scope: CoroutineScope) {
             // for a pairing that's since changed is dropped, not finished.
             pushLock.withLock {
                 if (epoch != pairingEpoch) return@withLock
+                if (fresh == null && _pushToken.value != null && registeredPushLocale == locale) return@withLock
                 val address = fresh ?: Push.transport.address(appContext, b, api, cacheKey) ?: return@withLock
                 val key = PushKeyStore(appContext).loadOrCreate()?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
                 try {
-                    b.registerDevice(address.token, "production", address.platform, key, address.webPush)
+                    b.registerDevice(address.token, "production", address.platform, key, address.webPush, locale)
                     if (epoch == pairingEpoch) {
+                        registeredPushLocale = locale
                         _pushToken.value = address.token
                         // Settings' Notify me picker shows once there's a token.
                         shell.pushToken.value = address.token

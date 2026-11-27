@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -421,7 +423,7 @@ private fun MovingView(drawable: AnimatedImageDrawable, modifier: Modifier) {
 @Composable
 private fun PlayBadge() {
     Box(Modifier.size(56.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
-        Icon(Line.Play, "Video", Modifier.size(24.dp), tint = Color.White)
+        Icon(Line.Play, stringResource(R.string.video), Modifier.size(24.dp), tint = Color.White)
     }
 }
 
@@ -496,8 +498,8 @@ fun PictureViewer(url: String, alt: String, preview: LoadedPicture, close: () ->
             val video = picture?.video
             if (picture == null && failed) {
                 Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Couldn't load the video", color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = { attempt++ }) { Text("Try again", color = Color.White) }
+                    Text(stringResource(R.string.couldn_t_load_the_video), color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { attempt++ }) { Text(stringResource(R.string.try_again), color = Color.White) }
                 }
             } else if (picture == null) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center).size(24.dp), strokeWidth = 2.dp, color = Color.White)

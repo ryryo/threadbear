@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -148,8 +150,8 @@ fun ThreadScreen(threadId: String, back: () -> Unit, open: (String) -> Unit) {
             }
             Loaded.Gone -> Box(Modifier.padding(inner).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("This thread's gone", style = MaterialTheme.typography.titleMedium)
-                    Text("It may have been deleted on the Mac.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.this_thread_s_gone), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.it_may_have_been_deleted_on_the_mac), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             is Loaded.Here -> Transcript(vm, l.detail.thread, l.detail.messages, inner, back, gate) { if (box.isEmpty) box.text.setTextAndPlaceCursorAtEnd(it) }
@@ -196,7 +198,7 @@ private fun ThreadBar(thread: PhoneThread?, back: () -> Unit) {
     if (renaming && thread != null) RenameDialog(thread) { renaming = false }
     if (sharing && thread != null) ShareThreadSheet(thread) { sharing = false }
     TopAppBar(
-        navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, "Back", Modifier.size(22.dp)) } },
+        navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, stringResource(R.string.back), Modifier.size(22.dp)) } },
         title = {
             if (thread != null) Row(verticalAlignment = Alignment.CenterVertically) {
                 val ref = thread.projects?.firstOrNull()
@@ -207,7 +209,7 @@ private fun ThreadBar(thread: PhoneThread?, back: () -> Unit) {
         },
         actions = {
             if (thread != null) Box {
-                IconButton(onClick = { menu = true }) { Icon(Line.More, "More", Modifier.size(20.dp)) }
+                IconButton(onClick = { menu = true }) { Icon(Line.More, stringResource(R.string.more), Modifier.size(20.dp)) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (thread.archivedAt != null) {
                         MenuItem("Back to the inbox", Line.Inbox) { menu = false; model.change(thread.threadId, ThreadChange.Unarchive) }
@@ -478,7 +480,7 @@ private fun StatusCard(vm: ThreadViewModel, thread: PhoneThread, messages: List<
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Line.Laptop, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant)
                 Spacer(Modifier.width(8.dp))
-                Text("Answer this on the Mac.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                Text(stringResource(R.string.answer_this_on_the_mac), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             }
         }
         // Its own id per status, so the seconds start again when a stopped one runs.

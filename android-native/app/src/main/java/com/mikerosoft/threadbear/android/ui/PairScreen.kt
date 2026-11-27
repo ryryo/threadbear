@@ -1,5 +1,6 @@
 package com.mikerosoft.threadbear.android.ui
 
+import androidx.compose.ui.res.stringResource
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.Image
@@ -68,7 +69,7 @@ fun PairScreen() {
                 Spacer(Modifier.height(8.dp))
                 Text("Threadbear", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Pair with the code on your Mac, in Settings, Phone & browser.",
+                    stringResource(R.string.pair_mac_instructions),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -84,7 +85,7 @@ fun PairScreen() {
                     ) {
                         Icon(Line.Scan, null, Modifier.size(20.dp))
                         Spacer(Modifier.size(10.dp))
-                        Text("Scan the code")
+                        Text(stringResource(R.string.scan_the_code))
                     }
                     OutlinedButton(
                         onClick = {
@@ -95,7 +96,7 @@ fun PairScreen() {
                     ) {
                         Icon(Line.Paste, null, Modifier.size(20.dp))
                         Spacer(Modifier.size(10.dp))
-                        Text("Paste a pairing code")
+                        Text(stringResource(R.string.paste_a_pairing_code))
                     }
                 }
             }

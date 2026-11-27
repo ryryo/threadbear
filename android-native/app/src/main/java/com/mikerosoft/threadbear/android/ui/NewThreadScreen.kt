@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -214,14 +216,14 @@ fun NewThreadScreen(close: () -> Unit) {
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = { starting?.cancel(); close() }) { Icon(Line.Close, "Cancel", Modifier.size(22.dp)) }
+                    IconButton(onClick = { starting?.cancel(); close() }) { Icon(Line.Close, stringResource(R.string.cancel), Modifier.size(22.dp)) }
                 },
-                title = { Text("New thread") },
+                title = { Text(stringResource(R.string.new_thread)) },
                 actions = {
                     if (busy) {
                         CircularProgressIndicator(Modifier.padding(end = 20.dp).size(20.dp), strokeWidth = 2.dp, color = colors.onSurfaceVariant)
                     } else {
-                        TextButton(onClick = ::start, enabled = canStart) { Text("Start", style = MaterialTheme.typography.titleMedium) }
+                        TextButton(onClick = ::start, enabled = canStart) { Text(stringResource(R.string.start), style = MaterialTheme.typography.titleMedium) }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background),
@@ -276,7 +278,7 @@ fun NewThreadScreen(close: () -> Unit) {
                 Row(Modifier.padding(start = 4.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Line.Moon, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant)
                     Spacer(Modifier.width(8.dp))
-                    Text("$it. It'll start when it's back.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    Text(stringResource(R.string.offline_thread_start, it), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.height(24.dp))

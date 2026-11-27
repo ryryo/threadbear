@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -68,14 +70,14 @@ fun PlanCard(message: PhoneMessage) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Line.Clipboard, null, Modifier.size(14.dp), tint = colors.onSurfaceVariant)
             Spacer(Modifier.width(6.dp))
-            Text("Plan", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+            Text(stringResource(R.string.plan), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
         }
         Text(Plans.title(message.text), style = MaterialTheme.typography.titleMedium)
         val preview = remember(message.text) { preview(Plans.body(message.text)) }
         if (preview.isNotEmpty()) Text(inline.parse(preview), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant,
             maxLines = 4, overflow = TextOverflow.Ellipsis)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Read the plan", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = LocalSignals.current.accent)
+            Text(stringResource(R.string.read_the_plan), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = LocalSignals.current.accent)
             Spacer(Modifier.width(4.dp))
             Icon(Line.ChevronRight, null, Modifier.size(13.dp), tint = LocalSignals.current.accent)
         }
@@ -102,7 +104,7 @@ fun PlanApprovalCard(card: PendingApproval.Approval, plan: PhoneMessage, tapped:
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Line.Clipboard, null, Modifier.size(18.dp), tint = colors.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
-            Text("The plan is ready", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.the_plan_is_ready), style = MaterialTheme.typography.titleMedium)
         }
         Text(Plans.title(plan.text), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         val canAllow = ApprovalOption.ALLOW in card.options
@@ -153,7 +155,7 @@ fun PlanSheet(
             val send = Intent(Intent.ACTION_SEND).setType("text/markdown").putExtra(Intent.EXTRA_TEXT, plan.text)
                 .putExtra(Intent.EXTRA_SUBJECT, Plans.fileName(plan.text)).putExtra(Intent.EXTRA_TITLE, Plans.fileName(plan.text))
             context.startActivity(Intent.createChooser(send, "Share the plan").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }) { Icon(Line.Share, "Share the plan", Modifier.size(18.dp)) }
+        }) { Icon(Line.Share, stringResource(R.string.share_the_plan), Modifier.size(18.dp)) }
     }) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {

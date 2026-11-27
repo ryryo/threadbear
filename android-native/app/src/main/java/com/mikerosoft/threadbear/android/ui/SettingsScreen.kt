@@ -1,5 +1,7 @@
 package com.mikerosoft.threadbear.android.ui
 
+import com.mikerosoft.threadbear.android.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -97,30 +99,30 @@ fun SettingsScreen(back: () -> Unit, runnerOrder: () -> Unit) {
         snackbarHost = { SnackbarHost(LocalSnackbar.current) },
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, "Back", Modifier.size(22.dp)) } },
-                title = { Text("Settings") },
+                navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, stringResource(R.string.back), Modifier.size(22.dp)) } },
+                title = { Text(stringResource(R.string.settings)) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { inner ->
         Column(Modifier.padding(inner).fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
-            Group("Paired with") {
+            Group(stringResource(R.string.paired_with)) {
                 // Breaks after its dots, not mid-word, when it needs two lines.
-                Field("Server", pairing?.serverName?.replace(".", ".\u200B") ?: "None")
+                Field(stringResource(R.string.server), pairing?.serverName?.replace(".", ".\u200B") ?: stringResource(R.string.none))
                 identity?.let { me ->
-                    Field("Phone", me.name)
-                    me.expiresAt?.let { Field("Token expires", day.format(it.atZone(ZoneId.systemDefault()))) }
+                    Field(stringResource(R.string.phone), me.name)
+                    me.expiresAt?.let { Field(stringResource(R.string.token_expires), day.format(it.atZone(ZoneId.systemDefault()))) }
                 }
                 if (!chooseRunner) runners.forEach { Field(it.name, RunnerOrder.status(it, now)) }
             }
             if (chooseRunner) {
-                Group("Runners", footer = "New threads start on the first one that's online.") {
+                Group(stringResource(R.string.runners), footer = stringResource(R.string.new_threads_first_online)) {
                     runners.forEach { Field(it.name, RunnerOrder.status(it, now)) }
                     Row(
                         Modifier.fillMaxWidth().clickable(onClick = runnerOrder).heightIn(min = 48.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Change the order", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.change_the_order), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Icon(Line.ChevronRight, null, Modifier.size(16.dp), tint = LocalSignals.current.faint)
                     }
                 }
@@ -129,24 +131,24 @@ fun SettingsScreen(back: () -> Unit, runnerOrder: () -> Unit) {
                 // A self-hosted backend: the push relay only reaches Convex cloud,
                 // so say why nothing comes rather than offer a picker that does
                 // nothing (docs/self-hosting.md).
-                Group("Notifications") {
+                Group(stringResource(R.string.notifications)) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
                         Icon(Line.BellOff, null, Modifier.size(18.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            "Your Threadbear backend is self-hosted, so it can't send notifications. Open the app to see what needs you.",
+                            stringResource(R.string.notification_selfhosted),
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             } else if (pushSetup == PushSetup.NO_DISTRIBUTOR) {
                 // The fdroid build with no UnifiedPush app: push is off until there is one.
-                Group("Notifications") {
+                Group(stringResource(R.string.notifications)) {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
                         Icon(Line.BellOff, null, Modifier.size(18.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            "Notifications need a UnifiedPush app on this phone, such as ntfy.",
+                            stringResource(R.string.notification_no_distributor),
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -154,30 +156,34 @@ fun SettingsScreen(back: () -> Unit, runnerOrder: () -> Unit) {
                         Modifier.fillMaxWidth().clickable { openLink(context, DISTRIBUTORS) }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Find one", style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.accent)
+                        Text(stringResource(R.string.find_one), style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.accent)
                     }
                 }
             } else if (pushSetup == PushSetup.CHOOSE_DISTRIBUTOR) {
-                Group("Notifications", footer = "This phone has more than one UnifiedPush app.") {
+                Group(stringResource(R.string.notifications), footer = stringResource(R.string.this_phone_has_more_than_one_unifiedpush_app)) {
                     Row(
                         Modifier.fillMaxWidth().clickable {
                             context.findActivity()?.let { Push.transport.choose(it) { model.registerPush() } }
                         }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Choose one for notifications", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.choose_one_for_notifications), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Icon(Line.ChevronRight, null, Modifier.size(16.dp), tint = LocalSignals.current.faint)
                     }
                 }
             } else if (shell.canChooseNotifications(token)) {
-                Group("Notify me") {
+                Group(stringResource(R.string.notify_me)) {
                     NotifyMode.entries.forEach { m ->
                         Row(
                             Modifier.fillMaxWidth().selectable(selected = m == mode, role = Role.RadioButton) { shell.setNotifyMode(m) }
                                 .heightIn(min = 48.dp).padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(m.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(stringResource(when (m) {
+                                NotifyMode.AWAY -> R.string.notify_away
+                                NotifyMode.ALWAYS -> R.string.notify_always
+                                NotifyMode.OFF -> R.string.notify_never
+                            }), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             RadioButton(
                                 selected = m == mode, onClick = null,
                                 colors = RadioButtonDefaults.colors(selectedColor = LocalSignals.current.accent),
@@ -188,23 +194,23 @@ fun SettingsScreen(back: () -> Unit, runnerOrder: () -> Unit) {
             }
             // The app's own version, and a newer release when there is one (Updates).
             val update by com.mikerosoft.threadbear.android.Updates.available.collectAsStateWithLifecycle()
-            Group("App") {
-                Field("Version", com.mikerosoft.threadbear.android.Updates.installed?.let { com.mikerosoft.threadbear.android.Updates.label(it) } ?: "Development build")
+            Group(stringResource(R.string.app)) {
+                Field(stringResource(R.string.version), com.mikerosoft.threadbear.android.Updates.installed?.let { com.mikerosoft.threadbear.android.Updates.label(it) } ?: "Development build")
                 update?.let { u ->
                     Row(
                         Modifier.fillMaxWidth().clickable { com.mikerosoft.threadbear.android.Updates.open(context, u) }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Update to ${com.mikerosoft.threadbear.android.Updates.label(u.date)}", style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.accent)
+                        Text(stringResource(R.string.update_to_version, com.mikerosoft.threadbear.android.Updates.label(u.date)), style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.accent)
                     }
                 }
             }
-            Group(null, footer = "Forgets the token on this phone. Revoke it on the Mac too if the phone's lost.") {
+            Group(null, footer = stringResource(R.string.forgets_the_token_on_this_phone_revoke_it_on_the_mac_too_if_the_phone_s_lost)) {
                 Row(
                     Modifier.fillMaxWidth().clickable { confirmUnpair = true }.heightIn(min = 48.dp).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Unpair this phone", style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.failed)
+                    Text(stringResource(R.string.unpair_this_phone), style = MaterialTheme.typography.bodyLarge, color = LocalSignals.current.failed)
                 }
             }
         }
@@ -213,11 +219,11 @@ fun SettingsScreen(back: () -> Unit, runnerOrder: () -> Unit) {
     if (confirmUnpair) {
         AlertDialog(
             onDismissRequest = { confirmUnpair = false },
-            title = { Text("Unpair this phone?") },
+            title = { Text(stringResource(R.string.unpair_this_phone_more)) },
             confirmButton = {
-                TextButton(onClick = { confirmUnpair = false; model.unpair() }) { Text("Unpair", color = LocalSignals.current.failed) }
+                TextButton(onClick = { confirmUnpair = false; model.unpair() }) { Text(stringResource(R.string.unpair), color = LocalSignals.current.failed) }
             },
-            dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
@@ -314,14 +320,14 @@ fun RunnerOrderScreen(back: () -> Unit) {
         snackbarHost = { SnackbarHost(LocalSnackbar.current) },
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, "Back", Modifier.size(22.dp)) } },
-                title = { Text("Runner order") },
+                navigationIcon = { IconButton(onClick = back) { Icon(Line.Back, stringResource(R.string.back), Modifier.size(22.dp)) } },
+                title = { Text(stringResource(R.string.runner_order)) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { inner ->
         Column(Modifier.padding(inner).fillMaxSize().verticalScroll(rememberScrollState())) {
-            Group(null, footer = "New threads start on the first one that's online. Drag to change the order.") {
+            Group(null, footer = stringResource(R.string.new_threads_start_on_the_first_one_that_s_online_drag_to_change_the_order)) {
                 order.forEachIndexed { index, runner ->
                     key(runner.runnerId) {
                         val lifted = dragging == runner.runnerId
@@ -354,7 +360,7 @@ fun RunnerOrderScreen(back: () -> Unit) {
 private fun RunnerRow(runner: PhoneRunner, online: Boolean, modifier: Modifier, handle: Modifier) {
     Row(modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
         Text(runner.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(if (online) "Online" else "Offline", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Icon(Line.Grip, "Drag to reorder", handle.size(48.dp).padding(14.dp), tint = LocalSignals.current.faint)
+        Text(if (online) stringResource(R.string.online) else stringResource(R.string.offline), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Line.Grip, stringResource(R.string.drag_to_reorder), handle.size(48.dp).padding(14.dp), tint = LocalSignals.current.faint)
     }
 }
