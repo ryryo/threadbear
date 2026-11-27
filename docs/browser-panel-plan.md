@@ -29,6 +29,15 @@
 
 The port of T3 Code's crop geometry is covered by the [T3 Code MIT notice](third-party/t3-code-MIT.txt).
 
+## Picker repair and acceptance
+
+The first implementation used a screenshot for selection and queried the live DOM after the click. Its fixed-coordinate tests showed that a picture could be added, but did not compare the selected pixels or enter a comment. Treat the picker acceptance checks above as open.
+
+1. Run the live DOM parts of T3 Code's fixed revision `c2fcbd79523e` in a CEF isolated world. Port `PickTarget.ts` and the selection, focus, pointer interception and teardown from `PickPreload.ts`. Keep the existing crop geometry. Replace Electron's transport with a session tied to the originating CEF page and document. The page cannot nominate the thread or an attachment path.
+2. Verify that the element never activates, a different element can be picked without losing the comment, and the native page stays in view while choosing. Support viewport rectangle selection including canvas or inaccessible frames. Capture the image only after the selection is ready for review. Compare the viewport and target around capture; if they change or the image fails, keep the comment and target.
+3. Show the actual crop and let the user omit the image, go back to selection or cancel. Only the final Add to draft action commits. Cancel pending work on navigation, dismissal and thread change. Continue a confirmed save to the original thread.
+4. Verify the result in the real CEF fixture. Use a known colored target to check the selected pixels and enter a non-ASCII comment. Check viewport changes, cancellation, text without an image and draft restart. Verify real macOS focus and IME separately from automation using inserted text. Public distribution still requires separate renderer-sandbox verification.
+
 ## Implementation and verification
 
 - The Browser view uses the existing native panel pool, runtime setup, dock and BrowserBear list. Its original Highlights page preview route was removed when the link actions moved to Browser.
