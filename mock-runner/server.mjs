@@ -376,6 +376,8 @@ const devicesRefusal = () => {
 };
 
 let mockInstructions = { text: '' };
+let botWorkerRequest;
+const workerBot = { id: 'editorial-bot', name: 'Editorial Bot', role: '', instructions: '', revision: 1 };
 let botWorkspaceMove = null;
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true, labReview: true, labReviewers: [{ provider: 'codex', model: 'gpt-6.1-sol' }, { provider: 'claude', effort: 'xhigh' }], labPanel: [], labPanelLines: 150, keepAwake: true, fullSync: false, spareWeek: true,
@@ -524,7 +526,7 @@ function mockExperiments() {
     // The Recipes view, with TB_MOCK_RECIPES (addRecipesDemo).
     ...(process.env.TB_MOCK_RECIPES ? ['recipes'] : []),
     ...(process.env.TB_MOCK_COORDINATORS ? ['coordinators'] : []),
-    ...(process.env.TB_MOCK_BOT_MOVE ? ['nativeBots'] : []),
+    ...(process.env.TB_MOCK_BOT_MOVE || process.env.TB_MOCK_BOT_WORKER ? ['nativeBots'] : []),
     // Agent Archive in the sidebar's search, with TB_MOCK_ARCHIVE (ARCHIVE_SESSIONS).
     ...(process.env.TB_MOCK_ARCHIVE ? ['archive'] : []),
   ];
@@ -979,6 +981,28 @@ async function handle(client, { id, method, params = {} }) {
 }
 
 async function dispatch(client, method, p) {
+  if (process.env.TB_MOCK_BOT_WORKER && method.startsWith('bots.')) {
+    const source = [...threads.values()].find(t => !t.runnerId && !t.summary.archivedAt)?.summary.id;
+    switch (method) {
+      case 'bots.status': return { enabled: true, available: true, workers: true };
+      case 'bots.list': return { bots: [workerBot] };
+      case 'bots.get':
+        if (p.botId !== workerBot.id || !source) throw rpcError(-32602, 'Expected the Bot from the workspace.');
+        return { bot: workerBot, conversations: [{ id: 'editorial-conversation', threadId: source }] };
+      case 'bots.workers.targets':
+        if (p.threadId !== source) throw rpcError(-32602, 'Expected the owner conversation.');
+        return { runners: [{ id: BRUCE, name: 'mac-mini' }] };
+      case 'bots.workers.start':
+        if (p.threadId !== source || p.targetRunnerId !== BRUCE || p.text !== '見出しを確認してください' || !p.operationId) {
+          throw rpcError(-32602, 'Expected the owner conversation, target, brief and operation ID.');
+        }
+        botWorkerRequest = { requestId: 'editorial-worker-request', targetRunnerId: BRUCE, state: 'done', result: { threadId: 'mini_media' } };
+        return { requestId: botWorkerRequest.requestId };
+      case 'bots.workers.history':
+        if (p.threadId !== source) throw rpcError(-32602, 'Expected the owner conversation.');
+        return botWorkerRequest ? [botWorkerRequest] : [];
+    }
+  }
   if (process.env.TB_MOCK_BOT_MOVE) {
     switch (method) {
       case 'bots.status': return { enabled: true, available: true, workspaceMoves: true };

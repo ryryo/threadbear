@@ -1173,6 +1173,7 @@ impl Threadbear {
             list = list.child(
                 h_flex()
                     .gap(px(8.))
+                    .flex_wrap()
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-conversation-{thread}")),

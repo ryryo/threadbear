@@ -29,6 +29,29 @@ async function click(world: ThreadbearWorld, tip: string) {
   }
 }
 
+When("I open the conversations for the worker's Bot", async function (this: BotWorld) {
+  await click(this, 'Bots: assistants with their own settings and notes');
+  await click(this, 'Editorial Bot');
+  await click(this, 'Conversations');
+});
+
+When('I ask {string} to do work for the Bot saying {string}', async function (this: BotWorld, runner: string, brief: string) {
+  await click(this, 'Run on another Runner');
+  await click(this, runner);
+  await this.app.do({ cmd: 'type', here: true, text: brief });
+  await click(this, 'Save');
+});
+
+When('I open the worker requests for that conversation', async function (this: BotWorld) {
+  await click(this, 'Worker requests');
+});
+
+Then("I can open the remote worker's saved Thread", async function (this: BotWorld) {
+  await click(this, 'Open worker Thread');
+  await this.until('the completed worker Thread on mac-mini', d =>
+    d.selection?.id === 'mini_media' && d.transcript.state === 'loaded');
+});
+
 When('I open the Bot workspace move', async function (this: BotWorld) {
   await click(this, 'Bots: assistants with their own settings and notes');
   await click(this, 'Move Bot workspace');

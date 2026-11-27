@@ -108,6 +108,16 @@ Feature: Bot workspace
     And I run the saved Bot schedule now
     Then the scheduled message ran in a new conversation with "Editor"
 
+  @bots.worker @remote-threads @swift-pending
+  Scenario: The owner opens a completed worker's result from the Bot conversation
+    Given the app is connected to an isolated Bot Runner
+    When I open the conversations for the worker's Bot
+    And I ask "mac-mini" to do work for the Bot saying "見出しを確認してください"
+    Then I can open the remote worker's saved Thread
+    When I open the conversations for the worker's Bot
+    And I open the worker requests for that conversation
+    Then I can open the remote worker's saved Thread
+
   @bots.workspace_move @swift-pending
   Scenario: The owner chooses a destination and Project before starting a workspace move
     Given the app is connected to an isolated Bot Runner

@@ -179,6 +179,8 @@ Before(async function (this: ThreadbearWorld, { pickle }) {
   else delete process.env.TB_MOCK_RECIPES;
   if (pickle.tags.some((t) => t.name === '@coordinators')) process.env.TB_MOCK_COORDINATORS = '1';
   else delete process.env.TB_MOCK_COORDINATORS;
+  if (pickle.tags.some((t) => t.name === '@bots.worker')) process.env.TB_MOCK_BOT_WORKER = '1';
+  else delete process.env.TB_MOCK_BOT_WORKER;
   if (pickle.tags.some((t) => t.name === '@bots.workspace_move')) process.env.TB_MOCK_BOT_MOVE = '1';
   else delete process.env.TB_MOCK_BOT_MOVE;
   // Example annotations only; the review board itself is always on.
