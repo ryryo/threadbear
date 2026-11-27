@@ -97,7 +97,7 @@ export class ConvexUseTally {
     }
   }
 
-  use(): ConvexUse {
+  use(fullSync = false): ConvexUse {
     const from = dayKey(this.now() - (WINDOW_DAYS - 1) * DAY_MS);
     let sent = 0;
     let bodies = 0;
@@ -106,7 +106,7 @@ export class ConvexUseTally {
       sent += d.sent;
       bodies += d.bodies;
     }
-    return estimate({ sent, bodies, since: new Date(this.since).toISOString(), days: Math.max(1, (this.now() - this.since) / DAY_MS) });
+    return estimate({ sent, bodies, since: new Date(this.since).toISOString(), days: Math.max(1, (this.now() - this.since) / DAY_MS) }, fullSync);
   }
 
   private prune(): boolean {
@@ -124,7 +124,7 @@ export class ConvexUseTally {
 
 // The estimate from 30 days' counts, scaled up to a month while there are
 // fewer days than that, so a busy first week warns before the month is out.
-export function estimate(c: { sent: number; bodies: number; since: string; days: number }): ConvexUse {
+export function estimate(c: { sent: number; bodies: number; since: string; days: number }, fullSync = false): ConvexUse {
   const scale = WINDOW_DAYS / Math.min(WINDOW_DAYS, Math.max(1, c.days));
   const io = Math.round(c.sent * IO_PER_SENT_BYTE * scale);
   // Bodies are kept 30 days, so what's stored is a month's worth however long it's been.
@@ -132,16 +132,20 @@ export function estimate(c: { sent: number; bodies: number; since: string; days:
   const out: ConvexUse = { sent: c.sent, bodies: c.bodies, io, storage, since: c.since };
   const ioOver = io >= FREE_IO_BYTES * WARN_AT;
   const storageOver = storage >= FREE_STORAGE_BYTES * WARN_AT;
-  if (ioOver || storageOver) out.warning = warningText(io, storage, ioOver, storageOver);
+  if (ioOver || storageOver) out.warning = warningText(io, storage, ioOver, storageOver, fullSync);
   return out;
 }
 
-export function warningText(io: number, storage: number, ioOver: boolean, storageOver: boolean): string {
+function warningText(io: number, storage: number, ioOver: boolean, storageOver: boolean, fullSync: boolean): string {
   const what = [ioOver ? `about ${mb(io)} of database I/O a month` : '', storageOver ? `about ${mb(storage)} of stored tool output` : ''].filter(Boolean).join(' and ');
+  const fullSyncAdvice = fullSync
+    ? 'To use less, turn full sync off ("sync": { "full": false } in runner.json). '
+    : 'Full sync is already off. This estimate still includes earlier sync traffic. ';
   return (
-    `Convex: this runner looks to be heading for ${what}, near the Free plan's limits (1 GB of I/O a month, 0.5 GB stored). ` +
-    `It's an estimate, and the limits are your team's. On Free, writes can start failing once you're over. ` +
-    `To use less, turn full sync off ("sync": { "full": false } in runner.json); or move to a paid plan in the Convex dashboard. ` +
+    `Convex: based on this runner's recent sync traffic, estimated use is ${what}. ` +
+    `Your team's Free plan limits are 1 GB of I/O a month and 0.5 GB stored. On Free, writes can start failing once you're over. ` +
+    fullSyncAdvice +
+    `Check your team's actual usage and plan in the Convex dashboard. ` +
     `On a paid plan already? Hide this with "sync": { "usageWarning": false }.`
   );
 }

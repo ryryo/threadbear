@@ -636,7 +636,9 @@ the mirror back as state. The Mac app doesn't use it.
   that was tool output, and estimates of a month's I/O and of stored tool output
   against Convex's Free plan (`src/convex-use.ts`), with a `warning` (also a
   `runner.notice` on connect) past 70% of either limit unless `sync.usageWarning`
-  is false. A runner can't read its team's real usage, so these are estimates of
+  is false. The warning reflects the current full-sync setting, and the estimate
+  can still include earlier tool output after full sync is turned off. A runner
+  can't read its team's real usage, so these are estimates of
   this runner alone. Reads: `phone:eventBody { token,
   threadId, seq }` and `sync:remoteBody { key, threadId, seq }` answer `null`, `{ state:
   "withheld", reason? }`, `{ state: "expired" }` or `{ state: "text", text, ok?, truncated?,

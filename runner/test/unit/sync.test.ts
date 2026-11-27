@@ -3337,9 +3337,9 @@ test("an archived thread's folder is looked at for its history", async () => {
 test('every mutation is counted for the estimate of Convex use, and the warning can be hidden', async () => {
   const { h } = setup();
   const home = tmpDir();
-  const make = (usageWarning?: boolean) =>
+  const make = (full: boolean, usageWarning?: boolean) =>
     new ConvexSync({
-      config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1', ...(usageWarning === false ? { usageWarning } : {}) },
+      config: { enabled: true, url: 'https://x.convex.cloud', name: 'TestMac', runnerId: 'r1', full, usageWarning },
       key: 'k',
       runner: h.runner,
       version: '0.1.0+test',
@@ -3349,7 +3349,7 @@ test('every mutation is counted for the estimate of Convex use, and the warning 
       use: new ConvexUseTally({ home }),
       post: async (_kind, fn) => (fn === 'sync:heartbeat' ? { apiVersion: BACKEND_API_VERSION } : null),
     });
-  const sync = make();
+  const sync = make(true);
   sync.start();
   await sync.flushNow();
   const before = sync.status().use!.sent;
@@ -3358,7 +3358,12 @@ test('every mutation is counted for the estimate of Convex use, and the warning 
   await sync.relaySource()!.post('mutation', 'sync:somethingElse', { key: 'k', text: 'x'.repeat(400_000_000) });
   assert.ok(sync.status().use!.sent > before + 400_000_000);
   assert.match(sync.status().use!.warning ?? '', /Free plan/);
+  assert.match(sync.status().use!.warning ?? '', /turn full sync off/);
   await sync.stop();
+  const reduced = make(false).status().use!;
+  assert.match(reduced.warning ?? '', /Full sync is already off/);
+  assert.match(reduced.warning ?? '', /earlier sync traffic/);
+  assert.doesNotMatch(reduced.warning ?? '', /turn full sync off/);
   // A failed try isn't counted: only what the backend took.
   let failing = true;
   const flaky = new ConvexSync({
@@ -3387,7 +3392,7 @@ test('every mutation is counted for the estimate of Convex use, and the warning 
   assert.equal(isConvexCloud('https://x.convex.cloud'), true);
   assert.equal(isConvexCloud('http://127.0.0.1:3210'), false, "a self-hosted backend has no Free plan to warn about");
   assert.equal(isConvexCloud('https://convex.cloud.example.com'), false);
-  const quiet = make(false);
+  const quiet = make(false, false);
   assert.equal(quiet.status().use!.warning, undefined);
   assert.ok(quiet.status().use!.sent > 400_000_000, 'the count is kept on disk');
 });

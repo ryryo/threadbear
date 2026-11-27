@@ -2009,7 +2009,7 @@ export class ConvexSync {
       s.full = { ...this.bodyStats, pending: this.bodies.length, ...((this.backendApiVersion ?? 0) < BODIES_API_VERSION && this.backendApiVersion !== undefined ? { backendTooOld: true } : {}) };
     }
     if (this.deps.use) {
-      const use = this.deps.use.use();
+      const use = this.deps.use.use(this.deps.config.full);
       // Free's limits are Convex cloud's; a self-hosted backend has none.
       if (this.deps.config.usageWarning === false || !isConvexCloud(this.deps.config.url)) delete use.warning;
       s.use = use;

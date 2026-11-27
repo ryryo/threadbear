@@ -620,7 +620,9 @@ and writes came to 1.7 times what runners wrote, so the I/O estimate is twice wh
 was sent; stored tool output is what full sync sent in 30 days, plus a third. A first
 month is scaled up from the days it has. `tb status` shows both, and past 70% of
 Free's 1 GB of I/O or 0.5 GB of storage it warns (and says so to the app when it
-connects), suggesting `"sync": { "full": false }` or a paid plan, and
+connects). The warning points to the Convex dashboard for actual team usage and
+suggests `"sync": { "full": false }` when full sync is on. After full sync is
+turned off, it explains that the estimate still includes earlier sync traffic. Use
 `"sync": { "usageWarning": false }` to hide it on one. It's one runner's view of
 limits that are the team's, so it can be under, and it never blocks anything. On
 Free, Convex also emails as you near a limit.

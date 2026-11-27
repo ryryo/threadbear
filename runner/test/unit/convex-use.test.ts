@@ -13,13 +13,14 @@ test('light use warns nothing; a month heading past 70% of Free warns, as an est
   const quiet = estimate({ sent: 50e6, bodies: 20e6, since: 'x', days: 30 });
   assert.equal(quiet.io, 100e6);
   assert.equal(quiet.warning, undefined);
-  const busy = estimate({ sent: (FREE_IO_BYTES * WARN_AT) / 2, bodies: 0, since: 'x', days: 30 });
+  const busy = estimate({ sent: (FREE_IO_BYTES * WARN_AT) / 2, bodies: 0, since: 'x', days: 30 }, true);
   assert.match(busy.warning ?? '', /I\/O/);
   assert.match(busy.warning ?? '', /estimate/);
   assert.match(busy.warning ?? '', /"full": false/);
   assert.match(busy.warning ?? '', /usageWarning/);
   const stored = estimate({ sent: 0, bodies: (FREE_STORAGE_BYTES * WARN_AT) / 1.3 + 1, since: 'x', days: 30 });
   assert.match(stored.warning ?? '', /stored tool output/);
+  assert.match(stored.warning ?? '', /Full sync is already off/);
 });
 
 test("a busy first week is scaled to a month, so it warns before the month's out", () => {
