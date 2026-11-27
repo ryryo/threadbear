@@ -6,12 +6,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 const root = join(import.meta.dirname, '../../..');
 const builtins = new Set(builtinModules.filter((m) => !m.startsWith('_')));
 
 for (const dir of ['convex', 'relay/convex']) {
+  test(`${dir}: source module paths use characters Convex accepts`, () => {
+    const full = join(root, dir);
+    if (!existsSync(full)) return;
+    const invalid = readdirSync(full, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(?:[cm]?[jt]s|[jt]sx)$/.test(entry.name))
+      .map((entry) => relative(full, join(entry.parentPath, entry.name)))
+      .filter((file) => file.split(sep).some((part) => !/^[a-zA-Z0-9_.]+$/.test(part)));
+    assert.deepEqual(invalid.sort(), []);
+  });
+
   test(`${dir}: Node built-ins only in "use node" files, and those only imported by each other`, () => {
     const full = join(root, dir);
     if (!existsSync(full)) return;

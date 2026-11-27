@@ -5,7 +5,7 @@
 // are what an agent showed Mike on purpose or he pasted (replyImages), or a shared thread's.
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
-import { botScheduleTarget } from './bot-schedule-values';
+import { botScheduleTarget } from './botScheduleValues';
 import { machineTimers } from '@convex-dev/state-machines';
 import { commandStateV } from './commandStates';
 import { moveStateV } from './moveStates';
