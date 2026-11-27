@@ -149,6 +149,15 @@ state and revision. `bots.requests.cancel` takes these IDs and
 `expectedRevision`. The durable cancellation stops queued input and
 prevents later returns, including if the recipient is in a turn that is
 doing other work. It does not stop unrelated work in that turn.
+When `bots.status` reports `requestAbandonment`, the owner can call
+`bots.requests.abandon` with the same IDs and revision for a child of a waiting
+Bot request. It records that single child as `abandoned` and queues one
+no-reply result to the parent’s original conversation. Other children still
+have to finish. An already running turn can finish, while any queued input
+for the abandoned child is dropped. A late answer remains readable through `bots.requests.get`
+and does not queue another result. Saving this state requires Bot data
+format 10. Its workspace transfer uses envelope version 2 so an unsupported
+target cannot stage or claim it.
 `bots.requests.retry` takes the same fields and reconciles delivery state.
 `bots.requests.rerun` takes those fields, a new or edited `text` and an
 `operationId`. The owner creates a new attempt linked by `rerunOf` to the

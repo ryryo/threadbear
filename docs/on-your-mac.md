@@ -912,6 +912,9 @@ the owning runner.
   uses the existing Thread placement code and removes the pack when the move
   settles. Convex switches the workspace owner, linked Threads and Bot schedule
   rows together. The first remote worker or workspace move requires format 9.
+  Giving up a delegated wait records the parent notification and any later
+  reply reference in the request journal. Such records require format 10 and
+  a compatible destination Runner when the workspace moves.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac. A runner that signs releases with a Touch ID key also reads

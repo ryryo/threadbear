@@ -26,6 +26,7 @@ test('a completed Bot request recovers the original reply after acceptance and a
       replies.set(replyId, body);
       throw new Error('interrupted after recipient saved the reply');
     },
+    waitingParent: () => false,
     readResult: source => source.threadId === 'receiver' && source.seq === 10 ? text : undefined,
     removeQueuedInput: () => { throw new Error('should not cancel'); },
   };
@@ -57,6 +58,7 @@ test('a failure shared by a steered turn keeps the two original request identiti
       assert.match(text, /the turn stopped/);
       ids.push(replyId);
     },
+    waitingParent: () => false,
     readResult: () => undefined,
     removeQueuedInput: () => { throw new Error('disk full'); },
   });

@@ -221,8 +221,11 @@ function setup() {
   const source = conversations.create(repo.create({ name: 'Editor' }).id, 'editor');
   const writer = repo.create({ name: 'Writer' });
   const target = conversations.create(writer.id, 'writer');
-  requests = new BotRequests({ root, runner: h.runner, repo, owns: () => true, protect: () => {}, warn: () => {} });
-  return { h, repo, conversations, source, target, writer, requests };
+  const reopen = (warn = () => {}) => {
+    requests = new BotRequests({ root, runner: h.runner, repo, owns: () => true, protect: () => {}, warn });
+    return requests;
+  };
+  return { h, repo, conversations, source, target, writer, requests: reopen(), reopen };
 }
 
 test('only the owner uses request RPCs and a JSON caller cannot insert a Bot request correlation', async t => {
@@ -241,6 +244,7 @@ test('only the owner uses request RPCs and a JSON caller cannot insert a Bot req
   t.after(async () => { owner.close(); agent.close(); await server.close(); });
   const params = { threadId: source.threadId, botId: writer.id, name: 'a', text: 'Summarize this', when: 'queue' };
   await assert.rejects(agent.call('bots.requests.send', params), /owner/);
+  await assert.rejects(agent.call('bots.requests.abandon', { threadId: source.threadId, requestId: 'not-mine', expectedRevision: 1 }), /owner/);
   await assert.rejects(agent.call('drain.bots.request', params), /owner/);
   await assert.rejects(agent.call('drain.bots.authorizeRequest', params), /owner/);
   const receipt = await owner.call<{ requestId: string }>('bots.requests.send', params);
@@ -336,4 +340,134 @@ test('a parent request returns the continuation after a child, and cancelling th
     requests.recover(target.threadId);
     assert.deepEqual(requests.ownerRead(source.threadId, parent.requestId).result, { text: 'Use a clearer heading.', whole: true });
   }
+});
+
+test('abandoning one child returns one no-reply notice after recovery and stores late text without waking the parent', async t => {
+  const { h, repo, conversations, source, target, writer, requests, reopen } = setup();
+  const reader = repo.create({ name: 'Reader' });
+  const tester = repo.create({ name: 'Tester' });
+  const readerThread = conversations.create(reader.id, 'reader');
+  const testerThread = conversations.create(tester.id, 'tester');
+  const parent = await requests.sendOwner(source.threadId, {
+    to: writer.id, name: 'parent', text: 'Ask Reader and Tester', when: 'queue',
+  });
+  await tick();
+  const parentSession = h.adapter.last;
+  parentSession.init();
+  const ask = (id: string, name: string) => requests.sendBot(target.threadId, {
+    to: id, name, text: 'Check the heading', when: 'queue',
+  }, async () => 'full');
+  const left = await ask(reader.id, 'first');
+  await tick();
+  const readerSession = h.adapter.last;
+  readerSession.init();
+  const right = await ask(tester.id, 'second');
+  await tick();
+  const testerSession = h.adapter.last;
+  testerSession.init();
+  parentSession.text('earlier', 'I asked both reviewers.');
+  parentSession.result();
+  await tick();
+  const child = requests.ownerGet(target.threadId, left.requestId);
+  const sibling = requests.ownerGet(target.threadId, right.requestId);
+  const root = requests.ownerGet(source.threadId, parent.requestId);
+  assert.throws(() => requests.ownerAbandon(target.threadId, child.id, child.revision - 1), /changed/);
+  assert.throws(() => requests.ownerAbandon(source.threadId, child.id, child.revision), /another conversation/);
+  assert.throws(() => requests.ownerAbandon(source.threadId, root.id, root.revision), /waiting parent/);
+
+  const send = h.runner.send.bind(h.runner);
+  const lost = t.mock.method(h.runner, 'send', (...args: Parameters<typeof send>) => {
+    const result = send(...args);
+    if (args[3]?.messageId === `bot-reply:${child.id}`) throw new Error('Notice acknowledgement was lost');
+    return result;
+  });
+  assert.throws(() => requests.ownerAbandon(target.threadId, child.id, child.revision), /acknowledgement was lost/);
+  lost.mock.restore();
+  await tick();
+  const reopened = reopen(() => assert.fail('Could not recover the abandoned request'));
+  reopened.recover();
+  reopened.recover();
+  const notice = 'No reply came back from Reader, and the user gave up waiting for it. This is its result: go on with the work you were given.';
+  assert.equal(parentSession.sent.filter(input => input.text.includes(notice)).length, 1);
+  const siblingAfter = reopened.ownerGet(target.threadId, sibling.id).state;
+  assert.equal(siblingAfter.status, 'running');
+  assert.ok('turnId' in sibling.state && 'turnId' in siblingAfter);
+  assert.equal(siblingAfter.turnId, sibling.state.turnId);
+  assert.equal(reopened.ownerGet(target.threadId, child.id).state.status, 'abandoned');
+  assert.throws(() => reopened.ownerAbandon(target.threadId, child.id, child.revision), /changed/);
+  parentSession.text('without-reader', 'Reader did not reply. I still need Tester.');
+  parentSession.result();
+  await tick();
+  reopened.recover(target.threadId);
+  assert.notEqual(reopened.ownerGet(source.threadId, root.id).state.status, 'returned');
+
+  const late = '遅れて届いた長い回答。'.repeat(410);
+  readerSession.text('late', late);
+  readerSession.result();
+  await tick();
+  reopened.recover(readerThread.threadId);
+  reopened.recover();
+  assert.deepEqual(reopened.ownerRead(target.threadId, child.id).result, { text: late, whole: true });
+  assert.equal(parentSession.sent.length, 2);
+
+  testerSession.text('answer', 'The title should be short.');
+  testerSession.result();
+  await tick();
+  reopened.recover(testerThread.threadId);
+  await tick();
+  assert.match(parentSession.sent.at(-1)?.text ?? '', /The title should be short\./);
+  parentSession.text('conclusion', 'Use a short title. Reader’s reply was unavailable.');
+  parentSession.result();
+  await tick();
+  reopened.recover(target.threadId);
+  assert.deepEqual(reopened.ownerRead(source.threadId, root.id).result,
+    { text: 'Use a short title. Reader’s reply was unavailable.', whole: true });
+});
+
+test('abandoning a queued child stops only that input and can recover a notice that was never written', async t => {
+  const { h, repo, conversations, source, target, writer, requests, reopen } = setup();
+  const reader = repo.create({ name: 'Reader' });
+  const readerThread = conversations.create(reader.id, 'reader');
+  await requests.sendOwner(source.threadId, {
+    to: writer.id, name: 'root', text: 'Ask Reader for a heading', when: 'queue',
+  });
+  await tick();
+  const parent = h.adapter.last;
+  parent.init();
+  h.runner.send(readerThread.threadId, 'Independent task');
+  await tick();
+  const worker = h.adapter.last;
+  worker.init();
+  const receipt = await requests.sendBot(target.threadId, {
+    to: reader.id, name: 'child', text: 'Check a heading', when: 'queue',
+  }, async () => 'full');
+  await tick();
+  assert.equal(worker.sent.length, 1);
+  parent.text('waiting', 'I am waiting for Reader.');
+  parent.result();
+  await tick();
+  const child = requests.ownerGet(target.threadId, receipt.requestId);
+  assert.equal(child.state.status, 'queued');
+
+  const send = h.runner.send.bind(h.runner);
+  const rejected = t.mock.method(h.runner, 'send', (...args: Parameters<typeof send>) => {
+    if (args[3]?.messageId === `bot-reply:${child.id}`) throw new Error('Notice was not written');
+    return send(...args);
+  });
+  assert.throws(() => requests.ownerAbandon(target.threadId, child.id, child.revision), /not written/);
+  rejected.mock.restore();
+  assert.equal(parent.sent.length, 1);
+  const recovered = reopen(() => assert.fail('Could not reconcile the saved notice'));
+  recovered.recover();
+  await tick();
+  assert.equal(parent.sent.length, 2);
+  assert.match(parent.sent[1]?.text ?? '', /the user gave up waiting/);
+  assert.equal(worker.sent.length, 1);
+  worker.text('independent', 'The unrelated task completed.');
+  worker.result();
+  await tick();
+  recovered.recover();
+  assert.equal(worker.sent.length, 1);
+  assert.equal(parent.sent.length, 2);
+  assert.equal(recovered.ownerRead(target.threadId, child.id).result, undefined);
 });

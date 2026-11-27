@@ -377,6 +377,7 @@ const devicesRefusal = () => {
 
 let mockInstructions = { text: '' };
 let botWorkerRequest;
+let childWaitAbandoned = false;
 const workerBot = { id: 'editorial-bot', name: 'Editorial Bot', role: '', instructions: '', revision: 1 };
 let botWorkspaceMove = null;
 const settings = {
@@ -526,7 +527,7 @@ function mockExperiments() {
     // The Recipes view, with TB_MOCK_RECIPES (addRecipesDemo).
     ...(process.env.TB_MOCK_RECIPES ? ['recipes'] : []),
     ...(process.env.TB_MOCK_COORDINATORS ? ['coordinators'] : []),
-    ...(process.env.TB_MOCK_BOT_MOVE || process.env.TB_MOCK_BOT_WORKER ? ['nativeBots'] : []),
+    ...(process.env.TB_MOCK_BOT_MOVE || process.env.TB_MOCK_BOT_WORKER || process.env.TB_MOCK_BOT_ABANDON ? ['nativeBots'] : []),
     // Agent Archive in the sidebar's search, with TB_MOCK_ARCHIVE (ARCHIVE_SESSIONS).
     ...(process.env.TB_MOCK_ARCHIVE ? ['archive'] : []),
   ];
@@ -981,14 +982,35 @@ async function handle(client, { id, method, params = {} }) {
 }
 
 async function dispatch(client, method, p) {
-  if (process.env.TB_MOCK_BOT_WORKER && method.startsWith('bots.')) {
+  const abandonFixture = Boolean(process.env.TB_MOCK_BOT_ABANDON);
+  if ((process.env.TB_MOCK_BOT_WORKER || abandonFixture) && method.startsWith('bots.')) {
     const source = [...threads.values()].find(t => !t.runnerId && !t.summary.archivedAt)?.summary.id;
+    const child = () => ({
+      id: 'child-request', parentRequestId: 'parent-request', targetBotId: 'recipient',
+      targetThreadId: 'recipient-thread', revision: childWaitAbandoned ? 2 : 1, when: 'queue',
+      state: childWaitAbandoned ? { status: 'abandoned', notice: 'received', late: {} } : { status: 'running' },
+    });
     switch (method) {
-      case 'bots.status': return { enabled: true, available: true, workers: true };
+      case 'bots.status':
+        return { enabled: true, available: true, workers: !abandonFixture, requestAbandonment: abandonFixture };
       case 'bots.list': return { bots: [workerBot] };
       case 'bots.get':
         if (p.botId !== workerBot.id || !source) throw rpcError(-32602, 'Expected the Bot from the workspace.');
-        return { bot: workerBot, conversations: [{ id: 'editorial-conversation', threadId: source }] };
+        return { bot: workerBot, conversations: [{ id: 'editorial-conversation', threadId: source }], capabilities: { requests: abandonFixture } };
+      case 'bots.requests.list':
+        if (!abandonFixture || p.threadId !== source) throw rpcError(-32602, 'Expected the origin conversation.');
+        return { requests: [child()] };
+      case 'bots.requests.abandon':
+        if (!abandonFixture || p.threadId !== source || p.requestId !== 'child-request' || p.expectedRevision !== 1 || childWaitAbandoned) {
+          throw rpcError(-32602, 'Expected one current child request.');
+        }
+        childWaitAbandoned = true;
+        return { row: child() };
+      case 'bots.requests.get':
+        if (!abandonFixture || p.threadId !== source || p.requestId !== 'child-request' || !childWaitAbandoned) {
+          throw rpcError(-32602, 'Expected the abandoned child in its original conversation.');
+        }
+        return { row: child(), result: { text: '遅れて届いた見出し案。', whole: true } };
       case 'bots.workers.targets':
         if (p.threadId !== source) throw rpcError(-32602, 'Expected the owner conversation.');
         return { runners: [{ id: BRUCE, name: 'mac-mini' }] };

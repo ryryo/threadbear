@@ -39,6 +39,8 @@ export function botRequestMethods(requests: () => BotRequests): Record<string, (
       requests().sendOwner(threadId, { ...input, to: botId })),
     'bots.requests.list': method(requestSource, ({ threadId }) => ({ requests: requests().ownerList(threadId) })),
     'bots.requests.get': method(requestIdentity, ({ threadId, requestId }) => requests().ownerRead(threadId, requestId)),
+    'bots.requests.abandon': method(requestWrite, ({ threadId, requestId, expectedRevision }) =>
+      ({ row: requests().ownerAbandon(threadId, requestId, expectedRevision) })),
     'bots.requests.cancel': method(requestWrite, ({ threadId, requestId, expectedRevision }) =>
       ({ row: requests().ownerCancel(threadId, requestId, expectedRevision) })),
     'bots.requests.retry': method(requestWrite, ({ threadId, requestId, expectedRevision }) =>

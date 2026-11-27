@@ -7,7 +7,7 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, BOT_TRANSFER_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_ABANDON_FORMAT, BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, BOT_TRANSFER_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -89,12 +89,17 @@ export class BotRuntime {
   status() {
     const reason = this.unavailable();
     return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined,
-      requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(),
+      requests: this.requestsAvailable(), requestAbandonment: this.requestAbandonmentAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(),
       groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), reason };
   }
 
   requestsAvailable(): boolean {
     return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_REQUEST_FORMAT);
+  }
+
+  private requestAbandonmentAvailable(): boolean {
+    const { home, canChangePrivacy } = this.options;
+    return this.requestsAvailable() && canChangePrivacy?.() === true && supervisorGuardsBotData(home, BOT_ABANDON_FORMAT);
   }
 
   rememberFromTurn(threadId: string, turnId: string, input: RememberInput, kept = false) {
@@ -148,6 +153,10 @@ export class BotRuntime {
         // execution Thread while this primary settles its saved result.
         if (!owns()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
         protectBotData(home, BOT_REQUEST_FORMAT);
+      },
+      protectAbandonment: () => {
+        if (!this.requestAbandonmentAvailable()) throw new RpcError(ErrorCode.busy, 'Wait for the updated Runner supervisor to finish handing over.');
+        protectBotData(home, BOT_ABANDON_FORMAT);
       },
       warn: () => runner().notice('error', 'A Bot request could not be reconciled.'),
     });
@@ -661,9 +670,9 @@ export class BotRuntime {
 
   private transfer(): BotWorkspaceTransfer {
     const { home, owner, owns } = this.options;
-    return this.transferService ??= new BotWorkspaceTransfer(home, owner(), () => {
+    return this.transferService ??= new BotWorkspaceTransfer(home, owner(), format => {
       if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
-      protectBotData(home, BOT_TRANSFER_FORMAT);
+      protectBotData(home, format ?? BOT_TRANSFER_FORMAT);
     });
   }
 

@@ -38,6 +38,13 @@ Feature: Bot workspace
     And I read the saved Bot request result
     Then I see the full saved request result
 
+  @bots.abandon @swift-pending
+  Scenario: The owner can give up one Bot request and later read its saved reply
+    Given the app is connected to an isolated Bot Runner
+    When I open requests in the Bot workspace
+    And I give up waiting for a delegated Bot request
+    Then I can read the late Bot reply
+
   @bots.tasks @bots @swift-pending
   Scenario: A background task keeps its own thread and result after reconnect
     Given the app is connected to an isolated Bot Runner

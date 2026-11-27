@@ -92,6 +92,7 @@ struct RequestCard {
     revision: u64,
     target_bot_id: String,
     target_thread_id: String,
+    parent_request_id: Option<String>,
     when: String,
     state: RequestStatus,
 }
@@ -99,6 +100,7 @@ struct RequestCard {
 #[derive(Deserialize)]
 struct RequestStatus {
     status: String,
+    late: Option<serde::de::IgnoredAny>,
     reason: Option<String>,
     #[serde(default)]
     failed: bool,
@@ -116,6 +118,8 @@ impl RequestStatus {
             "failed" => tr!("Failed"),
             "uncertain" => tr!("Delivery unconfirmed"),
             "cancelled" => tr!("Cancelled"),
+            "abandoned" if self.late.is_some() => tr!("Reply arrived after giving up"),
+            "abandoned" => tr!("Gave up waiting"),
             _ => tr!("Status unavailable"),
         }
     }
@@ -290,6 +294,7 @@ pub(crate) struct BotsState {
     offered: bool,
     available: bool,
     requests_available: bool,
+    request_abandonment: bool,
     tasks_available: bool,
     workers_available: bool,
     worker_choices: Option<(String, Vec<BotWorkerTarget>)>,
@@ -347,6 +352,8 @@ impl Threadbear {
                 this.bots.available = value["available"].as_bool().unwrap_or(false);
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
+                this.bots.request_abandonment =
+                    value["requestAbandonment"].as_bool().unwrap_or(false);
                 this.bots.workers_available = value["workers"].as_bool().unwrap_or(false);
                 this.bots.teams_available = value["teams"].as_bool().unwrap_or(false);
                 this.bots.schedules_available = value["schedules"].as_bool().unwrap_or(false);
@@ -1013,6 +1020,28 @@ impl Threadbear {
                 })),
             );
         }
+        if self.bots.request_abandonment
+            && request.parent_request_id.is_some()
+            && matches!(status, "admitted" | "queued" | "running")
+        {
+            let params = payload.clone();
+            row = row.child(
+                bot_button(
+                    SharedString::from(format!("bot-request-abandon-{id}")),
+                    tr!("Give up waiting"),
+                    busy,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.bot_write(
+                        "bots.requests.abandon",
+                        params.clone(),
+                        After::Requests,
+                        window,
+                        cx,
+                    )
+                })),
+            );
+        }
         if matches!(status, "returning" | "uncertain") {
             row = row.child(
                 bot_button(
@@ -1050,7 +1079,7 @@ impl Threadbear {
                 })),
             );
         }
-        if matches!(status, "returning" | "returned") {
+        if matches!(status, "returning" | "returned") || request.state.late.is_some() {
             if let Some((_, result)) = self
                 .bots
                 .request_result

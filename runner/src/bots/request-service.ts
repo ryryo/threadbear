@@ -11,7 +11,7 @@ import { resultText } from './handoff-result.ts';
 import type { SavedTask } from './task-journal.ts';
 import { activeBotInput } from './turn-proof.ts';
 
-type Options = { root: string; runner: Runner; repo: BotRepository; owns: () => boolean; protect: () => void; warn: () => void;
+type Options = { root: string; runner: Runner; repo: BotRepository; owns: () => boolean; protect: () => void; protectAbandonment?: () => void; warn: () => void;
   task?: (id: string) => SavedTask | undefined;
   childTasks?: (requestId: string) => readonly SavedTask[];
   onCancel?: (row: RequestRow) => void;
@@ -32,7 +32,10 @@ export class BotRequests {
   constructor(options: Options) {
     this.options = options;
     const { root, runner, owns, protect, warn } = options;
-    this.requests = new RequestStateStore(root, protect);
+    this.requests = new RequestStateStore(root, abandoned => {
+      if (abandoned && options.protectAbandonment) options.protectAbandonment();
+      else protect();
+    });
     this.evidence = new RequestThreadEvidence(runner, options.peerOwns);
     this.dispatch = new BotRequestDispatch({
       requests: this.requests,
@@ -59,6 +62,7 @@ export class BotRequests {
       },
       readResult: source => this.evidence.readResult(source),
       removeQueuedInput: row => this.evidence.removeQueued(row),
+      waitingParent: row => this.waitingParent(row),
     });
   }
 
@@ -109,6 +113,16 @@ export class BotRequests {
     } catch {
       return false;
     }
+  }
+
+  private waitingParent(row: RequestRow): boolean {
+    if (!row.parentRequestId || this.requests.cancelledAncestor(row)) return false;
+    const parent = this.requests.get(row.parentRequestId);
+    const source = this.options.runner.threads.get(row.sourceThreadId);
+    if (source && (source.rec.archivedAt || source.rec.copied || source.rt.deleted)) return false;
+    return ['admitted', 'queued', 'running'].includes(parent.state.status) &&
+      parent.targetThreadId === row.sourceThreadId && parent.targetConversationId === row.sourceConversationId &&
+      parent.targetBotId === row.sourceBotId && parent.targetPrivateBotId === row.sourcePrivateBotId;
   }
 
   private sendSaved(row: RequestRow, text: string, actor: RequestActor) {
@@ -218,7 +232,12 @@ export class BotRequests {
     let row: RequestRow;
     try { row = this.requests.get(ref.id); } catch { return 'wait'; }
     if (this.requests.cancelledAncestor(row)) return 'drop';
-    if (ref.role === 'result') return row.sourceThreadId === threadId && ['returning', 'returned'].includes(row.state.status) && this.replyAllowed(row) ? 'allow' : 'drop';
+    if (ref.role === 'result') {
+      const returning = row.state.status === 'abandoned'
+        ? row.state.notice !== 'suppressed' && this.waitingParent(row)
+        : ['returning', 'returned'].includes(row.state.status);
+      return row.sourceThreadId === threadId && returning && this.replyAllowed(row) ? 'allow' : 'drop';
+    }
     if (row.targetThreadId !== threadId || !['admitted', 'queued', 'running'].includes(row.state.status)) return 'drop';
     try {
       const link = this.link(threadId, true);
@@ -234,7 +253,7 @@ export class BotRequests {
     for (const row of this.requests.list().reverse()) {
       if (threadId && row.targetThreadId !== threadId && row.sourceThreadId !== threadId) continue;
       try {
-        if (this.requests.cancelledAncestor(row) && !['returned', 'failed', 'cancelled'].includes(row.state.status)) {
+        if (this.requests.cancelledAncestor(row) && !['returned', 'failed', 'cancelled', 'abandoned'].includes(row.state.status)) {
           this.cancelRequest(row, row.revision);
         } else {
           this.delivery.settle(row.id, true);
@@ -249,7 +268,7 @@ export class BotRequests {
 
   private openFrom(threadId: string): RequestRow[] {
     return this.requests.list().filter(row => row.sourceThreadId === threadId &&
-      !['returned', 'failed', 'cancelled'].includes(row.state.status));
+      !['returned', 'failed', 'cancelled', 'abandoned'].includes(row.state.status));
   }
 
   pendingFrom(threadId: string): boolean {
@@ -283,9 +302,21 @@ export class BotRequests {
   ownerRead(threadId: string, id: string) {
     const row = this.ownerGet(threadId, id);
     const state = row.state;
-    const saved = state.status === 'uncertain' ? state.reply?.result : 'result' in state ? state.result : undefined;
+    const saved = state.status === 'abandoned' ? state.late?.result
+      : state.status === 'uncertain' ? state.reply?.result : 'result' in state ? state.result : undefined;
     const result = saved ? resultText(saved, source => this.evidence.readResult(source)) : undefined;
     return { row, result };
+  }
+
+  ownerAbandon(threadId: string, id: string, revision: number) {
+    const row = this.ownerGet(threadId, id);
+    if (row.revision !== revision) throw new Error('This Bot request changed');
+    this.link(threadId, true);
+    if (!this.waitingParent(row)) throw new RpcError(ErrorCode.notAllowed, 'This Bot request has no waiting parent in this conversation.');
+    const target = this.options.repo.get(row.targetBotId).name;
+    // DS-Bot, src/host/handoffs.js abandonWork: the exact user-abandon notice.
+    const text = 'No reply came back from ' + target + ', and the user gave up waiting for it. This is its result: go on with the work you were given.';
+    return this.delivery.abandon(row, revision, text);
   }
 
   ownerCancel(threadId: string, id: string, revision: number) {

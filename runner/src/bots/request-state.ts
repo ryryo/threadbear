@@ -10,12 +10,19 @@ import { TEXT_KEPT } from './ported/result-text.js';
 import { ROOT_CHILDREN, parentScope, type RequestNode } from './request-graph.ts';
 
 export type RequestResult = { turnId: string; result: KeptResult; replyId: string; failed?: boolean };
+export type AbandonedRequest = {
+  status: 'abandoned';
+  notice: 'pending' | 'received' | 'suppressed';
+  text: string;
+  late?: RequestResult;
+};
 type RequestState =
   | { status: 'admitted' }
   | { status: 'queued' | 'running'; turnId: string }
   | ({ status: 'returning' | 'returned' } & RequestResult)
   | { status: 'uncertain'; reason: string; reply?: RequestResult }
-  | { status: 'failed' | 'cancelled'; reason: string };
+  | { status: 'failed' | 'cancelled'; reason: string }
+  | AbandonedRequest;
 export type RequestRow = RequestNode & {
   revision: number;
   rerunOf?: string;
@@ -34,14 +41,15 @@ export type RequestRow = RequestNode & {
 type Admission = Omit<RequestRow, 'rootRequestId' | 'revision' | 'state'>;
 
 const transitions: Record<RequestState['status'], ReadonlySet<RequestState['status']>> = {
-  admitted: new Set(['queued', 'running', 'uncertain', 'failed', 'cancelled']),
-  queued: new Set(['running', 'returning', 'failed', 'uncertain', 'cancelled']),
-  running: new Set(['returning', 'failed', 'uncertain', 'cancelled']),
+  admitted: new Set(['queued', 'running', 'uncertain', 'failed', 'cancelled', 'abandoned']),
+  queued: new Set(['running', 'returning', 'failed', 'uncertain', 'cancelled', 'abandoned']),
+  running: new Set(['returning', 'failed', 'uncertain', 'cancelled', 'abandoned']),
   returning: new Set(['returned', 'uncertain', 'cancelled']),
   returned: new Set(),
   failed: new Set(),
-  uncertain: new Set(['queued', 'running', 'returned', 'cancelled']),
+  uncertain: new Set(['queued', 'running', 'returned', 'cancelled', 'abandoned']),
   cancelled: new Set(),
+  abandoned: new Set(['abandoned']),
 };
 
 const key = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('\u0000');
@@ -67,6 +75,10 @@ function validState(row: RequestRow): boolean {
     case 'uncertain':
       return typeof state.reason === 'string' && state.reason.length > 0 && state.reason.length <= 1_000 &&
         (state.reply === undefined || validResult(row, state.reply));
+    case 'abandoned':
+      return row.parentRequestId !== undefined && typeof state.text === 'string' && state.text.length > 0
+        && state.text.length <= 1_000 && ['pending', 'received', 'suppressed'].includes(state.notice)
+        && (state.late === undefined || validResult(row, state.late));
     case 'returning':
     case 'returned': return validResult(row, state);
   }
@@ -85,14 +97,17 @@ function validRow(row: RequestRow): boolean {
 }
 
 function load(file: string): Map<string, RequestRow> {
-  let input: unknown;
   try {
     if (!lstatSync(file).isFile()) throw new Error('The Bot requests store must be a regular file');
-    input = JSON.parse(readFileSync(file, 'utf8'));
+    return readRequestJournal(readFileSync(file, 'utf8'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Map();
     throw error;
   }
+}
+
+export function readRequestJournal(text: string): Map<string, RequestRow> {
+  const input: unknown = JSON.parse(text);
   if (!Array.isArray(input)) throw new Error('Invalid Bot requests store');
   const rows = new Map<string, RequestRow>();
   for (const row of input as RequestRow[]) {
@@ -114,11 +129,11 @@ function load(file: string): Map<string, RequestRow> {
 
 export class RequestStateStore {
   private readonly file: string;
-  private readonly protect: () => void;
+  private readonly protect: (abandoned: boolean) => void;
   private readonly write: typeof atomicWriteFileSync;
   private rows: Map<string, RequestRow>;
 
-  constructor(root: string, protect: () => void, write = atomicWriteFileSync) {
+  constructor(root: string, protect: (abandoned: boolean) => void, write = atomicWriteFileSync) {
     this.file = join(root, 'requests.json');
     this.protect = protect;
     this.write = write;
@@ -128,7 +143,7 @@ export class RequestStateStore {
   private save(row: RequestRow): RequestRow {
     if (!validRow(row)) throw new Error('Invalid Bot request row');
     const next = new Map(this.rows).set(row.id, row);
-    this.protect();
+    this.protect(row.state.status === 'abandoned');
     this.write(this.file, JSON.stringify([...next.values()]) + '\n', 0o600);
     this.rows = next;
     return structuredClone(row);
@@ -166,6 +181,9 @@ export class RequestStateStore {
       }
     }
     const { rootRequestId } = parentScope(input, this.rows, input.id);
+    if (input.parentRequestId && this.rows.get(input.parentRequestId)?.state.status === 'abandoned') {
+      throw new Error('The abandoned request cannot delegate new work');
+    }
     return this.save({ ...input, rootRequestId, revision: 1, state: { status: 'admitted' } });
   }
 
@@ -183,6 +201,17 @@ export class RequestStateStore {
     if (row.revision !== expectedRevision) throw new Error('This Bot request changed');
     if (!transitions[row.state.status].has(state.status)) throw new Error('This Bot request cannot enter that state');
     if ('turnId' in row.state && 'turnId' in state && row.state.turnId !== state.turnId) throw new Error('The recipient’s turn changed');
+    if (state.status === 'abandoned') {
+      if (row.state.status === 'uncertain' && row.state.reply) throw new Error('This Bot request already has a result');
+      if (row.state.status !== 'abandoned' && (state.notice !== 'pending' || state.late)) {
+        throw new Error('The abandoned request must record its notice before delivery');
+      }
+      if (row.state.status === 'abandoned' && (state.text !== row.state.text ||
+          (row.state.notice !== 'pending' && state.notice !== row.state.notice) ||
+          (row.state.late && JSON.stringify(state.late) !== JSON.stringify(row.state.late)))) {
+        throw new Error('The abandoned request cannot replace an existing notice or late result');
+      }
+    }
     const expected = row.state.status === 'returning' ? row.state : row.state.status === 'uncertain' ? row.state.reply : undefined;
     if (state.status === 'returned' && (!expected || expected.replyId !== state.replyId ||
         expected.turnId !== state.turnId || expected.failed !== state.failed || JSON.stringify(expected.result) !== JSON.stringify(state.result))) {

@@ -2,7 +2,7 @@
 // DS-Bot's answerSender (Apache-2.0, see ported/NOTICE), the durable
 // request and recipient identify a delivery across normal completion and recovery.
 import { keepResult, resultText, type KeptResult } from './handoff-result.ts';
-import type { RequestRow, RequestStateStore } from './request-state.ts';
+import type { AbandonedRequest, RequestRow, RequestStateStore } from './request-state.ts';
 
 import type { InputEvidence } from './request-events.ts';
 
@@ -14,6 +14,7 @@ type Ports = {
   deliverReply: (row: RequestRow, replyId: string, text: string) => void;
   readResult: (source: KeptResult['source']) => string | undefined;
   removeQueuedInput: (row: RequestRow) => void;
+  waitingParent: (row: RequestRow) => boolean;
 };
 
 export class BotRequestReturn {
@@ -27,6 +28,7 @@ export class BotRequestReturn {
   settle(id: string, recovery = false): RequestRow {
     const { requests, inspectInput } = this.ports;
     let row = requests.get(id);
+    if (row.state.status === 'abandoned') return this.settleAbandoned(row, row.state);
     if (row.state.status === 'returning') return this.returnReply(row);
     if (row.state.status === 'uncertain' && row.state.reply) {
       const reply = row.state.reply;
@@ -75,6 +77,35 @@ export class BotRequestReturn {
       deliverReply(row, replyId, prefix + (whole ? text : `${text}\n\n[The full result is unavailable.]`));
     }
     return requests.advance(row.id, row.revision, { ...row.state, status: 'returned' });
+  }
+
+  abandon(row: RequestRow, revision: number, text: string): RequestRow {
+    const state: AbandonedRequest = { status: 'abandoned', notice: 'pending', text };
+    return this.settleAbandoned(this.ports.requests.advance(row.id, revision, state), state);
+  }
+
+  private settleAbandoned(row: RequestRow, state: AbandonedRequest): RequestRow {
+    const { requests, inspectReply, deliverReply, waitingParent, inspectInput } = this.ports;
+    const replyId = `bot-reply:${row.id}`;
+    let { notice, late } = state;
+    if (notice === 'pending') {
+      if (!waitingParent(row)) notice = 'suppressed';
+      else {
+        const found = inspectReply(row, replyId);
+        if (found === 'missing') deliverReply(row, replyId, state.text);
+        if (found === 'missing' || found === 'queued' || found === 'sent') notice = 'received';
+      }
+    }
+    if (!late) {
+      const input = inspectInput(row);
+      if (input.kind === 'complete' || input.kind === 'failed') {
+        const failed = input.kind === 'failed';
+        late = { turnId: input.turnId, replyId, failed,
+          result: keepResult({ threadId: row.targetThreadId, seq: input.seq }, failed ? input.message : input.text) };
+      }
+    }
+    return notice === state.notice && late === state.late ? row
+      : requests.advance(row.id, row.revision, { ...state, notice, late });
   }
 
   cancel(id: string, revision: number): RequestRow {

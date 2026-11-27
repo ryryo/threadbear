@@ -5,6 +5,8 @@ import { paths } from '../config.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { archive, MAX_ENTRIES, MAX_SEALED_BYTES, MAX_UNPACKED_BYTES, safeEntryPath, sha256, unarchive, unpackedSize, type PackEntry } from '../move-pack.ts';
 import { isThreadIdShape } from '../thread-id.ts';
+import { BOT_ABANDON_FORMAT } from './format.ts';
+import { readRequestJournal } from './request-state.ts';
 import { readGroupBook } from './group-store.ts';
 import { rehomeBotWorkspaceState, workspaceTransferConversations, type BotWorkspaceIdentity } from './repository.ts';
 import { readTaskJournal } from './task-journal.ts';
@@ -19,7 +21,7 @@ export const workspaceScheduleRevisions = z.array(z.object({
 })).max(512);
 export type WorkspaceScheduleRevision = z.infer<typeof workspaceScheduleRevisions>[number];
 const manifest = z.object({
-  format: z.literal(1), moveId: transferId, target: z.string().min(1), identity,
+  format: z.union([z.literal(1), z.literal(2)]), moveId: transferId, target: z.string().min(1), identity,
   files: z.array(z.object({ path: z.string(), bytes: z.number().int().nonnegative(), checksum })),
   schedules: workspaceScheduleRevisions.default([]),
   projects: workspaceProjectChoice.default('detach'),
@@ -38,6 +40,13 @@ function readFile(file: string): Buffer | undefined {
   if (!path) return undefined;
   if (!path.isFile()) throw new Error('A Bot workspace transfer needs regular files.');
   return readFileSync(file);
+}
+
+function transferFormat(entries: PackEntry[]): 1 | 2 {
+  const requests = entries.find(entry => entry.path === 'bots/requests.json');
+  if (!requests) return 1;
+  const rows = readRequestJournal(requests.data.toString('utf8'));
+  return [...rows.values()].some(row => row.state.status === 'abandoned') ? 2 : 1;
 }
 
 function checkFiles(entries: PackEntry[], transfer: { identity: BotWorkspaceIdentity; moveId: string; target: string; projects: WorkspaceProjectChoice }, sourceHome?: string): void {
@@ -112,6 +121,7 @@ function decode(packed: Buffer, expected: string): { manifest: Manifest; entries
   const [first, ...entries] = unarchive(packed);
   if (first?.path !== 'manifest.json') throw new Error('The Bot workspace transfer is missing its manifest.');
   const description = manifest.parse(JSON.parse(first.data.toString('utf8')));
+  if (description.format !== transferFormat(entries)) throw new Error('The transfer does not declare its Bot request format.');
   checkFiles(entries, description);
   if (JSON.stringify(filesOf(entries)) !== JSON.stringify(description.files)) throw new Error('The transfer files do not match its manifest.');
   return { manifest: description, entries };
@@ -124,9 +134,9 @@ export class BotWorkspaceTransfer {
   private readonly marker: string;
   private readonly home: string;
   private readonly runnerId: string;
-  private readonly protect: () => void;
+  private readonly protect: (format?: number) => void;
 
-  constructor(home: string, runnerId: string, protect: () => void) {
+  constructor(home: string, runnerId: string, protect: (format?: number) => void) {
     this.home = home;
     this.runnerId = runnerId;
     this.protect = protect;
@@ -214,7 +224,7 @@ export class BotWorkspaceTransfer {
     const entries = [...workspaceProjectFiles(join(this.home, 'bots'), projects), ...input.threadFiles];
     checkFiles(entries, { ...input, projects }, this.home);
     const schedules = [...(input.schedules ?? [])].sort((a, b) => a.id.localeCompare(b.id));
-    const description = manifest.parse({ format: 1, moveId, target, identity: owner, files: filesOf(entries), schedules, projects });
+    const description = manifest.parse({ format: transferFormat(entries), moveId, target, identity: owner, files: filesOf(entries), schedules, projects });
     const files = [{ path: 'manifest.json', data: Buffer.from(JSON.stringify(description)) }, ...entries];
     if (files.length > MAX_ENTRIES || unpackedSize(files) > MAX_UNPACKED_BYTES) throw new Error('The Bot workspace is too large to move.');
     const packed = archive(files);
@@ -238,7 +248,7 @@ export class BotWorkspaceTransfer {
     if (this.blocked() || current?.moveId === moveId) throw new Error('This Runner already has a workspace transfer.');
     input.check?.(opened.manifest);
     this.preflight(this.destinationFiles(opened.entries, owner));
-    this.protect();
+    this.protect(opened.manifest.format === 2 ? BOT_ABANDON_FORMAT : undefined);
     atomicWriteFileSync(this.bundle(moveId), input.packed, 0o600);
     this.save({ moveId, target, identity: owner, checksum: input.checksum, state: 'receiving' });
     return opened.manifest;

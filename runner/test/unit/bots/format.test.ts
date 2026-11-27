@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
+import { BOT_ABANDON_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -157,4 +158,37 @@ test('worker and transfer data prevents rolling back to the device-only release'
   assert.equal(launch.releaseCanUseBotData(dir, 'devices'), false);
   assert.throws(() => launch.pointCurrent(dir, 'devices'), /Bot data format/);
   assert.equal(checkBotDataFormat(home), true);
+});
+
+test('a supervised upgrade can write abandonment state and earlier releases cannot open it', async t => {
+  const { home, dir, marker } = fixture(t);
+  const formats = Array.from({ length: BOT_TRANSFER_FORMAT }, (_, index) => index + 1);
+  for (const [id, versions] of [['transfer', formats], ['abandon', [...formats, BOT_ABANDON_FORMAT]]] as const) {
+    const release = join(dir, 'releases', id, 'src', 'bots');
+    mkdirSync(release, { recursive: true });
+    writeFileSync(join(release, 'format.json'), '1\n');
+    writeFileSync(join(release, 'format-compatible.json'), JSON.stringify(versions) + '\n');
+  }
+  writeFileSync(marker, '9\n');
+  assert.throws(() => protectBotData(home, BOT_ABANDON_FORMAT), /updated Bot supervisor/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '9');
+  const check = join(home, 'publish-bot-format.mjs');
+  const formatModule = new URL('../../../src/bots/format.ts', import.meta.url);
+  writeFileSync(check, `import { BOT_ABANDON_FORMAT, protectBotData } from ${JSON.stringify(formatModule.href)};
+protectBotData(process.argv[2], BOT_ABANDON_FORMAT);
+process.disconnect();
+`);
+  const child = fork(check, [home], {
+    env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1',
+      THREADBEAR_BOT_FORMAT_GUARD_VERSION: '10', THREADBEAR_BOT_FORMAT_HOME: home },
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+  let stderr = '';
+  child.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+  const [code] = await once(child, 'close');
+  assert.equal(code, 0, stderr);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '10');
+  assert.equal(checkBotDataFormat(home), true);
+  assert.equal(launch.releaseCanUseBotData(dir, 'abandon'), true);
+  assert.throws(() => launch.pointCurrent(dir, 'transfer'), /Bot data format/);
 });

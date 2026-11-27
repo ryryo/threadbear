@@ -2095,6 +2095,8 @@ conversation** in its header to see where the request went, open the recipient,
 or read the result. **Check delivery** checks the saved receipt. **Start another
 run** takes a new brief and keeps the original conversations. Cancelling a
 request stops further delivery for that request and its children.
+For a delegated request, **Give up waiting** lets the parent Bot carry on
+with its other work. If a reply arrives later, open the request to read it.
 
 Use **Background tasks** to start work on its own thread while continuing the
 original conversation. Open the task to answer its questions and approvals.

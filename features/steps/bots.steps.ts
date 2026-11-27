@@ -52,6 +52,21 @@ Then("I can open the remote worker's saved Thread", async function (this: BotWor
     d.selection?.id === 'mini_media' && d.transcript.state === 'loaded');
 });
 
+When('I open requests in the Bot workspace', async function (this: BotWorld) {
+  await click(this, 'Bots: assistants with their own settings and notes');
+  await click(this, 'Editorial Bot');
+  await click(this, 'Requests');
+});
+
+When('I give up waiting for a delegated Bot request', async function (this: BotWorld) {
+  await click(this, 'Give up waiting');
+});
+
+Then('I can read the late Bot reply', async function (this: BotWorld) {
+  await click(this, 'Read result');
+  await seeRequestResult(this, '遅れて届いた見出し案。');
+});
+
 When('I open the Bot workspace move', async function (this: BotWorld) {
   await click(this, 'Bots: assistants with their own settings and notes');
   await click(this, 'Move Bot workspace');
@@ -201,10 +216,14 @@ When('I read the saved Bot request result', async function (this: BotWorld) {
 });
 
 Then('I see the full saved request result', async function (this: BotWorld) {
+  await seeRequestResult(this, BOT_FIXTURE_REPLY);
+});
+
+async function seeRequestResult(world: BotWorld, text: string) {
   const deadline = Date.now() + 10_000;
   for (;;) {
     try {
-      const item = await this.app.do({ cmd: 'a11y', label: BOT_FIXTURE_REPLY });
+      const item = await world.app.do({ cmd: 'a11y', label: text });
       assert.match(item, /^ok /);
       return;
     } catch (error) {
@@ -212,7 +231,7 @@ Then('I see the full saved request result', async function (this: BotWorld) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-});
+}
 
 type TaskWorld = BotWorld & { taskBot?: string; taskOrigin?: string; taskThread?: string };
 

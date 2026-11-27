@@ -219,7 +219,7 @@
       "phase": 3,
       "portMode": "B",
       "portPath": "runner/src/bots/handoff-result.ts",
-      "changes": "Retain the DS-Bot preview and incomplete-result behavior. Read the full answer from its durable ThreadStore event instead of copying it to a second file."
+      "changes": "Retain the DS-Bot preview and incomplete-result behavior. Read the full answer from its durable ThreadStore event instead of copying it to a second file. L334–366: reuse the original abandonment notice and single-child behavior in runner/src/bots/request-service.ts and request-return.ts. Threadbear journals the notice before queuing it and retains late replies in history without resuming the parent again."
     },
     {
       "upstreamPath": "ds-bot/src/host/delivery.js",
@@ -309,7 +309,7 @@
       "phase": 3,
       "portMode": "B",
       "portPath": "runner/test/ported-dsbot/request-state.test.ts",
-      "changes": "L227–277: cancellation closes only the requested branch and stays closed across restart. Keep native cancelled records and reject a late result, so it cannot wake the cancelled branch. A separate user action to give up a wait and resume the live parent is not part of this test."
+      "changes": "L227–277: cancellation closes only the requested branch and stays closed across restart. Keep native cancelled records and reject a late result, so it cannot wake the cancelled branch. The give-up-wait cases use the original assertions for one child, continued siblings, no duplicate parent notice and late results in runner/test/unit/bots/request-service.test.ts."
     },
     {
       "upstreamPath": "ds-bot/src/host/groups.js",

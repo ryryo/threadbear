@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { BOT_ABANDON_FORMAT } from '../../../src/bots/format.ts';
+import { RequestStateStore } from '../../../src/bots/request-state.ts';
+import { archive, sha256, unarchive } from '../../../src/move-pack.ts';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotConversations } from '../../../src/bots/conversations.ts';
 import { atomicWriteFileSync } from '../../../src/fsutil.ts';
@@ -259,4 +262,48 @@ test('workspace moves preserve materialized task Threads and leave stopped reser
   assert.deepEqual(recovered.get(active.id), persisted.get(active.id));
   assert.deepEqual(recovered.get(opened.id), persisted.get(opened.id));
   assert.deepEqual(recovered.get(stopped.id), persisted.get(stopped.id));
+});
+
+test('an abandoned request upgrades the transfer before claiming and cannot be disguised as an old envelope', () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const repo = new BotRepository(root, source);
+  const [chief, editor, reader] = ['Chief', 'Editor', 'Reader'].map(name => repo.create({ name }));
+  const identity = repo.workspaceIdentity();
+  const requests = new RequestStateStore(root, () => {});
+  const parent = requests.admit({
+    id: 'root', when: 'queue', acceptedAt: new Date(0).toISOString(),
+    sourceBotId: chief.id, sourceThreadId: 'chief-thread', sourceConversationId: 'chief-conversation',
+    targetBotId: editor.id, targetThreadId: 'editor-thread', targetConversationId: 'editor-conversation',
+  });
+  const child = requests.admit({
+    id: 'child', parentRequestId: parent.id, when: 'queue', acceptedAt: parent.acceptedAt,
+    sourceBotId: editor.id, sourceThreadId: parent.targetThreadId, sourceConversationId: parent.targetConversationId,
+    targetBotId: reader.id, targetThreadId: 'reader-thread', targetConversationId: 'reader-conversation',
+  });
+  requests.advance(child.id, child.revision, { status: 'abandoned', notice: 'pending', text: 'No reply came back.' });
+  assert.throws(() => requests.admit({
+    id: 'grandchild', parentRequestId: child.id, when: 'queue', acceptedAt: parent.acceptedAt,
+    sourceBotId: reader.id, sourceThreadId: child.targetThreadId, sourceConversationId: child.targetConversationId,
+    targetBotId: 'tester', targetThreadId: 'tester-thread', targetConversationId: 'tester-conversation',
+  }), /cannot delegate/);
+  const pack = new BotWorkspaceTransfer(home, source, () => {}).freeze({
+    moveId, identity, target, idle: () => true, threadFiles: [],
+  });
+  const dest = tmpDir();
+  const oldSupervisor = new BotWorkspaceTransfer(dest, target, format => {
+    if (format === BOT_ABANDON_FORMAT) throw new Error('This supervisor cannot stage abandoned requests.');
+  });
+  assert.throws(() => oldSupervisor.stage({ moveId, ...pack }), /cannot stage/);
+  assert.equal(oldSupervisor.progress(), undefined);
+  assert.equal(existsSync(join(dest, 'bots', 'requests.json')), false);
+  const [first, ...files] = unarchive(pack.packed);
+  const packed = archive([{ ...first, data: Buffer.from(JSON.stringify({ ...JSON.parse(first.data.toString()), format: 1 })) }, ...files]);
+  const protections: (number | undefined)[] = [];
+  const receiver = new BotWorkspaceTransfer(dest, target, format => { protections.push(format); });
+  assert.throws(() => receiver.stage({ moveId, packed, checksum: sha256(packed) }), /does not declare/);
+  assert.equal(receiver.stage({ moveId, ...pack }).format, 2);
+  assert.equal(protections[0], BOT_ABANDON_FORMAT);
+  receiver.accept({ moveId, workspaceId: identity.workspaceId, ownerRunnerId: target, epoch: identity.epoch + 1, state: 'claimed' }, moveId);
+  assert.deepEqual(new RequestStateStore(join(dest, 'bots'), () => {}).get(child.id), requests.get(child.id));
 });

@@ -49,9 +49,11 @@ export class RequestThreadEvidence {
     if (!journal) return { kind: kept ? 'waiting' : 'unknown' };
     // Check saved events before a stale queue snapshot; the existing Runner
     // flushes the authenticated input event before calling the CLI.
-    const childIds = new Set(children.filter(child => child.state.status === 'returned' && child.sourceThreadId === row.targetThreadId).map(child => child.id));
+    const childIds = new Set(children.filter(child => child.sourceThreadId === row.targetThreadId &&
+      (child.state.status === 'returned' || (child.state.status === 'abandoned' && child.state.notice === 'received'))).map(child => child.id));
     const taskIds = new Set(tasks.filter(task => 'outcome' in task.state && task.state.reply?.sent && task.sourceThreadId === row.targetThreadId).map(task => task.id));
-    const waitsForChild = children.some(child => !['returned', 'failed', 'cancelled'].includes(child.state.status)) ||
+    const waitsForChild = children.some(child => child.state.status === 'abandoned'
+      ? child.state.notice === 'pending' : !['returned', 'failed', 'cancelled'].includes(child.state.status)) ||
       tasks.some(task => !('outcome' in task.state) || (task.state.reply && !task.state.reply.sent));
     const waitsForResult = rec.queue.some(input =>
       (input.botInput?.request?.role === 'result' && childIds.has(input.botInput.request.id)) ||
