@@ -53,6 +53,17 @@ const running = (task: SavedTask) => !('outcome' in task.state);
 const taskFingerprint = (title: string, brief: string, folder?: string, retryOf?: string) =>
   createHash('sha256').update(JSON.stringify({ title: oneLine(title, TITLE_MAX).toWellFormed(), brief, folder, retryOf })).digest('hex');
 
+export function readTaskJournal(raw: string): Map<string, SavedTask> {
+  const rows = JSON.parse(raw) as SavedTask[];
+  if (!Array.isArray(rows)) throw new Error('Invalid Bot task journal');
+  const map = new Map<string, SavedTask>();
+  for (const row of rows) {
+    if (!row || typeof row.id !== 'string' || typeof row.threadId !== 'string' || !row.state ||
+        !Number.isSafeInteger(row.revision) || row.revision < 1 || map.has(row.id)) throw new Error('Invalid Bot task record');
+    map.set(row.id, row);
+  }
+  return map;
+}
 
 export class TaskJournal {
   private readonly file: string;
@@ -72,15 +83,7 @@ export class TaskJournal {
   private read(): Map<string, SavedTask> {
     try {
       if (!lstatSync(this.file).isFile()) throw new Error('The Bot task journal must be a regular file');
-      const rows = JSON.parse(readFileSync(this.file, 'utf8')) as SavedTask[];
-      if (!Array.isArray(rows)) throw new Error('Invalid Bot task journal');
-      const map = new Map<string, SavedTask>();
-      for (const row of rows) {
-        if (!row || typeof row.id !== 'string' || typeof row.threadId !== 'string' || !row.state ||
-            !Number.isSafeInteger(row.revision) || row.revision < 1 || map.has(row.id)) throw new Error('Invalid Bot task record');
-        map.set(row.id, row);
-      }
-      return map;
+      return readTaskJournal(readFileSync(this.file, 'utf8'));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Map();
       throw error;

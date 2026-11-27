@@ -376,6 +376,7 @@ const devicesRefusal = () => {
 };
 
 let mockInstructions = { text: '' };
+let botWorkspaceMove = null;
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true, labReview: true, labReviewers: [{ provider: 'codex', model: 'gpt-6.1-sol' }, { provider: 'claude', effort: 'xhigh' }], labPanel: [], labPanelLines: 150, keepAwake: true, fullSync: false, spareWeek: true,
   models: {
@@ -523,6 +524,7 @@ function mockExperiments() {
     // The Recipes view, with TB_MOCK_RECIPES (addRecipesDemo).
     ...(process.env.TB_MOCK_RECIPES ? ['recipes'] : []),
     ...(process.env.TB_MOCK_COORDINATORS ? ['coordinators'] : []),
+    ...(process.env.TB_MOCK_BOT_MOVE ? ['nativeBots'] : []),
     // Agent Archive in the sidebar's search, with TB_MOCK_ARCHIVE (ARCHIVE_SESSIONS).
     ...(process.env.TB_MOCK_ARCHIVE ? ['archive'] : []),
   ];
@@ -977,6 +979,27 @@ async function handle(client, { id, method, params = {} }) {
 }
 
 async function dispatch(client, method, p) {
+  if (process.env.TB_MOCK_BOT_MOVE) {
+    switch (method) {
+      case 'bots.status': return { enabled: true, available: true, workspaceMoves: true };
+      case 'bots.list': return { bots: [] };
+      case 'bots.workspace.moveStatus': return { move: botWorkspaceMove };
+      case 'bots.workspace.movePreview':
+        return {
+          projects: [{ id: 'p_editorial', title: 'Editorial' }],
+          runners: [{ id: 'studio', name: 'Studio Mac' }],
+          ...(p.runnerId === 'studio' ? { destinationProjects: [{ id: 'p_studio_editorial', title: 'Editorial on Studio Mac' }] } : {}),
+        };
+      case 'bots.workspace.move':
+        if (p.runnerId !== 'studio' || p.projects?.assign?.p_editorial !== 'p_studio_editorial') throw rpcError(-32602, 'Expected the explicit destination Project.');
+        botWorkspaceMove = { moveId: p.moveId, state: 'frozen', target: p.runnerId };
+        return { moveId: p.moveId, state: 'staged' };
+      case 'bots.workspace.cancelMove':
+        if (p.moveId !== botWorkspaceMove?.moveId) throw rpcError(-32602, 'Expected the pending move ID.');
+        botWorkspaceMove = { ...botWorkspaceMove, state: 'cancelled' };
+        return {};
+    }
+  }
   if (coordinatorRequest && (method.startsWith('coordinators.') || ['mock.coordinatorFinish', 'mock.coordinatorVerify', 'mock.coordinatorNotesChanged', 'mock.coordinatorAsk'].includes(method))) {
     if (method.startsWith('coordinators.') && !settings.experiments.find((e) => e.id === 'coordinators')?.on) throw rpcError(-32602, 'The coordinator experiment is off.');
     return coordinatorRequest(method, p);

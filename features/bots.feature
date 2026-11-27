@@ -96,3 +96,15 @@ Feature: Bot workspace
     And I schedule a new Bot conversation saying "見出し案を送る"
     And I run the saved Bot schedule now
     Then the scheduled message ran in a new conversation with "Editor"
+
+  @bots.workspace_move @swift-pending
+  Scenario: The owner chooses a destination and Project before starting a workspace move
+    Given the app is connected to an isolated Bot Runner
+    When I open the Bot workspace move
+    And I choose "Studio Mac" as the Bot workspace destination
+    Then I cannot move the workspace before choosing what to do with its Project
+    When I assign the Bot workspace Project to "Editorial on Studio Mac"
+    And I confirm the Bot workspace move
+    Then I can see that the Bot workspace transfer is waiting for the destination
+    When I cancel the Bot workspace transfer
+    Then I can see that the Bot workspace transfer was cancelled

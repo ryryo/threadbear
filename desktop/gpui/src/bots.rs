@@ -20,6 +20,7 @@ mod groups;
 mod schedules;
 mod tasks;
 mod teams;
+mod workspace_move;
 use tasks::TaskCard;
 use teams::TeamCard;
 
@@ -221,6 +222,7 @@ enum Edit {
     TaskStart,
     TaskWrite(String),
     TaskRetry(String, u64),
+    Worker(String, String),
 }
 
 impl Edit {
@@ -238,6 +240,7 @@ impl Edit {
             Self::TaskStart => tr!("Task title on the first line, then the brief"),
             Self::TaskWrite(_) => tr!("Instruction for the task"),
             Self::TaskRetry(_, _) => tr!("Brief for the new task run"),
+            Self::Worker(_, _) => tr!("Instructions for the other Runner"),
         }
     }
 }
@@ -250,18 +253,54 @@ struct Editor {
     memory_revision: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct BotWorkerTarget {
+    id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BotWorkerRequest {
+    request_id: String,
+    target_runner_id: String,
+    state: BotWorkerState,
+    result: Option<BotWorkerReply>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BotWorkerReply {
+    thread_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BotWorkerState {
+    Queued,
+    Running,
+    Done,
+    Expired,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Default)]
 pub(crate) struct BotsState {
     offered: bool,
     available: bool,
     requests_available: bool,
     tasks_available: bool,
+    workers_available: bool,
+    worker_choices: Option<(String, Vec<BotWorkerTarget>)>,
+    worker_history: Option<(String, Vec<BotWorkerRequest>)>,
     teams_available: bool,
     show_teams: bool,
     schedules_available: bool,
     show_schedules: bool,
     schedule_rows: Vec<Value>,
     groups: groups::GroupsState,
+    workspace_move: workspace_move::WorkspaceMove,
     teams: Vec<TeamCard>,
     selected_team: Option<String>,
     reason: Option<String>,
@@ -308,8 +347,11 @@ impl Threadbear {
                 this.bots.available = value["available"].as_bool().unwrap_or(false);
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
+                this.bots.workers_available = value["workers"].as_bool().unwrap_or(false);
                 this.bots.teams_available = value["teams"].as_bool().unwrap_or(false);
                 this.bots.schedules_available = value["schedules"].as_bool().unwrap_or(false);
+                this.bots.workspace_move.available =
+                    value["workspaceMoves"].as_bool().unwrap_or(false);
                 this.bots.groups.available = value["groups"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
@@ -364,6 +406,7 @@ impl Threadbear {
         self.bots.show_teams = false;
         self.bots.show_schedules = false;
         self.bots.groups.visible = false;
+        self.bots.workspace_move.visible = false;
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
         self.bots.source = source;
@@ -676,6 +719,7 @@ impl Threadbear {
                         this.bots.show_teams = false;
                         this.bots.show_schedules = false;
                         this.bots.groups.visible = false;
+                        this.bots.workspace_move.visible = false;
                         this.edit_bot(Edit::New, String::new(), window, cx);
                     })),
             );
@@ -699,6 +743,13 @@ impl Threadbear {
                 bot_button("bot-schedules", "Bot schedules", disabled)
                     .when(self.bots.show_schedules, |button| button.primary())
                     .on_click(cx.listener(|this, _, _, cx| this.open_bot_schedules(cx))),
+            );
+        }
+        if self.bots.workspace_move.available {
+            list = list.child(
+                bot_button("move-bot-workspace", tr!("Move Bot workspace"), disabled)
+                    .when(self.bots.workspace_move.visible, |button| button.primary())
+                    .on_click(cx.listener(|this, _, _, cx| this.open_workspace_move(cx))),
             );
         }
         for bot in &self.bots.list {
@@ -746,6 +797,11 @@ impl Threadbear {
                 .child(self.bots.reason.clone().unwrap_or_else(|| {
                     tr!("Checking whether Bots are available on this Runner…").into()
                 }))
+                .into_any_element();
+        }
+        if self.bots.workspace_move.visible && self.bots.workspace_move.available {
+            return page
+                .child(self.render_workspace_move(cx))
                 .into_any_element();
         }
         if self.bots.show_schedules && self.bots.schedules_available {
@@ -1104,10 +1160,16 @@ impl Threadbear {
             let title = self.bot_conversation_title(index, &row.thread_id, &detail.bot.name);
             let thread = row.thread_id.clone();
             let source = thread.clone();
+            let worker_source = thread.clone();
+            let history_source = thread.clone();
             let missing = !self.threads.contains_key(&thread);
             let scheduled = row.id.as_ref().filter(|_| !missing && self.bots.schedules_available && detail.bot.archived_at.is_none())
                 .map(|conversation| json!({ "kind": "conversation", "botId": bot_id, "conversationId": conversation, "threadId": thread }));
             let schedule_title = title.clone();
+            let worker = self.bots.workers_available
+                && !missing
+                && detail.bot.privacy.is_none()
+                && detail.bot.archived_at.is_none();
             list = list.child(
                 h_flex()
                     .gap(px(8.))
@@ -1136,6 +1198,36 @@ impl Threadbear {
                             this.load_bot_memory(false, cx);
                         })),
                     )
+                    .children(worker.then(|| {
+                        bot_button(
+                            SharedString::from(format!("bot-worker-{index}")),
+                            tr!("Run on another Runner"),
+                            self.bots.busy,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.bot_write(
+                                    "bots.workers.targets",
+                                    json!({ "threadId": worker_source }),
+                                    After::WorkerChoices(worker_source.clone()),
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ))
+                    }))
+                    .children(worker.then(|| {
+                        bot_button(
+                            SharedString::from(format!("bot-worker-history-{index}")),
+                            tr!("Worker requests"),
+                            self.bots.busy,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.load_bot_worker_history(history_source.clone(), window, cx);
+                            },
+                        ))
+                    }))
                     .children(scheduled.map(|target| {
                         bot_button(
                             SharedString::from(format!("schedule-bot-conversation-{index}")),
@@ -1155,6 +1247,72 @@ impl Threadbear {
                         ))
                     })),
             );
+        }
+        if let Some((source, runners)) = self.bots.worker_choices.as_ref().filter(|(source, _)| {
+            detail
+                .conversations
+                .iter()
+                .any(|row| &row.thread_id == source)
+        }) {
+            list = list.child(tr!("Choose a Runner"));
+            for runner in runners {
+                let source = source.clone();
+                let target = runner.id.clone();
+                list = list.child(
+                    bot_button(
+                        SharedString::from(format!("bot-worker-target-{target}")),
+                        runner.name.clone(),
+                        self.bots.busy,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.edit_bot(
+                            Edit::Worker(source.clone(), target.clone()),
+                            String::new(),
+                            window,
+                            cx,
+                        );
+                    })),
+                );
+            }
+        }
+        if let Some((_, requests)) = self.bots.worker_history.as_ref().filter(|(source, _)| {
+            detail
+                .conversations
+                .iter()
+                .any(|row| &row.thread_id == source)
+        }) {
+            if requests.is_empty() {
+                list = list.child(tr!("No worker requests for this conversation."));
+            }
+            for request in requests {
+                let state = match request.state {
+                    BotWorkerState::Queued => tr!("Queued"),
+                    BotWorkerState::Running => tr!("Running"),
+                    BotWorkerState::Done => tr!("Finished"),
+                    BotWorkerState::Expired => tr!("Expired"),
+                    BotWorkerState::Unknown => tr!("Status unavailable"),
+                };
+                let mut row = h_flex()
+                    .gap(px(8.))
+                    .child(self.runner_name_of(&request.target_runner_id))
+                    .child(state);
+                if let Some(result) = &request.result {
+                    let thread = result.thread_id.clone();
+                    row = row.child(
+                        bot_button(
+                            SharedString::from(format!("bot-worker-open-{}", request.request_id)),
+                            tr!("Open worker Thread"),
+                            self.bots.busy,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.open_thread_from_page(thread.clone(), window, cx);
+                            },
+                        )),
+                    );
+                }
+                list = list.child(row);
+            }
         }
         list.into_any_element()
     }
@@ -1959,6 +2117,9 @@ impl Threadbear {
 }
 
 enum After {
+    WorkerChoices(String),
+    WorkerQueued(String),
+    WorkerHistory(String),
     Requests,
     Tasks,
     Teams,
@@ -2061,6 +2222,11 @@ impl Threadbear {
                     After::Tasks,
                 )
             }
+            Edit::Worker(source, target) => (
+                "bots.workers.start",
+                json!({ "threadId": source, "targetRunnerId": target, "text": text }),
+                After::WorkerQueued(source.clone()),
+            ),
             Edit::TaskWrite(task_id) => (
                 "bots.tasks.send",
                 json!({ "taskId": task_id, "text": text }),
@@ -2166,6 +2332,7 @@ impl Threadbear {
                         | "bots.settings.automaticTidy"
                         | "bots.requests.rerun"
                         | "bots.tasks.start"
+                        | "bots.workers.start"
                         | "bots.tasks.send"
                         | "bots.tasks.retry"
                 ))
@@ -2210,6 +2377,21 @@ impl Threadbear {
         .detach();
     }
 
+    fn load_bot_worker_history(
+        &mut self,
+        source: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.bot_write(
+            "bots.workers.history",
+            json!({ "threadId": source }),
+            After::WorkerHistory(source),
+            window,
+            cx,
+        );
+    }
+
     fn bot_written(
         &mut self,
         after: After,
@@ -2218,6 +2400,36 @@ impl Threadbear {
         cx: &mut Context<Self>,
     ) {
         match after {
+            After::WorkerChoices(source) => {
+                let runners =
+                    serde_json::from_value::<Vec<BotWorkerTarget>>(value["runners"].clone())
+                        .unwrap_or_default();
+                if runners.is_empty() {
+                    self.bots.worker_choices = None;
+                    self.bots.error =
+                        Some(tr!("No other Runner can take Bot work right now.").into());
+                } else {
+                    self.bots.worker_choices = Some((source, runners));
+                }
+            }
+            After::WorkerQueued(source) => {
+                if value["requestId"].as_str().is_some() {
+                    self.bots.editor = None;
+                    self.bots.worker_choices = None;
+                    self.load_bot_worker_history(source, window, cx);
+                } else {
+                    self.bots.error =
+                        Some(tr!("The Runner did not return the worker request.").into());
+                }
+            }
+            After::WorkerHistory(source) => {
+                match serde_json::from_value::<Vec<BotWorkerRequest>>(value) {
+                    Ok(rows) => self.bots.worker_history = Some((source, rows)),
+                    Err(_) => {
+                        self.bots.error = Some(tr!("Worker requests could not be read.").into())
+                    }
+                }
+            }
             After::Profile => {
                 let Ok(profile) = serde_json::from_value::<Profile>(value["bot"].clone()) else {
                     self.bots.error = Some(tr!("The Runner did not return the saved Bot.").into());

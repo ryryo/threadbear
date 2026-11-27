@@ -247,6 +247,7 @@ export type BotInputRef = {
   task?: { id: string; role: 'work' | 'result' };
   group?: { groupId: string; roundId: string; callId: string };
   scheduledRevision?: number;
+  worker?: string;
 };
 
 export type ThreadSummary = {

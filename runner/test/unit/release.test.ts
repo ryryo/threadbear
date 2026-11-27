@@ -258,7 +258,13 @@ test('a managed Bot request keeps its full result and receipt after a Runner res
     const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       assert.equal((await c.call('bots.status')).requests, true);
+      assert.equal((await c.call('bots.status')).workspaceMoves, false, 'the fixture has no shared backend');
+      assert.deepEqual(await c.call('bots.workspace.moveStatus'), { move: null });
       const { bot: editor } = await c.call('bots.create', { name: '編集者' });
+      await assert.rejects(c.call('bots.workspace.move', {
+        moveId: 'not-connected', runnerId: 'fixture-peer', projects: 'detach',
+      }), /updated backend/);
+      assert.deepEqual(await c.call('bots.workspace.moveStatus'), { move: null });
       const { bot: writer } = await c.call('bots.create', { name: 'ライター' });
       const { conversation: source } = await c.call('bots.conversations.create', { botId: editor.id, operationId: 'source' });
       const { conversation: destination } = await c.call('bots.conversations.create', { botId: writer.id, operationId: 'destination' });

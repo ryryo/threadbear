@@ -25,6 +25,7 @@ struct TeamChange {
 
 impl Threadbear {
     pub(super) fn open_bot_teams(&mut self, cx: &mut Context<Self>) {
+        self.bots.workspace_move.visible = false;
         if self.bots.busy || self.bots.editor.is_some() {
             return;
         }

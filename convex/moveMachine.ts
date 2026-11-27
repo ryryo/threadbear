@@ -44,6 +44,7 @@ export const move = unlessStepping('moveState', () => defineMachine(
         FREEZE: {},
         PACK: { chunks: v.array(v.id('_storage')), sha256: v.string(), bytes: v.number() },
         CLAIM: {},
+        WORKSPACE_CLAIM: {},
         DONE: {},
         FAIL: { note: v.string() },
       },
@@ -56,7 +57,10 @@ export const move = unlessStepping('moveState', () => defineMachine(
     },
     states: {
       start: {
-        on: { START: { to: 'asking', effect: 'start', description: 'The main Mac starts a move, for Mike or an agent: to an online runner, one move per thread at a time.' } },
+        on: {
+          START: { to: 'asking', effect: 'start', description: 'The main Mac starts a move, for Mike or an agent: to an online runner, one move per thread at a time.' },
+          WORKSPACE_CLAIM: { to: 'claimed', effect: 'workspaceClaim', description: 'The Bot workspace claim switches its already placed Threads in one mutation.' },
+        },
       },
       asking: {
         description: 'S describes the thread (its folder, repo, login), and T works out where it can put it.',
@@ -145,6 +149,7 @@ export const move = unlessStepping('moveState', () => defineMachine(
       pack: async (ctx, { id, state, event }) => legacy(ctx, id, { kind: 'unpacking', frozenAt: state.frozenAt, giveUpAt: state.giveUpAt }, { chunks: [...event.chunks], sha256: event.sha256, bytes: event.bytes }),
       // moves.ts moveClaim hands the thread over in the same mutation.
       claim: async (ctx, { id }) => legacy(ctx, id, { kind: 'claimed', claimedAt: Date.now(), doneAsked: false }),
+      workspaceClaim: async () => ({ kind: 'claimed' as const, claimedAt: Date.now(), doneAsked: true }),
       doneAsked: async (ctx, { id, state }) => {
         await patch(ctx, id, {});
         return { ...state, doneAsked: true };

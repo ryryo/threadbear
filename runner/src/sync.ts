@@ -173,9 +173,10 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 106;
+export const BACKEND_API_VERSION = 107;
 export const BOT_SCHEDULE_API_VERSION = 105;
 export const BOT_WORKSPACE_API_VERSION = 106;
+export const BOT_WORKER_API_VERSION = 107;
 export const INDEX_POOL_API_VERSION = 101;
 export const COORDINATORS_API_VERSION = 102;
 export const NEXT_PICK_API_VERSION = 103;
@@ -750,6 +751,7 @@ export type SyncDeps = {
   cachePath?: string;
   runner: Host;
   commands?: CommandHost;
+  botWorkers?: () => import('./bots/worker.ts').BotWorkers | undefined;
   botWorkspace?: (scrub: (text: string) => string, excluded?: ReadonlySet<string>) => ReturnType<import('./bots/device-workspace.ts').DeviceBotWorkspace['snapshot']> | null;
   // The runner's key pair for secrets the phone answers (secrets.ts).
   // Absent in small tests: then a secret card isn't mirrored.
@@ -4407,6 +4409,8 @@ export class ConvexSync {
         this.lookForReplyImages();
         this.retryCommands();
         this.publishBotWorkspace();
+        this.publishBotWorkerResults();
+        this.advertiseBotWorker();
         if ((this.backendApiVersion ?? 0) >= SCHEDULES_API_VERSION && this.running) void this.deps.schedules?.attach(this.scheduleBackend());
         if ((this.backendApiVersion ?? 0) >= SHARED_POOLS_API_VERSION && this.running) this.deps.pools?.attach(this.poolBackend());
         if ((this.backendApiVersion ?? 0) >= MEMORY_API_VERSION && this.running) this.deps.memory?.attach(this.memoryBackend());
@@ -5057,6 +5061,96 @@ export class ConvexSync {
     return out;
   }
 
+  private workerAdvertised = false;
+  private workerAdvertising = false;
+
+  private advertiseBotWorker(): void {
+    if (this.workerAdvertised || this.workerAdvertising || !this.running || !this.deps.botWorkers?.() ||
+        (this.backendApiVersion ?? 0) < BOT_WORKER_API_VERSION || !this.deps.secretBox) return;
+    this.workerAdvertising = true;
+    this.post('mutation', 'botWorkerGrants:advertise', { ...this.workerProcess(), sealingKey: this.deps.secretBox.publicKey() })
+      .then(() => { this.workerAdvertised = true; })
+      .catch(() => this.deps.log.debug('could not advertise Bot workers'))
+      .finally(() => { this.workerAdvertising = false; });
+  }
+
+  botWorkersAvailable(): boolean {
+    return this.running && (this.backendApiVersion ?? 0) >= BOT_WORKER_API_VERSION;
+  }
+
+  botWorkspaceMoveCall(
+    kind: 'query' | 'mutation', method: import('./bots/workspace-wire.ts').WorkspaceMoveCall, params: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.botWorkersAvailable()) throw new Error('Sync needs an updated backend to move Bot workspaces.');
+    return this.post(kind, method, { ...params, ...this.workerProcess() });
+  }
+
+  async botWorkerTarget(workspaceId: string, epoch: number, targetRunnerId: string): Promise<string> {
+    if (!this.running || (this.backendApiVersion ?? 0) < BOT_WORKER_API_VERSION) throw new Error('Sync needs an updated backend to start Bot workers.');
+    await this.writeBotWorkspaceOrdered();
+    const key = await this.post('query', 'botWorkerGrants:target', { ...this.workerProcess(), workspaceId, epoch, targetRunnerId });
+    if (typeof key !== 'string') throw new Error('That Runner is offline or cannot run Bot workers.');
+    return key;
+  }
+
+  async botWorkerTargets(workspaceId: string, epoch: number, forMove: boolean): Promise<unknown> {
+    if (!this.botWorkersAvailable()) throw new Error('Sync needs an updated backend to list Bot Runners.');
+    await this.writeBotWorkspaceOrdered();
+    return this.post('query', 'botWorkerGrants:targets', { ...this.workerProcess(), workspaceId, epoch, forMove });
+  }
+
+  async issueBotWorker({ ownerRunnerId, ...grant }: import('./bots/worker.ts').BotWorkerGrant): Promise<unknown> {
+    if (!this.running || ownerRunnerId !== this.runnerId || (this.backendApiVersion ?? 0) < BOT_WORKER_API_VERSION) {
+      throw new Error('This Runner cannot start the Bot worker through sync.');
+    }
+    return this.post('mutation', 'botWorkerGrants:issue', { ...this.workerProcess(), grant });
+  }
+
+  botWorkerResult(workspaceId: string, threadId: string, requestId: string): Promise<unknown> {
+    if (!this.botWorkersAvailable()) throw new Error('Sync needs an updated backend to read Bot worker results.');
+    return this.post('query', 'botWorkerGrants:result', { ...this.workerProcess(), workspaceId, threadId, requestId });
+  }
+
+  botWorkerHistory(workspaceId: string, threadId: string): Promise<unknown> {
+    if (!this.botWorkersAvailable()) throw new Error('Sync needs an updated backend to read Bot worker history.');
+    return this.post('query', 'botWorkerGrants:history', { ...this.workerProcess(), workspaceId, threadId });
+  }
+
+  private botWorkersReporting = false;
+  private readonly botWorkerReported = new Set<string>();
+
+  private workerAttempt(workspaceId: string, requestId: string): string {
+    return crypto.createHash('sha256').update(JSON.stringify([workspaceId, requestId, this.runnerId])).digest('hex');
+  }
+
+  private workerProcess() {
+    return { key: this.deps.key, runnerId: this.runnerId, startedAt: this.deps.startedAt };
+  }
+
+  private publishBotWorkerResults(): void {
+    const workers = this.deps.botWorkers?.();
+    if (!workers || !this.running || this.botWorkersReporting || (this.backendApiVersion ?? 0) < BOT_WORKER_API_VERSION) return;
+    this.botWorkersReporting = true;
+    this.writeBotWorkerResults(workers).catch(() => this.deps.log.debug('could not mirror Bot worker results'))
+      .finally(() => { this.botWorkersReporting = false; });
+  }
+
+  private async writeBotWorkerResults(workers: import('./bots/worker.ts').BotWorkers): Promise<void> {
+    for (const threadId of workers.completed()) {
+      if (this.botWorkerReported.has(threadId)) continue;
+      const result = workers.result(threadId);
+      if (!result) continue;
+      try {
+        await this.post('mutation', 'botWorkerGrants:complete', {
+          ...this.workerProcess(), ...result, attempt: this.workerAttempt(result.workspaceId, result.requestId),
+        });
+        this.botWorkerReported.add(threadId);
+      } catch {
+        // The worker's saved Thread remains the source for a later retry.
+      }
+    }
+  }
+
   private botProjection?: string;
   private botProjectionInFlight?: Promise<void>;
   private readonly botProfilesWithdrawing = new Map<string, number>();
@@ -5122,6 +5216,17 @@ export class ConvexSync {
       return threadId;
     };
     switch (c.kind) {
+      case 'botWorker': {
+        const workers = this.deps.botWorkers?.();
+        if (!workers || typeof a.workspaceId !== 'string' || typeof a.requestId !== 'string' ||
+            (this.backendApiVersion ?? 0) < BOT_WORKER_API_VERSION) throw new Error('This Runner cannot take a Bot worker request.');
+        const { workspaceId, requestId } = a;
+        const grant = await this.post('mutation', 'botWorkerGrants:take', {
+          ...this.workerProcess(), workspaceId, requestId, attempt: this.workerAttempt(workspaceId, requestId),
+        });
+        if (!grant) throw new Error('This Bot worker request is no longer available.');
+        return workers.admit(grant);
+      }
       case 'botProfileEdit':
       case 'botDeviceAction': {
         const apply = c.kind === 'botProfileEdit' ? host.botProfileEdit : host.botDeviceAction;

@@ -2118,6 +2118,17 @@ Create a Bot schedule from a specific conversation, a Bot’s **Schedule a new
 conversation** action, or **Schedule a Group post**. Use **Bot schedules**
 to edit, pause or run these schedules on the owning Runner.
 
+From a Bot conversation, choose **Run on another Runner** and give it a brief.
+The owning Runner keeps the Bot settings and memory. **Worker requests** shows
+the runs and opens their results from the original conversation.
+
+Use **Move Bot workspace** to transfer ownership of the entire workspace.
+Choose the destination Runner and decide where each Project's Bot notes and
+conversation links should go. You can leave a Project on the original Runner.
+Finish or stop active work before starting the transfer. Conversation history and
+Bot schedules go with it. **Cancel workspace transfer** is available until the
+destination claims the workspace.
+
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.

@@ -83,13 +83,16 @@ import { RpcServer } from './rpc.ts';
 import { AppSeen } from './app-seen.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
-import { checkBotDataFormat, supervisorGuardsBotData } from './bots/format.ts';
+import { BOT_TRANSFER_FORMAT, checkBotDataFormat, protectBotData, supervisorGuardsBotData } from './bots/format.ts';
 import { BOT_EXPERIMENT, BotRuntime } from './bots/runtime.ts';
 import { keptGroupCall } from './bots/group-rpc.ts';
 import { acceptKeptBotRequest, BotRequestHandover } from './bots/request-handover.ts';
 import type { PublicDraft, RequestApproval } from './bots/request-service.ts';
 import { keptRemember, type RememberInput } from './bots/memory-tool.ts';
 import { method as botMethod } from './bots/rpc.ts';
+import { BotWorkers, requestBotWorker, workerResultParams } from './bots/worker.ts';
+import { connectNativeWorkspaceRunner, workspaceMoveInput, workspaceMovePreviewInput, workspaceMoveReceipt } from './bots/workspace-wire.ts';
+import { workspaceMemoryProjects } from './bots/workspace-projects.ts';
 import { botConversationSchedules, botScheduleMethods } from './bots/schedule-rpc.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
@@ -463,8 +466,9 @@ async function main(): Promise<void> {
   };
   const botRequestHandover = new BotRequestHandover();
   const memoryTool = (threadId: string) => {
-    const link = runner.threads.get(threadId)?.rec.botLink;
-    if (box || !link || link.taskId || !experimentOn(cfg.home, BOT_EXPERIMENT)) return undefined;
+    const record = runner.threads.get(threadId)?.rec;
+    const link = record?.botLink;
+    if (box || record?.botWorker || !link || link.taskId || !experimentOn(cfg.home, BOT_EXPERIMENT)) return undefined;
     return async (input: RememberInput) => {
       const turnId = runner.threads.get(threadId)?.rt.turn?.turnId;
       if (!turnId) throw new RpcError(ErrorCode.moved, 'The Bot no longer has that active turn.');
@@ -474,8 +478,9 @@ async function main(): Promise<void> {
     };
   };
   const requestTools = (threadId: string) => {
-    const link = runner.threads.get(threadId)?.rec.botLink;
-    return bots.requestsAvailable() && link && !link.groupId ? {
+    const record = runner.threads.get(threadId)?.rec;
+    const link = record?.botLink;
+    return bots.requestsAvailable() && !record?.botWorker && link && !link.groupId ? {
       sendBot: (id: string, input: PublicDraft, authorize: RequestApproval) => {
         if (!draining) return bots.requests().sendBot(id, input, authorize);
         const turnId = runner.threads.get(id)?.rt.turn?.turnId;
@@ -500,11 +505,11 @@ async function main(): Promise<void> {
       } } : undefined;
   const taskTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
-    return bots.tasksAvailable() && link && !link.taskId ? bots.tasks() : undefined;
+    return bots.tasksAvailable() && !runner.threads.get(threadId)?.rec.botWorker && link && !link.taskId ? bots.tasks() : undefined;
   };
   const teamTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
-    return bots.teamsAvailable() && link && !link.taskId && !link.groupId && !privateAgent(threadId) ? bots.teams() : undefined;
+    return bots.teamsAvailable() && !runner.threads.get(threadId)?.rec.botWorker && link && !link.taskId && !link.groupId && !privateAgent(threadId) ? bots.teams() : undefined;
   };
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
@@ -620,6 +625,13 @@ async function main(): Promise<void> {
   // Not in box mode: its spawn gate (spawn-gate.ts) holds processes on the
   // main thread only, and the look runs git.
   const trustWorker = box ? undefined : new TrustOffThread();
+  const canRunBotWorkers = () => !box && !draining && experimentOn(cfg.home, BOT_EXPERIMENT) && supervisorGuardsBotData(cfg.home, BOT_TRANSFER_FORMAT);
+  let nativeWorkers: BotWorkers | undefined;
+  const botWorkers = () => nativeWorkers ??= new BotWorkers({
+    home: cfg.home, runner, runnerId: syncRunnerId, canWrite: canRunBotWorkers,
+    protect: () => protectBotData(cfg.home, BOT_TRANSFER_FORMAT),
+    open: (bytes, info) => runner.secrets.openBytes(bytes, info),
+  });
   runner = new Runner({
     // A box's one thread, and whether its restored worktree's setup must run
     // before any turn (runner/moves.ts setUpRestored).
@@ -635,8 +647,10 @@ async function main(): Promise<void> {
     // His own, then the habits of the recipes that are on (recipes.ts): both
     // are for every thread, and a change to either is news the same way.
     standingInstructions: () => [instructions.given().trim(), recipesHabits?.() ?? ''].filter(Boolean).join('\n\n'),
-    botContext: (rec) => bots.context(rec),
-    botPermissionCeiling: rec => bots.permissionCeiling(rec),
+    botContext: (rec) => rec.botWorker ? botWorkers().context(rec) : bots.context(rec),
+    botPermissionCeiling: rec => rec.botWorker?.ceiling ?? bots.permissionCeiling(rec),
+    botWorkspaceBlocked: rec => bots.blocksWorkspaceThread(rec),
+    botWorkerQueue: (threadId, requestId) => botWorkers().queue(threadId, requestId),
     botRequestQueue: (threadId, ref) => bots.requestQueue(threadId, ref),
     botTaskQueue: (threadId, ref) => bots.taskQueue(threadId, ref),
     botGroupQueue: (threadId, ref) => bots.groupQueue(threadId, ref),
@@ -752,7 +766,7 @@ async function main(): Promise<void> {
   bootStep('machine');
   scheduler = new Scheduler({
     runner,
-    botSchedules: { targets: () => bots.scheduledTargets(), protect: () => bots.protectScheduleData() },
+    botSchedules: { targets: () => bots.scheduledTargets(), protect: () => bots.protectScheduleData(), moving: () => bots.workspaceIsMoving() },
     home: cfg.home,
     clock: realClock,
     log,
@@ -1088,6 +1102,7 @@ async function main(): Promise<void> {
           }
         : {}),
     },
+    botWorkers: () => canRunBotWorkers() ? botWorkers() : undefined,
     secretBox: runner.secrets,
     ...(box
       ? {
@@ -1498,6 +1513,33 @@ async function main(): Promise<void> {
     if (!rec) throw new RpcError(ErrorCode.threadNotFound, 'The saved Group Thread is unavailable.');
     return bots.groups().delegateKept(rec, turnId, operationId, members, note);
   } });
+  methods['bots.status'] = () => ({
+    ...bots.status(), workers: canRunBotWorkers() && sync.botWorkersAvailable(),
+    workspaceMoves: bots.workspaceMovesAvailable() && sync.botWorkersAvailable(),
+  });
+  Object.assign(methods, {
+    'bots.workers.targets': async (p: Record<string, unknown>) => {
+      if (typeof p.threadId !== 'string') throw new RpcError(ErrorCode.badParams, 'Choose the originating Bot conversation.');
+      const { workspaceId, epoch } = bots.workerRequestSource(p.threadId);
+      return { runners: await sync.botWorkerTargets(workspaceId, epoch, false) };
+    },
+    'bots.workers.start': (p: Record<string, unknown>) => requestBotWorker({
+      home: cfg.home, now: Date.now,
+      protect: () => protectBotData(cfg.home, BOT_TRANSFER_FORMAT),
+      source: threadId => bots.workerRequestSource(threadId),
+      target: (workspace, epoch, target) => sync.botWorkerTarget(workspace, epoch, target),
+      issue: request => sync.issueBotWorker(request),
+    }, p),
+    'bots.workers.result': (p: Record<string, unknown>) => {
+      const { requestId } = workerResultParams.parse(p);
+      if (typeof p.threadId !== 'string') throw new RpcError(ErrorCode.badParams, 'Choose the originating Bot conversation.');
+      return sync.botWorkerResult(bots.workerReadSource(p.threadId).workspaceId, p.threadId, requestId);
+    },
+    'bots.workers.history': (p: Record<string, unknown>) => {
+      if (typeof p.threadId !== 'string') throw new RpcError(ErrorCode.badParams, 'Choose the originating Bot conversation.');
+      return sync.botWorkerHistory(bots.workerReadSource(p.threadId).workspaceId, p.threadId);
+    },
+  });
   const updateSettings = methods['settings.update'];
   methods['settings.update'] = p => {
     if ((p.experiments as Record<string, unknown> | undefined)?.[ARCHIVE_EXPERIMENT] === true && bots.hasPrivateBots()) {
@@ -1769,12 +1811,61 @@ async function main(): Promise<void> {
       runnerName: (id) => runnerNames.get(id) ?? (id === syncRunnerId ? (cfg.sync.name ?? defaultRunnerName()) : id),
     },
   }));
+  let nativeWorkspace: ReturnType<typeof connectNativeWorkspaceRunner> | undefined;
+  const workspaceMoves = () => {
+    const store = bots.workspaceMoveStore();
+    if (!sync.botWorkersAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Sync needs an updated backend to move Bot workspaces.');
+    return nativeWorkspace ??= connectNativeWorkspaceRunner(runner, {
+      runnerId: syncRunnerId, store,
+      key: target => {
+        const move = store.progress();
+        const identity = bots.workspaceMoveIdentity(move?.moveId ?? '', target);
+        return sync.botWorkerTarget(identity.workspaceId, identity.epoch, target);
+      },
+      call: (...args) => sync.botWorkspaceMoveCall(...args),
+      open: (bytes, info) => runner.secrets.openBytes(bytes, info),
+      validateTarget: () => { bots.workspaceMoveStore(); },
+      adopted: () => bots.workspaceAdopted(),
+    });
+  };
+  const pollWorkspaceMoves = () => {
+    if (bots.workspaceMovesAvailable() && sync.botWorkersAvailable()) {
+      workspaceMoves().poll().catch(error => log.debug('Bot workspace move will retry', { error: String(error) }));
+    }
+  };
+  Object.assign(methods, {
+    'bots.workspace.moveStatus': () => ({ move: bots.workspaceMoveStore().progress() ?? null }),
+    'bots.workspace.movePreview': botMethod(workspaceMovePreviewInput, async ({ runnerId }) => {
+      workspaceMoves();
+      const { workspaceId, epoch } = bots.workspaceMoveIdentity('', runnerId ?? '');
+      const runners = await sync.botWorkerTargets(workspaceId, epoch, true);
+      const ids = new Set(workspaceMemoryProjects(path.join(cfg.home, 'bots')));
+      for (const { rec } of runner.threads.values()) {
+        if (!rec.botLink || rec.botWorker || rec.copied) continue;
+        for (const project of rec.projects ?? []) ids.add(project.id);
+      }
+      const sourceProjects = [...ids].sort().map(id => ({ id, title: projects.record(id)?.title ?? id }));
+      if (!runnerId) return { projects: sourceProjects, runners };
+      await sync.botWorkerTarget(workspaceId, epoch, runnerId);
+      const destinationProjects = await sync.botWorkspaceMoveCall('query', 'botWorkspaceMoves:destinationProjects', { workspaceId, epoch, targetRunnerId: runnerId });
+      return { projects: sourceProjects, runners, destinationProjects };
+    }),
+    'bots.workspace.move': botMethod(workspaceMoveInput, ({ moveId, runnerId, projects: choice }) => {
+      const identity = bots.workspaceMoveIdentity(moveId, runnerId);
+      return workspaceMoves().start({
+        moveId, target: runnerId, projects: choice, identity, idle: () => bots.workspaceIdleForMove(),
+        schedules: () => scheduler.workspaceScheduleRevisions(),
+      });
+    }),
+    'bots.workspace.cancelMove': botMethod(workspaceMoveReceipt, ({ moveId }) => workspaceMoves().cancel(moveId)),
+  });
   // The backend's version is known once sync has heard from it: until the
   // watch starts, it's tried again (start does nothing once it has).
   refreshNames();
   const movesTimer = setInterval(() => {
     refreshNames();
     moves.start();
+    pollWorkspaceMoves();
   }, 30_000);
   movesTimer.unref();
   moves.start();

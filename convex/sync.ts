@@ -5,6 +5,7 @@
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
 import { botWorkspaceProjection } from './botWorkspaceValues';
+import { botSchedulesFrozen, requireBotWorkspaceWrite } from './botWorkspaceAuthority';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2240,7 +2241,8 @@ export const setBotWorkspace = mutation({
       if (row) await ctx.db.delete('botWorkspaces', row._id);
       return null;
     }
-    if (workspace.ownerRunnerId !== runnerId || (row && row.workspace.epoch > workspace.epoch)) throw forbidden('mirror a different Bot workspace');
+    if (workspace.ownerRunnerId !== runnerId) throw forbidden('mirror a different Bot workspace');
+    await requireBotWorkspaceWrite(ctx, workspace.workspaceId, runnerId, workspace.epoch);
     capDoc(caller, 'A Bot workspace projection', workspace, 400 * 1_024);
     const safe = clean(workspace);
     if (row) await ctx.db.patch('botWorkspaces', row._id, { workspace: safe });
@@ -2712,9 +2714,10 @@ function visibleTo<T extends { runnerId: string }>(caller: Caller, row: T | unde
 // ownerFenced): an old copy of it can't move that schedule's next time or
 // write its runs (Daybreak 178). Putting a schedule on that runner, or
 // asking it to run one (requestScheduleRun), stays the owner's.
-async function runOf(ctx: MutationCtx, caller: Caller, scheduleId: string) {
+async function runOf(ctx: MutationCtx, caller: Caller, scheduleId: string, holder: string) {
   const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
-  return row && !(await ownerFenced(ctx, caller, row.runnerId)) ? row : undefined;
+  return row && !(await ownerFenced(ctx, caller, row.runnerId)) &&
+    (!row.botTarget || (holder.startsWith(row.runnerId + ':') && !(await botSchedulesFrozen(ctx, row.runnerId)))) ? row : undefined;
 }
 
 // Whether any row with this schedule id, owned or an old mirrored one (from
@@ -2823,6 +2826,7 @@ export const saveSchedule = mutation({
     checkRunnerId(schedule.runnerId);
     if (!caller.owner && !SCHEDULE_ID.test(schedule.id)) throw new ConvexError({ kind: 'badArgs', message: "A runner key's schedule ids are UUIDs, as its runner makes them." });
     if (!mayWrite(caller, schedule.runnerId, row?.runnerId) || (await scheduleIdTaken(ctx, caller, schedule.id))) throw forbidden(`save schedule ${schedule.id}`);
+    if ((schedule.botTarget || row?.botTarget) && await botSchedulesFrozen(ctx, schedule.runnerId)) throw forbidden('edit a moving Bot schedule');
     if (expectedUpdatedAt !== undefined && (row?.updatedAt !== expectedUpdatedAt || !row.botTarget)) {
       throw new ConvexError({ kind: 'conflict', message: 'This Bot schedule changed. Reload it before saving.' });
     }
@@ -2856,6 +2860,7 @@ export const deleteSchedule = mutation({
     // refusal to say it's there or whose it is.
     const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
     if (!row) return false;
+    if (row.botTarget && await botSchedulesFrozen(ctx, row.runnerId)) throw forbidden('delete a moving Bot schedule');
     if (row.botTarget && row.updatedAt !== expectedUpdatedAt) {
       throw new ConvexError({ kind: 'conflict', message: 'This Bot schedule changed. Reload it before deleting.' });
     }
@@ -2930,6 +2935,7 @@ export const claimSchedule = mutation({
     await actAs(ctx, caller, runnerId);
     const row = await scheduleRow(ctx, scheduleId);
     if (!row || row.runnerId !== runnerId) return false;
+    if (row.botTarget && await botSchedulesFrozen(ctx, runnerId)) return false;
     const now = Date.now();
     if (row.claim && row.claim.until > now && row.claim.holder !== holder) return false;
     if (kind === 'due' && (row.paused || row.nextRunAt !== expect)) return false;
@@ -2949,7 +2955,7 @@ export const releaseSchedule = mutation({
     const caller = await runnerAuth(ctx, key, 'releaseSchedule');
     // Another runner's schedule is as good as missing to a runner key: no
     // refusal to say it's there or whose it is. A run is its runner's own.
-    const row = await runOf(ctx, caller, scheduleId);
+    const row = await runOf(ctx, caller, scheduleId, holder);
     if (row?.claim?.holder === holder) await ctx.db.patch(row._id, { claim: undefined });
     return null;
   },
@@ -2976,7 +2982,7 @@ export const scheduleRan = mutation({
     lastRun = clean(lastRun);
     // Another runner's schedule is as good as missing to a runner key: no
     // refusal to say it's there or whose it is. A run is its runner's own.
-    const row = await runOf(ctx, caller, scheduleId);
+    const row = await runOf(ctx, caller, scheduleId, holder);
     if (!row) return null;
     // One it has already, or older (THREADBEAR-15): the runner tells a run
     // again until it hears back, so one whose answer got lost comes again,

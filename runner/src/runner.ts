@@ -688,7 +688,9 @@ export type RunnerDeps = {
   standingInstructions?: () => string;
   botContext?: (rec: ThreadRecord) => string;
   botPermissionCeiling?: (rec: ThreadRecord) => PermissionMode | undefined;
+  botWorkspaceBlocked?: (rec: ThreadRecord) => boolean;
   botTaskQueue?: (threadId: string, task: NonNullable<BotInputRef['task']>) => 'allow' | 'wait' | 'drop';
+  botWorkerQueue?: (threadId: string, requestId: string) => 'allow' | 'wait' | 'drop';
   botGroupQueue?: (threadId: string, group: NonNullable<BotInputRef['group']>) => 'allow' | 'wait' | 'drop';
   botRequestQueue?: (threadId: string, request: NonNullable<BotInputRef['request']>) => 'allow' | 'wait' | 'drop';
   botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
@@ -802,9 +804,11 @@ export class Runner {
   standingInstructions?: () => string;
   private botContext?: (rec: ThreadRecord) => string;
   private readonly botPermissionCeiling?: RunnerDeps['botPermissionCeiling'];
+  private readonly botWorkspaceBlocked?: RunnerDeps['botWorkspaceBlocked'];
   private botRequestQueue?: RunnerDeps['botRequestQueue'];
   private botTaskQueue?: RunnerDeps['botTaskQueue'];
   private readonly botGroupQueue?: RunnerDeps['botGroupQueue'];
+  private readonly botWorkerQueue?: RunnerDeps['botWorkerQueue'];
   private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   private pendingBotPrivacy?: (threadId: string) => string | undefined;
   coordinators?: Coordinators;
@@ -938,9 +942,11 @@ export class Runner {
     this.standingInstructions = deps.standingInstructions;
     this.botContext = deps.botContext;
     this.botPermissionCeiling = deps.botPermissionCeiling;
+    this.botWorkspaceBlocked = deps.botWorkspaceBlocked;
     this.botRequestQueue = deps.botRequestQueue;
     this.botTaskQueue = deps.botTaskQueue;
     this.botGroupQueue = deps.botGroupQueue;
+    this.botWorkerQueue = deps.botWorkerQueue;
     this.botFolderRefusal = deps.botFolderRefusal;
     this.pendingBotPrivacy = deps.pendingBotPrivacy;
     this.appRestartAsked = deps.appRestartAsked;
@@ -2128,6 +2134,7 @@ export class Runner {
 
   send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string; held?: true } {
     const st = this.mustGet(threadId);
+    this.requireWritableBotWorkspace(st.rec);
     this.checkAccepting();
     // A thread a draining runner is letting go of is about to be the new
     // runner's; a message queued here now would be lost on the way. The Mac
@@ -2158,6 +2165,10 @@ export class Runner {
     }
   }
 
+  private requireWritableBotWorkspace(rec: ThreadRecord): void {
+    if (this.botWorkspaceBlocked?.(rec)) throw new RpcError(ErrorCode.busy, 'The Bot workspace is frozen for a move.');
+  }
+
   sendTo(st: ThreadState, text: string, images: ImageRef[], opts: SendOptions = {}): string {
     const { rec, rt } = st;
     this.checkBotPermission(rec, rec.permissionMode);
@@ -2169,15 +2180,19 @@ export class Runner {
     if (taskId && this.botTaskQueue?.(rec.id, { id: taskId, role: 'work' }) !== 'allow') {
       throw new RpcError(ErrorCode.notAllowed, 'This Bot task is no longer accepting messages.');
     }
-    const botDelivery = opts.botRequest || opts.botTask || opts.botGroup;
+    if (rec.botWorker && opts.botWorker !== rec.botWorker.requestId) {
+      throw new RpcError(ErrorCode.notAllowed, 'Post new work through the approved Bot worker request.');
+    }
+    const botDelivery = opts.botRequest || opts.botTask || opts.botGroup || opts.botWorker;
     if (rec.botLink?.groupId && opts.botGroup?.groupId !== rec.botLink.groupId) {
       throw new RpcError(ErrorCode.notAllowed, 'Post new work from the Bot Group.');
     }
     if (botDelivery && (!rec.botLink || !opts.messageId || !opts.botSource ||
-        [opts.botRequest, opts.botTask, opts.botGroup].filter(Boolean).length !== 1 ||
+        [opts.botRequest, opts.botTask, opts.botGroup, opts.botWorker].filter(Boolean).length !== 1 ||
         (opts.botRequest && this.botRequestQueue?.(rec.id, opts.botRequest) !== 'allow') ||
         (opts.botTask && this.botTaskQueue?.(rec.id, opts.botTask) !== 'allow') ||
-        (opts.botGroup && this.botGroupQueue?.(rec.id, opts.botGroup) !== 'allow'))) {
+        (opts.botGroup && this.botGroupQueue?.(rec.id, opts.botGroup) !== 'allow') ||
+        (opts.botWorker && this.botWorkerQueue?.(rec.id, opts.botWorker) !== 'allow'))) {
       throw new RpcError(ErrorCode.notAllowed, 'This Bot delivery is not allowed in this conversation.');
     }
     // Written with less access than it has now: Mike's to read, not its
@@ -2258,6 +2273,7 @@ export class Runner {
       ...(opts.botRequest ? { request: opts.botRequest } : {}),
       ...(taskInput ? { task: taskInput } : {}),
       ...(opts.botGroup ? { group: opts.botGroup } : {}),
+      ...(opts.botWorker ? { worker: opts.botWorker } : {}),
       ...(opts.scheduledRevision !== undefined && { scheduledRevision: opts.scheduledRevision }),
     };
     if (opts.origin) msg.origin = opts.origin;
@@ -4192,6 +4208,7 @@ export class Runner {
   }): { thread: ThreadSummary } {
     const st = this.mustGet(params.threadId);
     const { rec, rt } = st;
+    this.requireWritableBotWorkspace(rec);
     if (params.permissionMode !== undefined) this.checkBotPermission(rec, params.permissionMode);
     if (this.coordinators?.forThread(rec.id)?.state === 'active' && (params.archived || params.snoozedUntil)) {
       throw new RpcError(ErrorCode.badParams, 'Pause this project’s coordinator before archiving or hibernating its conversation.');
@@ -4541,6 +4558,7 @@ export class Runner {
   // a mistake can be undone by hand) and forgets it.
   delete(threadId: string): Record<string, never> {
     const st = this.mustGet(threadId);
+    this.requireWritableBotWorkspace(st.rec);
     if (st.rec.coordinatorHelperFor && this.coordinators?.forThread(st.rec.coordinatorHelperFor)) {
       throw new RpcError(ErrorCode.badParams, 'A coordinator helper session is managed by its project coordinator.');
     }
@@ -4898,7 +4916,7 @@ export class Runner {
   // Starts the next queued message if nothing is running. Returns true if
   // one started. One that can't be written (disk full) stays at the front.
   kickQueue(st: ThreadState): boolean {
-    if (this.stopping || st.rt.editing || st.rt.moving || st.rt.holds?.size) return false;
+    if (this.stopping || st.rt.editing || st.rt.moving || st.rt.holds?.size || this.botWorkspaceBlocked?.(st.rec)) return false;
     try {
       this.prepareQueue(st);
     } catch (e) {
@@ -4941,11 +4959,13 @@ export class Runner {
     const botRequest = offered.botInput?.request;
     const botTask = offered.botInput?.task;
     const botGroup = offered.botInput?.group;
-    if (botRequest || botTask || botGroup) {
+    const botWorker = offered.botInput?.worker;
+    if (botRequest || botTask || botGroup || botWorker) {
       const receipt = this.store.log(st.rec.id);
       const decision = (botRequest ? this.botRequestQueue?.(st.rec.id, botRequest) :
         botTask ? this.botTaskQueue?.(st.rec.id, botTask) :
-          botGroup && this.botGroupQueue?.(st.rec.id, botGroup)) ?? 'wait';
+          botGroup ? this.botGroupQueue?.(st.rec.id, botGroup) :
+            botWorker && this.botWorkerQueue?.(st.rec.id, botWorker)) ?? 'wait';
       if (decision === 'wait') return false;
       // Recovery from an earlier partial send may reconstruct this queue
       // item. The flushed event means the input may already have run.
@@ -5211,7 +5231,7 @@ export class Runner {
     const privateBotId = rec.privateBotId ?? this.pendingBotPrivacy?.(rec.id);
     const s: ThreadSummary = {
       id: rec.id,
-      ...(rec.botLink ? { botLink: rec.botLink } : {}),
+      ...(rec.botLink && !rec.botWorker ? { botLink: rec.botLink } : {}),
       ...(privateBotId ? { privateBotId } : {}),
       title: rec.title,
       cwd: rec.cwd,
@@ -5799,7 +5819,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; scheduledRevision?: number; agentSignal?: AbortSignal };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; botWorker?: string; scheduledRevision?: number; agentSignal?: AbortSignal };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; scheduledRevision?: number; superseded?: false } | { superseded: true; started: true };
 

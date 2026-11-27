@@ -55,6 +55,16 @@ export type GroupBatch = z.infer<typeof batch>;
 export type GroupBook = z.infer<typeof snapshot> & { events: GroupEvent[] };
 type Write = (file: string, body: string, mode: number) => void;
 
+export function readGroupBook(groupId: string, text: string): GroupBook {
+  const valid = id.parse(groupId);
+  const { rows, torn } = parseBook(text);
+  const last = rows.pop();
+  if (torn || last?.kind !== 'state' || last.id !== valid) throw new Error('The Group has no complete saved state.');
+  const state = snapshot.parse(last.state);
+  if (state.group.id !== valid || (state.round && state.round.roomId !== valid)) throw new Error('The Group identity changed on disk.');
+  return { ...state, events: rows.map(row => entry.parse(row)) };
+}
+
 export class GroupStore {
   private readonly root: string;
   private readonly repo: BotRepository;
@@ -87,12 +97,7 @@ export class GroupStore {
     if (known) return structuredClone(known);
     const file = this.path(valid);
     if (!lstatSync(file).isFile()) throw new Error('The Group book must be a regular file.');
-    const { rows, torn } = parseBook(readFileSync(file, 'utf8'));
-    const last = rows.pop();
-    if (torn || last?.kind !== 'state' || last.id !== valid) throw new Error('The Group has no complete saved state.');
-    const state = snapshot.parse(last.state);
-    if (state.group.id !== valid || (state.round && state.round.roomId !== valid)) throw new Error('The Group identity changed on disk.');
-    const book = { ...state, events: rows.map(row => entry.parse(row)) };
+    const book = readGroupBook(valid, readFileSync(file, 'utf8'));
     this.books.set(valid, book);
     return structuredClone(book);
   }

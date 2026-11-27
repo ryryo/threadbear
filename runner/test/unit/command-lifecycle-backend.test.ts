@@ -506,9 +506,9 @@ test('device edits survive reply loss, compare revisions, and stay with the acti
   assert.equal(conflict.outcome, 'conflict');
   await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId: second, ok: true, result: JSON.stringify(conflict) });
   assert.deepEqual(await s.seen(second), { state: 'done', result: conflict });
-  const next = { ...reopened.snapshot(value => value), epoch: workspace.epoch + 1, profiles: [] };
+  const next = { ...reopened.snapshot(value => value), profiles: [] };
   await publish(MINI_KEY, 'new-release', next);
-  assert.equal(await outcome(publish(MINI_KEY, 'new-release')), 'forbidden');
+  assert.equal(await outcome(publish(MINI_KEY, 'new-release', { ...next, epoch: next.epoch + 1 })), 'forbidden');
   assert.equal(await outcome(queue()), 'notFound');
   assert.deepEqual(await call(s.ctx, phone.botWorkspaces, { token: TOKEN }), [next]);
 });

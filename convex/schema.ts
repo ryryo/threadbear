@@ -5,8 +5,9 @@
 // are what an agent showed Mike on purpose or he pasted (replyImages), or a shared thread's.
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
-import { botScheduleTarget } from './botScheduleValues';
+import { botScheduleRevision, botScheduleTarget } from './botScheduleValues';
 import { botWorkspaceProjection } from './botWorkspaceValues';
+import { botWorkerGrant, botWorkerResult } from './botWorkerValues';
 import { machineTimers } from '@convex-dev/state-machines';
 import { commandStateV } from './commandStates';
 import { moveStateV } from './moveStates';
@@ -294,7 +295,7 @@ export const appSchema = defineSchema({
     // machine: hidden from the Runs-on menu and Settings' machine list. Set
     // when the box is made; a heartbeat keeps it.
     box: v.optional(v.object({ serviceId: v.id('runnerServices') })),
-  }).index('by_runnerId', ['runnerId']),
+  }).index('by_runnerId', ['runnerId']).index('by_last_seen', ['lastSeenAt']),
 
   // The box image main's workflow last promoted for a Fly app, by digest:
   // what a virtual runner that follows main boots (boxImage.ts). One row an app.
@@ -815,6 +816,40 @@ export const appSchema = defineSchema({
   // What the phone asks a runner to do (step 3). The owning runner takes
   // pending ones for its runnerId (or "any"), applies them through the
   // same code the Mac app uses, and marks them done or failed.
+  botWorkerTargets: defineTable({
+    runnerId: v.string(), startedAt: v.string(), sealingKey: v.string(),
+  }).index('by_runnerId', ['runnerId']),
+
+  botWorkerJobs: defineTable({
+    ...botWorkerGrant.fields,
+    ownerRunnerId: v.string(), fingerprint: v.string(), commandId: v.id('commands'),
+    state: v.union(v.literal('queued'), v.literal('running'), v.literal('done')),
+    attempt: v.optional(v.string()), result: v.optional(botWorkerResult),
+  }).index('by_request', ['workspaceId', 'requestId'])
+    .index('by_workerThread', ['workerThread'])
+    .index('by_source', ['workspaceId', 'threadId'])
+    .index('by_workspace_state', ['workspaceId', 'state', 'expiresAt']),
+
+  botWorkspaceOwners: defineTable({
+    workspaceId: v.string(), ownerRunnerId: v.string(), epoch: v.number(),
+    transfer: v.optional(v.object({
+      moveId: v.string(), sourceRunnerId: v.string(), targetRunnerId: v.string(), epoch: v.number(), checksum: v.string(),
+      bytes: v.number(), parts: v.number(), sealedChecksum: v.string(), stored: v.number(),
+      threadIds: v.array(v.string()),
+      schedules: v.optional(v.array(botScheduleRevision)),
+      state: v.union(v.literal('staged'), v.literal('claimed'), v.literal('cancelled')),
+    })),
+  }).index('by_workspaceId', ['workspaceId']).index('by_owner', ['ownerRunnerId'])
+    .index('by_bot_target', ['transfer.targetRunnerId', 'transfer.state']),
+
+  botWorkspaceParts: defineTable({
+    workspaceId: v.string(), moveId: v.string(), index: v.number(), data: v.string(),
+  }).index('by_part', ['workspaceId', 'moveId', 'index']),
+
+  botWorkspaceMoveCancellations: defineTable({
+    workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), targetRunnerId: v.string(), epoch: v.number(),
+  }).index('by_move', ['workspaceId', 'moveId']),
+
   botWorkspaces: defineTable({
     runnerId: v.string(),
     workspace: botWorkspaceProjection,
@@ -825,7 +860,7 @@ export const appSchema = defineSchema({
     threadId: v.optional(v.string()),
     // interrupt and call (API 44) come only from the main Mac's runner (relay.ts queueCommand).
     // save only from the backend, for a thread's box before it sleeps (boxService.ts askToSave).
-    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture'), v.literal('press'), v.literal('slashCommands'), v.literal('designReviews'), v.literal('respondReview'), v.literal('save'), v.literal('botProfileEdit'), v.literal('botDeviceAction')),
+    kind: v.union(v.literal('send'), v.literal('respond'), v.literal('update'), v.literal('create'), v.literal('page'), v.literal('share'), v.literal('quickAsk'), v.literal('interrupt'), v.literal('call'), v.literal('schedule'), v.literal('picture'), v.literal('press'), v.literal('slashCommands'), v.literal('designReviews'), v.literal('respondReview'), v.literal('save'), v.literal('botProfileEdit'), v.literal('botDeviceAction'), v.literal('botWorker')),
     args: v.any(),
     state: v.union(v.literal('pending'), v.literal('taken'), v.literal('done'), v.literal('failed')),
     // The same, as its state machine has it (commandMachine.ts), which writes
@@ -871,6 +906,8 @@ export const appSchema = defineSchema({
   // (moveClaim) is the one mutation where the thread changes hands.
   threadMoves: defineTable({
     moveId: v.string(),
+    // eslint-disable-next-line machines/no-optional-on-machine-tables -- Workspace membership is metadata for the whole Thread move, independent of its state.
+    botWorkspaceMove: v.optional(v.string()),
     threadId: v.string(),
     from: v.string(),
     to: v.string(),
@@ -1236,6 +1273,7 @@ export const appSchema = defineSchema({
   })
     .index('by_runnerId', ['runnerId'])
     .index('by_scheduleId', ['id'])
+    .index('by_runner_owned_bot', ['runnerId', 'owned', 'botTarget.kind'])
     .index('by_updated', ['updatedMs'])
     .index('by_runner_updated', ['runnerId', 'updatedMs']),
 

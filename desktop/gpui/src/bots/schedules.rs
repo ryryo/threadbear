@@ -2,6 +2,7 @@ use super::*;
 
 impl Threadbear {
     pub(super) fn open_bot_schedules(&mut self, cx: &mut Context<Self>) {
+        self.bots.workspace_move.visible = false;
         self.bots.show_schedules = true;
         self.bots.groups.visible = false;
         self.bots.show_teams = false;

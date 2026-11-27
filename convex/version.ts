@@ -501,4 +501,6 @@
 // 104: phone:registerDevice accepts an optional locale for push notifications.
 // 105: native Bot schedule targets and compare-and-save for owned Bot schedules.
 // 106: owner-readable Bot workspace projection and commands.
-export const API_VERSION = 106;
+// 107: Bot workspace ownership, destination Project preview, staged Thread
+//    and schedule claim, and scoped worker grants.
+export const API_VERSION = 107;

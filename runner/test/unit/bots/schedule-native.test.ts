@@ -14,7 +14,7 @@ import { nullLogger } from '../../../src/log.ts';
 import { Scheduler } from '../../../src/schedules.ts';
 import { makeHarness, tick } from '../../helpers/fakes.ts';
 
-function setup() {
+function setup(moving?: () => boolean) {
   let conversations: BotConversations;
   let groups: BotGroups;
   const h = makeHarness(undefined, {}, {
@@ -33,12 +33,33 @@ function setup() {
   const targets = new BotScheduleTargets({ runner: h.runner, repo, conversations, groups: () => groups });
   const scheduler = new Scheduler({
     runner: h.runner, home: h.home, clock: h.clock, log: nullLogger, zone: () => 'UTC',
-    botSchedules: { targets: () => targets, protect: () => {} },
+    botSchedules: { targets: () => targets, protect: () => {}, moving },
   });
   scheduler.start();
   const future = new Date(h.clock.now() + 60_000).toISOString();
   return { h, chief, writer, repo, conversations, groups, targets, scheduler, future };
 }
+
+test('a workspace fence holds due Bot reservations until placement has reopened the workspace', async () => {
+  let moving = false;
+  const { h, chief, repo, scheduler, future } = setup(() => moving);
+  const sc = await scheduler.create({ text: 'レビューをお願い', at: future, botTarget: { kind: 'newConversation', botId: chief.id } });
+  assert.throws(() => scheduler.workspaceScheduleRevisions(), /all Bot reservations to sync/);
+  moving = true;
+  await assert.rejects(scheduler.runNow(sc.id, 'full', true), /workspace is moving/);
+  h.clock.advance(120_000);
+  await tick();
+  assert.equal(scheduler.find(sc.id).lastRun, undefined);
+  assert.equal(repo.conversations(chief.id).length, 0);
+  moving = false;
+  h.clock.advance(120_000);
+  await tick();
+  assert.equal(scheduler.find(sc.id).runs, 1);
+  assert.equal(repo.conversations(chief.id).length, 1);
+  h.clock.advance(120_000);
+  await tick();
+  assert.equal(scheduler.find(sc.id).runs, 1);
+});
 
 test('the schedule binds an authorized conversation and reuses the native fire receipt', async () => {
   const { h, chief, writer, repo, conversations, targets, future } = setup();

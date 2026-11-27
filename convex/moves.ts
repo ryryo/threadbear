@@ -78,7 +78,7 @@ async function moveRow(ctx: QueryCtx | MutationCtx, moveId: string): Promise<Mov
     .query('threadMoves')
     .withIndex('by_moveId', (q) => q.eq('moveId', moveId))
     .unique();
-  if (!m) throw new ConvexError({ kind: 'notFound', message: 'no such move' });
+  if (!m || m.botWorkspaceMove) throw new ConvexError({ kind: 'notFound', message: 'no such move' });
   return m;
 }
 
@@ -168,6 +168,7 @@ export const startMove = mutation({
       .withIndex('by_threadId', (q) => q.eq('threadId', a.threadId))
       .unique();
     if (!t) throw new ConvexError({ kind: 'notFound', message: 'no such thread' });
+    if (t.botLink) throw conflict('A Bot Thread moves only with its workspace.');
     if (t.runnerId === a.to) throw bad('The thread is on that runner already.');
     const r = await ctx.db
       .query('runners')
@@ -227,7 +228,7 @@ export const moves = query({
       .withIndex('by_to', (q) => q.eq('to', runnerId).gte('updatedAt', since))
       .order('desc')
       .take(LISTED);
-    for (const m of [...fromHere, ...toHere]) if (ownThreadOnly(caller, m.threadId)) out.set(m.moveId, m);
+    for (const m of [...fromHere, ...toHere]) if (!m.botWorkspaceMove && ownThreadOnly(caller, m.threadId)) out.set(m.moveId, m);
     return [...out.values()].sort((a, b) => a.createdAt - b.createdAt).map(listed);
   },
 });
@@ -433,6 +434,32 @@ export const moveClaim = mutation({
     return null;
   },
 });
+
+export async function checkBotWorkspaceThread(ctx: MutationCtx, from: string, threadId: string) {
+  const current = await ctx.db.query('threads').withIndex('by_threadId', q => q.eq('threadId', threadId)).unique();
+  if (!current?.botLink || current.runnerId !== from) throw conflict('A Bot Thread changed owners while the workspace was staged.');
+  for (const move of await ctx.db.query('threadMoves').withIndex('by_thread', q => q.eq('threadId', threadId)).order('desc').take(100)) {
+    if (GOING.includes(move.state)) throw conflict('A Bot Thread is already moving.');
+  }
+  return current;
+}
+
+// Called only after checking all members, in the workspace claim's mutation.
+export async function claimBotWorkspaceThread(
+  ctx: MutationCtx, transfer: { workspaceId: string; moveId: string; from: string; to: string }, threadId: string,
+): Promise<void> {
+  const now = Date.now();
+  const moveId = await sha256(JSON.stringify([transfer.workspaceId, transfer.moveId, threadId]));
+  const before = {
+    moveId, threadId, from: transfer.from, to: transfer.to, botWorkspaceMove: transfer.moveId,
+    state: 'claimed' as const, createdAt: now, updatedAt: now,
+  };
+  const made = await moveMachine.create(ctx, before as never, { type: 'WORKSPACE_CLAIM' });
+  if (made.status !== 'done') throw conflict(`The Bot Thread move could not be started: ${made.reasons.join(' ')}`);
+  const saved = await ctx.db.get('threadMoves', made.id);
+  if (!saved) throw conflict('The move of a Bot Thread could not be saved.');
+  await switchThread(ctx, saved);
+}
 
 // The switch itself, in the claim's mutation: the thread, its Pocket cards
 // and its share link to T, S's sidebar row for it gone, and its mirrored

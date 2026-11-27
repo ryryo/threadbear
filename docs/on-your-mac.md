@@ -906,6 +906,12 @@ the owning runner.
   its official CLI with tools disabled. Private conversations stay out of
   Convex and require a dedicated work folder. Private protection and the first
   tidy use format 2 and need the updated supervisor before the Runner can write.
+  Work sent to another Runner uses a sealed snapshot and a grant for that
+  request. A workspace move saves its progress in `<home>/bots-transfer.json`
+  and a temporary pack in `<home>/bots-transfer-<moveId>.pack`. The transfer
+  uses the existing Thread placement code and removes the pack when the move
+  settles. Convex switches the workspace owner, linked Threads and Bot schedule
+  rows together. The first remote worker or workspace move requires format 9.
 - **Presence** (`runner/src/presence.ts`): reads how long the keyboard and
   mouse have been idle (`ioreg`), so your phone knows whether you're at
   the Mac. A runner that signs releases with a Touch ID key also reads

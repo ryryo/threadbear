@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
+import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -138,5 +138,23 @@ test('a Group book requires a format-6 supervisor and keeps the team format read
   assert.equal(launch.releaseCanUseBotData(dir, 'teams'), false);
   assert.throws(() => launch.pointCurrent(dir, 'teams'), /Bot data format/);
   assert.ok(launch.releaseCanUseBotData(dir, 'groups'));
+  assert.equal(checkBotDataFormat(home), true);
+});
+
+test('worker and transfer data prevents rolling back to the device-only release', t => {
+  const { home, dir, marker } = fixture(t);
+  for (const [id, last] of [['devices', 8], ['transfers', 9]] as const) {
+    const bot = join(dir, 'releases', id, 'src', 'bots');
+    mkdirSync(bot, { recursive: true });
+    writeFileSync(join(bot, 'format.json'), '1\n');
+    writeFileSync(join(bot, 'format-compatible.json'), JSON.stringify(Array.from({ length: last }, (_, n) => n + 1)));
+  }
+  writeFileSync(marker, '8\n');
+  assert.equal(launch.releaseCanUseBotData(dir, 'transfers'), true);
+  assert.throws(() => protectBotData(home, BOT_TRANSFER_FORMAT), /updated Bot supervisor/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '8');
+  writeFileSync(marker, '9\n');
+  assert.equal(launch.releaseCanUseBotData(dir, 'devices'), false);
+  assert.throws(() => launch.pointCurrent(dir, 'devices'), /Bot data format/);
   assert.equal(checkBotDataFormat(home), true);
 });

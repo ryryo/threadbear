@@ -4,6 +4,8 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotRuntime } from '../../../src/bots/runtime.ts';
+import { BotRepository } from '../../../src/bots/repository.ts';
+import { BotWorkspaceTransfer } from '../../../src/bots/workspace-transfer.ts';
 import { neutraliseCopied } from '../../../src/real-copy.ts';
 import { makeHarness, tick, tmpDir } from '../../helpers/fakes.ts';
 
@@ -87,6 +89,47 @@ test('Bot Threads cannot be packed for moving, and a copy retains its read-only 
   assert.throws(() => runtime.context(copied), /copy/i);
 });
 
+test('the workspace move fence keeps owner edits and sends from changing either saved or reloaded Bot Threads', async () => {
+  const home = tmpDir();
+  const open = () => {
+    const runtime = new BotRuntime({
+      home, runner: () => h.runner, owner: () => 'local',
+      enabled: () => true, guarded: () => true, owns: () => true,
+    });
+    const h = makeHarness(home, {}, {
+      botContext: rec => runtime.context(rec),
+      botPermissionCeiling: rec => runtime.permissionCeiling(rec),
+      botWorkspaceBlocked: rec => runtime.blocksWorkspaceThread(rec),
+    });
+    return { runtime, ...h };
+  };
+  const original = open();
+  const { bot } = original.runtime.methods['bots.create']({ name: 'Editor' }) as { bot: { id: string } };
+  const { conversation } = original.runtime.methods['bots.conversations.create']({
+    botId: bot.id, operationId: 'move-source',
+  }) as { conversation: { threadId: string } };
+  const id = conversation.threadId;
+  const before = original.store.load(id);
+  const transfer = new BotWorkspaceTransfer(home, 'local', () => {});
+  const identity = new BotRepository(join(home, 'bots'), 'local').workspaceIdentity();
+  transfer.prepare({ moveId: 'owner-move', target: 'next', identity, idle: () => true });
+
+  const reopened = open();
+  for (const h of [original, reopened]) {
+    assert.throws(() => h.runner.update({ threadId: id, title: 'A late change' }), /frozen for a move/);
+    assert.throws(() => h.runner.send(id, 'A late message'), /frozen for a move/);
+    assert.throws(() => h.runner.delete(id), /frozen for a move/);
+    assert.deepEqual(h.store.load(id), before);
+    assert.equal(h.adapter.sessions.length, 0);
+  }
+  const ordinary = reopened.runner.makeThread({ text: '', title: 'Unrelated' }).st.rec;
+  assert.equal(reopened.runner.update({ threadId: ordinary.id, title: 'Still editable' }).thread.title, 'Still editable');
+  transfer.abandonPreparation('owner-move');
+  reopened.runner.send(id, 'Continue from the old workspace.');
+  await tick();
+  assert.equal(reopened.adapter.last.opts.threadId, id);
+});
+
 test('Private is guarded before the first conversation and children keep the dedicated folder', async () => {
   const home = tmpDir();
   const folder = realpathSync.native(tmpDir());
@@ -164,4 +207,28 @@ test('existing Bot conversations stay locally protected across failure and resum
   assert.equal(complete.bot.privacy.folder, folder);
   assert.equal(restarted.store.load(thread.id)?.privateBotId, bot.id);
   assert.equal(restarted.store.load(child.id)?.cwd, folder);
+});
+
+test('a restarted Runner cannot create or use a Bot workspace already frozen for a move', () => {
+  const home = tmpDir();
+  let runtime: BotRuntime;
+  const h = makeHarness(home, {}, {
+    botContext: rec => runtime.context(rec),
+    botPermissionCeiling: rec => runtime.permissionCeiling(rec),
+  });
+  const options = { home, runner: () => h.runner, owner: () => 'source', enabled: () => true, guarded: () => true, owns: () => true };
+  const original = runtime = new BotRuntime(options);
+  const { bot } = original.methods['bots.create']({ name: 'Editor' }) as { bot: { id: string } };
+  const { thread } = original.methods['bots.conversations.create']({ botId: bot.id, operationId: 'chat' }) as { thread: { id: string } };
+  const state = JSON.parse(readFileSync(join(home, 'bots', 'state.json'), 'utf8'));
+  writeFileSync(join(home, 'bots-transfer.json'), JSON.stringify({
+    moveId: 'm1', target: 'other', identity: { workspaceId: state.workspaceId, ownerRunnerId: 'source', epoch: 1 },
+    checksum: '1'.repeat(64), state: 'frozen',
+  }));
+  const reopened = runtime = new BotRuntime(options);
+  assert.equal(reopened.methods['bots.status']({}).available, false);
+  assert.throws(() => reopened.methods['bots.create']({ name: 'Reviewer' }), /move/);
+  assert.throws(() => reopened.context(h.store.load(thread.id)!), /move/);
+  assert.throws(() => h.runner.send(thread.id, 'Do work on the old owner'), /move/);
+  assert.equal(h.adapter.sessions.length, 0);
 });

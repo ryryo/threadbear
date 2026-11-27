@@ -178,7 +178,7 @@ export function memoryBackend(root = CONVEX) {
       let desc = false;
       const range = {
         eq: (f: string, x: unknown) => (preds.push((r) => get(r, f) === x), range),
-        gt: (f: string, x: any) => (preds.push((r) => get(r, f) !== undefined && get(r, f) > x), range),
+        gt: (f: string, x: unknown) => (preds.push((r) => cmp(get(r, f), x) > 0), range),
         gte: (f: string, x: any) => (preds.push((r) => get(r, f) !== undefined && get(r, f) >= x), range),
         lt: (f: string, x: any) => (preds.push((r) => get(r, f) !== undefined && get(r, f) < x), range),
         lte: (f: string, x: any) => (preds.push((r) => get(r, f) !== undefined && get(r, f) <= x), range),

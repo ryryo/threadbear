@@ -411,6 +411,22 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `dropShareImages` | its own | the thread's row is its runner's; none: nothing |
 | `setProjects` | its own | `runnerId` |
 | `setBotWorkspace` | its own | Current owning Runner process and workspace epoch |
+| `previewBotWorkspaceMove` | its own | Current workspace owner and epoch; only the distinct destination Runner's active Project IDs and titles |
+| `beginBotWorkspaceMove` | its own | Source Runner, current workspace epoch and a distinct available target |
+| `putBotWorkspacePart` | its own | Staged source and the declared move and part |
+| `readBotWorkspacePart` | its own | Staged target and the declared move and part |
+| `pendingBotWorkspaceMove` | its own | Current target process, after the source uploaded every part |
+| `stateBotWorkspaceMove` | its own | The named move's source or target |
+| `claimBotWorkspaceMove` | its own | Staged target, verified checksum and matching source epoch |
+| `cancelBotWorkspaceMove` | its own | Staged source, before the workspace transfers |
+| `advertiseBotWorker` | its own | Current worker process and its own sealing key |
+| `getBotWorkerTarget` | its own | Workspace owner, current epoch and a distinct live worker |
+| `listBotWorkerTargets` | its own | Current workspace owner and epoch; names and IDs of live Bot-capable Runners |
+| `issueBotWorkerGrant` | its own | Workspace owner, public source conversation and bounded worker scope |
+| `takeBotWorkerGrant` | its own | Assigned worker and matching claimed command |
+| `completeBotWorkerGrant` | its own | Assigned worker, reported Thread and matching attempt |
+| `readBotWorkerResult` | its own | Current workspace owner and the originating conversation |
+| `readBotWorkerHistory` | its own | Current workspace owner and the originating conversation |
 | `upsertProjects` | its own | `runnerId` |
 | `projectIcons` | its own | `runnerId` |
 | `setProjectIcon` | its own | `runnerId`, and the file no other runner's row uses |

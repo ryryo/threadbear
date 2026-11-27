@@ -156,6 +156,7 @@ Mike cancelled it: the thread stays on
 S, and its uploads are deleted.
   end note
   [*] --> asking : START (owner) / start
+  [*] --> claimed : WORKSPACE_CLAIM (runner) / workspaceClaim
   asking --> asking : DESCRIBE(info) (runner) / describe
   asking --> ready : READY(plan, sealKey) (runner) [described] / ready
   asking --> cancelled : CANCEL (owner) / cancel
@@ -186,6 +187,7 @@ S, and its uploads are deleted.
 How a row is born:
 
 - `START (owner)` → `asking`. The main Mac starts a move, for Mike or an agent: to an online runner, one move per thread at a time.
+- `WORKSPACE_CLAIM (runner)` → `claimed`. The Bot workspace claim switches its already placed Threads in one mutation.
 
 From `asking`:
 

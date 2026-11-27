@@ -29,6 +29,53 @@ async function click(world: ThreadbearWorld, tip: string) {
   }
 }
 
+When('I open the Bot workspace move', async function (this: BotWorld) {
+  await click(this, 'Bots: assistants with their own settings and notes');
+  await click(this, 'Move Bot workspace');
+});
+
+When('I choose {string} as the Bot workspace destination', async function (this: BotWorld, runner: string) {
+  await click(this, runner);
+});
+
+Then('I cannot move the workspace before choosing what to do with its Project', async function (this: BotWorld) {
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string; disabled?: boolean }[];
+    const start = labels.find(row => row.label === 'Start workspace transfer');
+    if (start) {
+      assert.equal(start.disabled, true);
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail('The start transfer control did not appear.');
+});
+
+When('I assign the Bot workspace Project to {string}', async function (this: BotWorld, project: string) {
+  await click(this, 'Choose a destination for Editorial');
+  await click(this, project);
+});
+
+When('I confirm the Bot workspace move', async function (this: BotWorld) {
+  await click(this, 'Start workspace transfer');
+});
+
+When('I cancel the Bot workspace transfer', async function (this: BotWorld) {
+  await click(this, 'Cancel workspace transfer');
+});
+
+Then(/^I can see that the Bot workspace transfer (is waiting for the destination|was cancelled)$/, async function (this: BotWorld, state: string) {
+  const expected = state === 'was cancelled' ? 'Transfer cancelled' : 'Waiting for the destination Runner';
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+    if (labels.some(row => row.label === expected)) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail(`Could not see the transfer status: ${expected}`);
+});
+
 When('I create a Bot called {string} from the Bots page', async function (this: BotWorld, name: string) {
   await click(this, 'Bots: assistants with their own settings and notes');
   await click(this, 'New Bot');

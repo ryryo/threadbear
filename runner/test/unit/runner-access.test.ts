@@ -134,21 +134,46 @@ test('the owner key can do everything', () => {
 // boxes:exchange is a box's first call: it has a boot token, not a key.
 const KEYLESS = ['exchange'];
 
-test('every function in convex/sync.ts, relay.ts, moves.ts, boxes.ts and boxService.ts is sorted, and asks the gate under its own name', () => {
-  const src = ['sync.ts', 'relay.ts', 'moves.ts', 'boxes.ts', 'boxService.ts'].map((f) => fs.readFileSync(path.join(import.meta.dirname, '../../../convex', f), 'utf8')).join('\n');
-  const exported = [...src.matchAll(/^export const (\w+) = (?:mutation|query|action)\(/gm)].map((m) => m[1]!);
-  assert.ok(exported.length > 40, 'found the functions');
-  assert.deepEqual([...exported].sort(), [...Object.keys(ACCESS), ...KEYLESS].sort());
-  // Each function's body, up to the next export.
-  const parts = src.split(/^(?=export )/m);
-  for (const name of exported) {
-    if (KEYLESS.includes(name)) continue;
-    const body = parts.find((p) => p.startsWith(`export const ${name} =`))!;
-    // An action has no database, so it asks the gate through a query (boxes.ts actionAuth).
-    // An options argument may follow (a box's housekeeping, lib.ts runnerAuth).
-    assert.match(body, new RegExp(`(runnerAuth|actionAuth)\\(ctx, key, '${name}'(, \\{[^}]*\\})?\\)`), `${name} asks runnerAuth as '${name}'`);
-    assert.doesNotMatch(body, /checkRunnerKey/, `${name} doesn't use the old check`);
+test('every Runner endpoint declares its access and calls the gate under the documented name', () => {
+  const aliases: Record<string, Record<string, string>> = {
+    'botWorkerGrants.ts': {
+      advertise: 'advertiseBotWorker',
+      target: 'getBotWorkerTarget',
+      targets: 'listBotWorkerTargets',
+      issue: 'issueBotWorkerGrant',
+      take: 'takeBotWorkerGrant',
+      complete: 'completeBotWorkerGrant',
+      result: 'readBotWorkerResult',
+      history: 'readBotWorkerHistory',
+    },
+    'botWorkspaceMoves.ts': {
+      destinationProjects: 'previewBotWorkspaceMove',
+      begin: 'beginBotWorkspaceMove',
+      putPart: 'putBotWorkspacePart',
+      part: 'readBotWorkspacePart',
+      pending: 'pendingBotWorkspaceMove',
+      state: 'stateBotWorkspaceMove',
+      claim: 'claimBotWorkspaceMove',
+      cancel: 'cancelBotWorkspaceMove',
+    },
+  };
+  const files = ['sync.ts', 'relay.ts', 'moves.ts', 'boxes.ts', 'boxService.ts', ...Object.keys(aliases)];
+  const exported = [];
+  for (const file of files) {
+    const src = fs.readFileSync(path.join(import.meta.dirname, '../../../convex', file), 'utf8');
+    for (const body of src.split(/^(?=export )/m)) {
+      const name = /^export const (\w+) = (?:mutation|query|action)\(/.exec(body)?.[1];
+      if (!name) continue;
+      const gate = aliases[file]?.[name] ?? name;
+      exported.push(gate);
+      if (KEYLESS.includes(gate)) continue;
+      // An action calls the auth query, since it cannot read the database itself.
+      assert.match(body, new RegExp(`(runnerAuth|actionAuth)\\(ctx, key, '${gate}'(, \\{[^}]*\\})?\\)`), `${file}:${name} asks for '${gate}'`);
+      assert.doesNotMatch(body, /checkRunnerKey/, `${file}:${name} doesn't use the old check`);
+    }
   }
+  assert.ok(exported.length > 40, 'found the functions');
+  assert.deepEqual(exported.sort(), [...Object.keys(ACCESS), ...KEYLESS].sort());
 });
 
 // A box call that can write can make work (lib.ts keyUsed): BOX_READS is exactly its queries.

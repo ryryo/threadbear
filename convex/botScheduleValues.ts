@@ -5,3 +5,5 @@ export const botScheduleTarget = v.union(
   v.object({ kind: v.literal('newConversation'), botId: v.string() }),
   v.object({ kind: v.literal('group'), groupId: v.string() }),
 );
+
+export const botScheduleRevision = v.object({ id: v.string(), updatedAt: v.string() });

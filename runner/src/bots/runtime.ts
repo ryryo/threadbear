@@ -7,7 +7,7 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, BOT_TRANSFER_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -31,6 +31,8 @@ import { BotScheduleTargets } from './schedule-target.ts';
 import type { RememberInput } from './memory-tool.ts';
 import { activeBotInput } from './turn-proof.ts';
 
+import { BotWorkspaceTransfer } from './workspace-transfer.ts';
+
 export const BOT_EXPERIMENT = 'nativeBots';
 
 type Options = {
@@ -52,6 +54,7 @@ type ReviewDeps = Pick<BotReviewOptions, 'redact' | 'askers' | 'privateFolder'> 
 export class BotRuntime {
   private readonly options: Options;
   private repository?: BotRepository;
+  private transferService?: BotWorkspaceTransfer;
   private privateData?: boolean;
   private readonly privacyChange = new Map<string, Promise<unknown>>();
   private workspace?: { repo: BotRepository; conversations: BotConversations };
@@ -76,14 +79,18 @@ export class BotRuntime {
       repo: this.getWorkspace().repo, teams: this.teams(), now: () => this.options.runner().isoNow(),
       protect: () => this.protectTeamData(), setCeiling: (bot, rev, cap) => this.setBotCeiling(bot, rev, cap),
     })), groupMethods(() => this.groups(), (groupId, seq, operationId, text) => this.approveGroupNote(groupId, seq, operationId, text)), {
-    'bots.status': (_params: Record<string, unknown>) => {
-      const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), reason };
-    },
+    'bots.status': (_params: Record<string, unknown>) => this.status(),
   });
 
   constructor(options: Options) {
     this.options = options;
+  }
+
+  status() {
+    const reason = this.unavailable();
+    return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined,
+      requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(),
+      groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), reason };
   }
 
   requestsAvailable(): boolean {
@@ -148,6 +155,7 @@ export class BotRuntime {
 
   permissionCeiling(rec: ThreadRecord): PermissionMode | undefined {
     if (!rec.botLink || rec.copied) return undefined;
+    if (this.blocksWorkspaceThread(rec)) throw new RpcError(ErrorCode.busy, 'The Bot workspace is frozen for a move.');
     const limit = this.repo().get(rec.botLink.botId).permissionCeiling;
     if (rec.botLink.groupId) return lowerMode(limit ?? 'full', this.groups().threads.check(rec).group.ceiling);
     if (rec.botLink.taskId && this.tasksAvailable()) {
@@ -158,6 +166,63 @@ export class BotRuntime {
       }
     }
     return limit;
+  }
+
+  blocksWorkspaceThread(rec: ThreadRecord): boolean {
+    return Boolean(rec.botLink && !rec.copied && !rec.botWorker && this.workspaceIsMoving());
+  }
+
+  workspaceIsMoving(): boolean {
+    return this.transfer().blocked();
+  }
+
+  workspaceMovesAvailable(): boolean {
+    const { home, owns, enabled, canChangePrivacy } = this.options;
+    return owns() && enabled() && !!canChangePrivacy?.() && supervisorGuardsBotData(home, BOT_TRANSFER_FORMAT);
+  }
+
+  workspaceMoveStore(): BotWorkspaceTransfer {
+    if (!this.workspaceMovesAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot workspace moves need the primary Runner and its updated supervisor.');
+    return this.transfer();
+  }
+
+  workspaceMoveIdentity(moveId: string, target: string) {
+    const current = this.workspaceMoveStore().progress();
+    if ((current?.state === 'preparing' || current?.state === 'frozen') &&
+        current.moveId === moveId && current.target === target) return current.identity;
+    const { repo } = this.getWorkspace();
+    const bots = repo.list();
+    if (bots.length === 0) throw new RpcError(ErrorCode.badParams, 'This Runner has no Bot workspace to move.');
+    if (bots.some(bot => bot.privacy)) throw new RpcError(ErrorCode.notAllowed, 'Private Bots need their original work folders on this Runner.');
+    return repo.workspaceIdentity();
+  }
+
+  workspaceIdleForMove(): boolean {
+    if (this.privacyChange.size || (this.tasksAvailable() && this.tasks().activeCount())) return false;
+    if (this.groupsAvailable()) {
+      const { store } = this.groups();
+      if (store.list().some(group => ['running', 'finalizing'].includes(store.get(group.id).round?.status ?? ''))) return false;
+    }
+    if (this.requestsAvailable()) {
+      const requests = this.requests();
+      for (const { rec } of this.options.runner().threads.values()) {
+        if (rec.botLink && !rec.botWorker && !rec.copied && requests.pendingFrom(rec.id)) return false;
+      }
+    }
+    return true;
+  }
+
+  workspaceAdopted(): void {
+    const reviewDeps = this.reviewDeps;
+    this.stopReviews();
+    this.repository = this.workspace = undefined;
+    this.privateData = undefined;
+    this.requestService = this.taskService = this.groupService = this.teamService = undefined;
+    this.scheduleTargets = this.deviceWorkspace = undefined;
+    this.reconcileRequests();
+    this.reconcileTasks();
+    this.reconcileGroups();
+    if (reviewDeps) this.startReviews(reviewDeps);
   }
 
   private async setBotCeiling(botId: string, revision: number, ceiling: PermissionMode) {
@@ -236,6 +301,36 @@ export class BotRuntime {
         if (!result.saved) throw new Error('The task stopped but the Runner could not save that stop.');
       },
     });
+  }
+
+  private workerConversation(threadId: string) {
+    if (!supervisorGuardsBotData(this.options.home, BOT_TRANSFER_FORMAT) || !this.options.canChangePrivacy?.()) {
+      throw new RpcError(ErrorCode.busy, 'Wait for the Bot Runner to update and finish the handover.');
+    }
+    const { repo, conversations } = this.getWorkspace();
+    const runner = this.options.runner();
+    const state = runner.threads.get(threadId);
+    const link = state?.rec.botLink;
+    if (!link || link.groupId || link.taskId || state.rec.botWorker || state.rec.copied || state.rec.archivedAt ||
+        runner.privateBotOf(threadId) || !repo.matchesConversation(link.botId, link.conversationId, threadId)) {
+      throw new RpcError(ErrorCode.notAllowed, 'Run a worker from the Bot’s regular conversation.');
+    }
+    const bot = repo.get(link.botId);
+    if (bot.privacy) throw new RpcError(ErrorCode.notAllowed, 'The Bot worker conversation must be public.');
+    return { bot, repo, conversations, runner };
+  }
+
+  workerReadSource(threadId: string) {
+    return this.workerConversation(threadId).repo.workspaceIdentity();
+  }
+
+  workerRequestSource(threadId: string) {
+    const { bot, repo, conversations, runner } = this.workerConversation(threadId);
+    const ceiling = lowerMode(runner.authoritySaved(threadId).mode, bot.permissionCeiling ?? 'full');
+    if (bot.archivedAt || ceiling === 'plan') throw new RpcError(ErrorCode.notAllowed, 'This Bot cannot start work on another Runner.');
+    return { ...repo.workspaceIdentity(), botId: bot.id, profileRevision: bot.revision, threadId, ceiling,
+      title: bot.name, instructions: conversations.botContext(bot),
+    };
   }
 
   devicesAvailable(): boolean {
@@ -560,7 +655,16 @@ export class BotRuntime {
     if (!owns()) return 'Bot controls are available on the owning Runner.';
     if (!enabled()) return 'The Bots experiment is turned off.';
     if (!guarded()) return 'Bots need the updated Runner supervisor to be running.';
+    if (this.transfer().blocked()) return 'The Bot workspace is frozen for a move.';
     return undefined;
+  }
+
+  private transfer(): BotWorkspaceTransfer {
+    const { home, owner, owns } = this.options;
+    return this.transferService ??= new BotWorkspaceTransfer(home, owner(), () => {
+      if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+      protectBotData(home, BOT_TRANSFER_FORMAT);
+    });
   }
 
   private getWorkspace() {
@@ -589,7 +693,10 @@ export class BotRuntime {
 
   private repo(): BotRepository {
     const { home, owner } = this.options;
-    return this.repository ??= new BotRepository(join(home, 'bots'), owner(), () => protectBotData(home));
+    return this.repository ??= new BotRepository(join(home, 'bots'), owner(), () => {
+      if (this.transfer().blocked()) throw new RpcError(ErrorCode.busy, 'The Bot workspace is frozen for a move.');
+      protectBotData(home);
+    });
   }
 
   private protectNewFormat(): void {

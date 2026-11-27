@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FakeAccounts, makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
+import { BotRepository } from '../../src/bots/repository.ts';
+import { BotWorkspaceTransfer } from '../../src/bots/workspace-transfer.ts';
+import { adoptWorkspaceThread, packWorkspaceThread, placeWorkspaceThread, workspaceThreadFiles, workspaceThreadPacks } from '../../src/bots/workspace-threads.ts';
 import { projectDirName } from '../../src/transcripts.ts';
 import { realpath } from '../../src/worktrees.ts';
 import { moveInfoFrom, type MoveRow } from '../../src/moves.ts';
@@ -645,4 +648,55 @@ test('a move placed whole is known after a restart, and placing again after a pa
   await t.runner.placeMove(r, entries);
   assert.equal(fs.existsSync(earlier), false, "the earlier placing's transcript went");
   assert.equal((await t.runner.adoptMoved(r)).adopted, true, 'placed again, whole');
+});
+
+// Adapt the ordinary Thread move fixture above. The only differences
+// are the workspace freeze, Bot identity, and the workspace claim.
+test('a workspace move reuses native placement and keeps the Bot link and CLI transcript', async () => {
+  const work = tmpDir();
+  const sDir = tmpDir();
+  const tDir = tmpDir();
+  const s = machine([{ id: 'claude-main', provider: 'claude', title: 'source', configDir: sDir }]);
+  const t = machine([{ id: 'claude-1', provider: 'claude', title: 'target', configDir: tDir }]);
+  const repo = new BotRepository(path.join(s.home, 'bots'), 'S1');
+  const bot = repo.create({ name: 'Editor' });
+  const identity = repo.workspaceIdentity();
+  const id = s.runner.create({ text: '見出しを確認して', accountId: 'claude-main', cwd: work }).thread.id;
+  s.adapter.last.init();
+  s.adapter.last.text('answer', '確認済み');
+  s.adapter.last.result('completed');
+  await tick();
+  const rec = s.runner.threads.get(id)!.rec;
+  rec.botLink = { botId: bot.id, conversationId: 'own-chat' };
+  s.store.save(rec);
+  const sid = rec.nativeSessionId!;
+  const before = path.join(sDir, 'projects', projectDirName(realpath(work)));
+  fs.mkdirSync(before, { recursive: true });
+  fs.writeFileSync(path.join(before, `${sid}.jsonl`), '{"type":"user"}\n');
+  const transfer = new BotWorkspaceTransfer(s.home, 'S1', () => {});
+  const layout = { moveId: 'workspace-1', target: 'T1', projects: 'detach' as const };
+  const belongs = (link: { botId: string }) => link.botId === bot.id;
+  await assert.rejects(s.runner.packForMove(id, row(id)), /owning Runner/);
+  await assert.rejects(packWorkspaceThread(s.runner, transfer, identity, id, layout, belongs), /frozen workspace/);
+  transfer.prepare({ ...layout, identity, idle: () => s.runner.moveIdle(id) });
+  const sourcePack = await packWorkspaceThread(s.runner, transfer, identity, id, layout, belongs);
+  const files = workspaceThreadFiles(sourcePack);
+  const packed = workspaceThreadPacks(files, { ...identity, moveId: layout.moveId })[0]!;
+  assert.throws(() => workspaceThreadPacks(files, { ...identity, moveId: 'different' }), /does not match/);
+  const stripped = { ...packed, entries: packed.entries.map(entry => {
+    if (entry.path !== 'thread/thread.json') return entry;
+    const { botLink: _omitted, ...remaining } = JSON.parse(entry.data.toString('utf8'));
+    return { ...entry, data: Buffer.from(JSON.stringify(remaining)) };
+  }) };
+  await assert.rejects(placeWorkspaceThread(t.runner, 'T1', stripped, { cwd: work }), /owning Runner/);
+  const staged = await placeWorkspaceThread(t.runner, 'T1', packed, { cwd: work });
+  assert.equal(t.runner.threads.has(id), false);
+  const proof = { state: 'claimed' as const, workspaceId: identity.workspaceId, moveId: layout.moveId, ownerRunnerId: 'T1', epoch: identity.epoch + 1 };
+  await assert.rejects(adoptWorkspaceThread(t.runner, packed, staged, { ...proof, epoch: identity.epoch }), /does not match/);
+  await adoptWorkspaceThread(t.runner, packed, staged, proof);
+  await adoptWorkspaceThread(t.runner, packed, staged, proof);
+  assert.deepEqual(t.store.load(id)?.botLink, rec.botLink);
+  assert.equal(t.store.load(id)?.nativeSessionId, sid);
+  assert.equal(fs.readFileSync(path.join(tDir, 'projects', projectDirName(realpath(work)), `${sid}.jsonl`), 'utf8'), '{"type":"user"}\n');
+  assert.ok(t.store.log(id).read(1, t.store.log(id).lastSeq).some(event => event.type === 'assistant.text' && event.text === '確認済み'));
 });

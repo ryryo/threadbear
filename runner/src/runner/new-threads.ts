@@ -22,7 +22,7 @@ import { newRuntime } from './runtime.ts';
 import { providerInfo, providerName } from '../providers.ts';
 import { cutSafely } from '../safe-cut.ts';
 
-type ThreadIdentity = { id: string; sessionId: string; botLink?: ThreadRecord['botLink']; privateBotId?: string };
+type ThreadIdentity = { id: string; sessionId: string; botLink?: ThreadRecord['botLink']; botWorker?: ThreadRecord['botWorker']; privateBotId?: string };
 
 export const newThreadsPart = {
   create(this: Runner, params: {
@@ -285,6 +285,7 @@ export const newThreadsPart = {
     const rec: ThreadRecord = {
       id,
       ...(ids?.botLink ? { botLink: ids.botLink } : {}),
+      ...(ids?.botWorker ? { botWorker: ids.botWorker } : {}),
       ...(privateBotId ? { privateBotId } : {}),
       title: params.title?.trim() ? cutSafely(params.title.trim(), 200) : titleFrom(params.text),
       titleSet: Boolean(params.title?.trim()),

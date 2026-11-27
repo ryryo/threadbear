@@ -35,6 +35,17 @@ import { cleanUpWorktree, makeWorktree, MAIN, parseCheckouts, realpath, type Wor
 import { runningSession } from '../cli-session.ts';
 import { writeSlot } from '../slot.ts';
 
+type WorkspaceMovePermit = (record: ThreadRecord) => boolean;
+
+function requireMovableBot(record: ThreadRecord, permit?: WorkspaceMovePermit): void {
+  const foreignBot = permit
+    ? !record.botLink || record.copied || record.botWorker || !permit(record)
+    : Boolean(record.botLink);
+  if (record.privateBotId || foreignBot) {
+    throw new Error('A Bot conversation stays on its owning Runner.');
+  }
+}
+
 // What T placed for a move, so adopting after a restart and throwing it
 // away after a failure both know (<home>/moves/<moveId>/placed.json).
 // whole: placeMove got to the end, so all that's left is the claim
@@ -794,12 +805,12 @@ export const movesPart = {
     return !rt.tasks.some((t) => t.kind === 'agent') && !st.rec.subagents?.some((a) => a.status === 'running');
   },
 
-  async describeForMove(this: Runner, threadId: string, schedules: number): Promise<MoveInfo | undefined> {
+  async describeForMove(this: Runner, threadId: string, schedules: number, workspace?: WorkspaceMovePermit): Promise<MoveInfo | undefined> {
     if (this.coordinators?.forThread(threadId) || this.coordinators?.helperOwner(threadId)) throw new Error('Project coordinators stay on their owning runner in this experiment.');
     const st = this.threads.get(threadId);
     if (!st) return undefined;
     const { rec } = st;
-    if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
+    requireMovableBot(rec, workspace);
     const account = this.accounts.list().find((a) => a.id === rec.accountId);
     const own = Boolean(rec.worktree && !rec.worktree.removedAt);
     const top = await repoTop(rec.cwd);
@@ -847,12 +858,12 @@ export const movesPart = {
 
   // Releases the CLI and gathers what goes: the thread's folder, its
   // Claude transcript, and its worktree's git work.
-  async packForMove(this: Runner, threadId: string, row: MoveRow): Promise<{ entries: PackEntry[]; leftBehind: string[] }> {
+  async packForMove(this: Runner, threadId: string, row: MoveRow, workspace?: WorkspaceMovePermit): Promise<{ entries: PackEntry[]; leftBehind: string[] }> {
     if (this.coordinators?.forThread(threadId) || this.coordinators?.helperOwner(threadId)) throw new Error('Project coordinators stay on their owning runner in this experiment.');
     const st = this.threads.get(threadId);
     if (!st) throw new Error("The thread isn't here any more.");
     const { rec, rt } = st;
-    if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
+    requireMovableBot(rec, workspace);
     const leftBehind: string[] = [];
     const shells = rt.tasks.filter((t) => t.kind !== 'agent').length;
     if (shells) leftBehind.push(`${shells} background ${shells === 1 ? 'job was' : 'jobs were'} stopped, as they can't move.`);
@@ -1022,7 +1033,7 @@ export const movesPart = {
 
   // T: everything in place but the thread itself, which waits in staging
   // until the switch. Throws (after undoing what it made) to fail the move.
-  async placeMove(this: Runner, row: MoveRow, entries: PackEntry[]): Promise<void> {
+  async placeMove(this: Runner, row: MoveRow, entries: PackEntry[], workspace?: WorkspaceMovePermit): Promise<void> {
     // The id names the thread's folder here, and the apps put it in shell
     // lines and links: only a thread id's shape (thread-id.ts).
     if (!isThreadIdShape(row.threadId)) throw new Error("The moved thread's id isn't a thread id.");
@@ -1049,7 +1060,7 @@ export const movesPart = {
       const recFile = path.join(stage, 'thread', 'thread.json');
       const rec = JSON.parse(fs.readFileSync(recFile, 'utf8'));
       if (rec.id !== row.threadId) throw new Error("The moved thread's record is for another thread.");
-      if (rec.botLink || rec.privateBotId) throw new Error('A Bot conversation stays on its owning Runner.');
+      requireMovableBot(rec, workspace);
       fitMovedLog(path.join(stage, 'thread', 'events.ndjson'), { threadId: row.threadId, now: path.join(stage, 'thread', 'media'), final: this.store.mediaDir(row.threadId) });
       // From an older runner, a thread it ran in the sandbox experiment.
       if (rec.confined) throw new Error("A thread that ran in a sandbox can't move here: Threadbear no longer has one to run it in.");

@@ -30,6 +30,7 @@ import { cutSafely, firstLineSafely } from './safe-cut.ts';
 import { CEILING_REFUSED, ceilingMode, lowerMode } from './runner/ceiling.ts';
 import { raises } from './threadbear-mcp.ts';
 import type { BotScheduleTargets } from './bots/schedule-target.ts';
+import type { WorkspaceScheduleRevision } from './bots/workspace-transfer.ts';
 
 // What a check printed, carried by a run: kept (when it was kept) and the
 // command, so a sent run drops that command's kept file.
@@ -300,7 +301,7 @@ export class Scheduler {
   // One file a run, so two runner processes in a handover never write over
   // each other's (a list in one file would need a lock).
   private runsDir: string;
-  private readonly botSchedules?: { targets: () => BotScheduleTargets; protect: () => void };
+  private readonly botSchedules?: { targets: () => BotScheduleTargets; protect: () => void; moving?: () => boolean };
 
   constructor(deps: {
     runner: ScheduleRunner;
@@ -869,6 +870,18 @@ export class Scheduler {
     return this.listRecords().filter(row => row.botTarget && this.mine(row)).map(row => this.view(row));
   }
 
+  workspaceScheduleRevisions(): WorkspaceScheduleRevision[] {
+    const own = this.listRecords().filter(row => row.botTarget && this.mine(row));
+    if (!own.length) return [];
+    if (this.mode !== 'backend') throw bad('Wait for all Bot reservations to sync before moving the workspace.');
+    const waiting = new Set(this.readRuns().map(row => row.scheduleId));
+    if (own.some(({ id }) => this.holds.has(id) || this.runningNow.has(id) || this.checking.has(id) ||
+        this.sending.has(id) || this.dispatching.has(id) || this.hasUnrecorded(id) || waiting.has(id))) {
+      throw new RpcError(ErrorCode.busy, 'Wait for the Bot reservations’ current runs to settle.');
+    }
+    return own.map(({ id, updatedAt }) => ({ id, updatedAt }));
+  }
+
   find(idOrPrefix: string): Schedule {
     return this.view(this.mustGet(idOrPrefix));
   }
@@ -1148,6 +1161,7 @@ export class Scheduler {
     this.refused();
     const row = this.mustGet(scheduleId);
     if (Boolean(row.botTarget) !== botEdit || (botEdit && !this.mine(row))) throw bad('Open the Bot schedule to run it.');
+    if (row.botTarget && this.botSchedules?.moving?.()) throw new RpcError(ErrorCode.busy, 'The Bot workspace is moving.');
     if (this.runningNow.has(scheduleId)) throw new RpcError(ErrorCode.busy, 'This schedule is already being run; try again in a moment.');
     this.runningNow.add(scheduleId);
     try {
@@ -1422,6 +1436,7 @@ export class Scheduler {
     this.bindAllOld();
     for (const rec of [...this.items.values()]) {
       if (rec.paused || !rec.nextRunAt || Date.parse(rec.nextRunAt) > now) continue;
+      if (rec.botTarget && this.botSchedules?.moving?.()) continue;
       if (this.checking.has(rec.id)) continue;
       // Keep a run in flight through its send too: a handover's RPC is
       // asynchronous, and a new tick mustn't send the same local slot again.
@@ -1490,6 +1505,7 @@ export class Scheduler {
       for (const row of [...this.items.values()]) {
         let rec = row;
         if (!this.mine(rec)) continue;
+        if (rec.botTarget && this.botSchedules?.moving?.()) continue;
         if (this.dispatching.has(rec.id) || this.sending.has(rec.id)) continue;
         if (rec.finishedAt && now - Date.parse(rec.finishedAt) > KEEP_FINISHED_MS) {
           await backend.remove(rec.id).catch(() => {});
@@ -1829,6 +1845,7 @@ export class Scheduler {
 
   // `by`: Run now's presser (runNow).
   private async send(rec: ScheduleRecord, manual: boolean, checked?: { skip: string } | Carried, requestedRun?: string, by?: PermissionMode): Promise<{ outcome: 'sent' | 'skipped' | 'failed' | 'retry'; threadId?: string; turnId?: string; note?: string }> {
+    if (rec.botTarget && this.botSchedules?.moving?.()) return { outcome: 'retry', note: 'The Bot workspace is moving.' };
     // Run now consumes an unfinished one-off's due slot too. A cron's
     // explicit runs have their own identity and leave the next slot alone.
     const run = rec.at && !rec.finishedAt ? `due:${rec.at}#${rec.runs}` : requestedRun ?? (manual ? `manual:${crypto.randomUUID()}` : `due:${rec.nextRunAt}`);

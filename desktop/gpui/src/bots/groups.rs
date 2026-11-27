@@ -131,6 +131,7 @@ impl Threadbear {
     }
 
     pub(super) fn open_bot_groups(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.bots.workspace_move.visible = false;
         self.bots.show_teams = false;
         self.bots.show_schedules = false;
         self.bots.groups.visible = true;

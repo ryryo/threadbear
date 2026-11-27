@@ -41,6 +41,7 @@ export type Bot = z.infer<typeof bot>;
 export type Conversation = z.infer<typeof conversation>;
 type PendingConversation = z.infer<typeof pendingConversation>;
 type State = z.infer<typeof state>;
+export type BotWorkspaceIdentity = { workspaceId: string; ownerRunnerId: string; epoch: number };
 type BotSettings = Pick<Bot, 'name' | 'role' | 'instructions'>;
 
 // Name handling from DS-Bot d104d9ca18d69a35460f14e15dff4d553181433a,
@@ -80,6 +81,26 @@ function load(file: string, ownerRunnerId: string): State {
   }
 }
 
+function readWorkspaceTransferState(raw: string, from: BotWorkspaceIdentity): State {
+  const current = state.parse(JSON.parse(raw));
+  if (current.ownerRunnerId !== from.ownerRunnerId || current.workspaceId !== from.workspaceId || current.ownerEpoch !== from.epoch) {
+    throw new Error('The saved Bot workspace identity does not match its transfer manifest.');
+  }
+  return current;
+}
+
+export function workspaceTransferConversations(raw: string, from: BotWorkspaceIdentity): Conversation[] {
+  const current = readWorkspaceTransferState(raw, from);
+  if (current.pendingConversations.length) throw new Error('Finish the reserved Bot conversations before moving this workspace.');
+  return current.conversations;
+}
+
+// This is used only on a verified transfer bundle, never the source state.
+export function rehomeBotWorkspaceState(raw: string, from: BotWorkspaceIdentity, runnerId: string): string {
+  const current = readWorkspaceTransferState(raw, from);
+  return JSON.stringify({ ...current, ownerRunnerId: runnerId, ownerEpoch: from.epoch + 1 }) + '\n';
+}
+
 /** The owning Runner holds its normal data lock for this repository's lifetime. */
 export class BotRepository {
   private readonly file: string;
@@ -104,7 +125,7 @@ export class BotRepository {
 
   workspaceId(): string { return this.current.workspaceId; }
 
-  workspaceIdentity(): { workspaceId: string; ownerRunnerId: string; epoch: number } {
+  workspaceIdentity(): BotWorkspaceIdentity {
     const { workspaceId, ownerRunnerId, ownerEpoch } = this.current;
     return { workspaceId, ownerRunnerId, epoch: ownerEpoch };
   }

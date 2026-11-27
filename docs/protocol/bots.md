@@ -327,3 +327,57 @@ primary, which verifies the peer's active turn and saves the change in
 the scope's existing journal. It returns the stored receipt for a retry
 of that operation. If it cannot reach the primary, the old Runner does
 not write a copy.
+
+### Workers on another Runner
+
+A workspace owner can give a regular public Bot conversation a worker
+on another connected Runner. `bots.workers.start` takes its Thread ID,
+the other Runner's ID, the prompt, and a stable operation ID. The owner
+seals the approved Bot context to that Runner's key. The backend queues
+only its workspace and request IDs through the usual command queue.
+The worker then claims the bounded grant and runs one native Thread
+under its permission ceiling. Private Bots stay on their owning Runner.
+
+The worker keeps the answer in its own Thread events.
+`bots.workers.result` takes the originating Thread ID and request ID
+and returns the worker Thread and the saved result sequence once ready.
+`bots.workers.history` takes the originating Thread ID and returns up to
+20 recent requests with their Runner, state and saved result reference.
+Both reads use the request's original conversation. The current workspace
+owner can read those requests after a workspace transfer.
+A transport retry uses the original request. Only the workspace owner
+has access to the grant's result. A worker's grant does not give it
+permission to update the owner's Bot settings or workspace.
+
+### Workspace moves
+
+While a workspace is preparing, frozen or being received, the Runner
+holds linked conversation queues. It refuses new messages, settings
+changes and deletion of those conversations, including after a restart.
+If the owner cancels before an offer, the existing queues can resume.
+Once the ownership claim succeeds, the source can no longer change
+those conversations.
+
+When `bots.status` reports `workspaceMoves`, the owner can start a move
+with `bots.workspace.move`. It takes a destination Runner ID, a stable
+move ID and an explicit Project choice. `bots.workspace.movePreview`
+lists the source Project IDs, including scopes with saved notes, and the
+available destination Runners. With a `runnerId` it also lists active
+Projects on that Runner. The destination checks the selected IDs again
+before claiming.
+Use `projects: "detach"` to detach every Project or
+`projects: {assign: {sourceId: targetId}}` to name each destination
+by ID. An assignment to the same ID keeps that scope. An assignment to
+null leaves that Project behind. Titles do not select destinations.
+Detaching leaves Project memberships and Project-scoped notes on the
+source. Bot, Team and Group notes travel with the workspace.
+`bots.workspace.moveStatus` returns the local transfer state.
+`bots.workspace.cancelMove` takes that same move ID. A frozen source
+reopens only with a cancellation from the authority. A target places
+the validated Threads before claiming and opens them after the claim.
+Bot reservations already in the backend move in the same claim as the
+workspace and its Threads. They retain their IDs, timing, run history
+and permission ceilings. A reservation with an unsettled run prevents
+the move. A reservation cannot start or be edited during the claim.
+The authority also remembers a cancellation issued before the offer
+arrives. A late copy of the cancelled offer cannot freeze the workspace.
