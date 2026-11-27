@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { FakeAccounts, FakeAdapter, makeHarness, tick, tmpDir, withCodex } from '../helpers/fakes.ts';
-import { ConvexSync, forBackend, RELAY_CARDS_API_VERSION, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, OPTION_NOTES_API_VERSION, NEXT_PICK_API_VERSION, BACKEND_API_VERSION, BOT_WORKSPACE_API_VERSION, MAC_RUNNER_STATS_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SHARED_USAGE_POLL_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
+import { ConvexSync, forBackend, RELAY_CARDS_API_VERSION, ASKED_API_VERSION, LINKS_API_VERSION, PROJECTS_DIFF_API_VERSION, STARS_API_VERSION, NETWORK_WAIT_API_VERSION, OPTION_NOTES_API_VERSION, NEXT_PICK_API_VERSION, BACKEND_API_VERSION, BOT_WORKSPACE_API_VERSION, BOT_NOTE_ERASURE_API_VERSION, MAC_RUNNER_STATS_API_VERSION, TURNS_API_VERSION, ICONS_API_VERSION, RUNNER_ICON_API_VERSION, SCHEDULES_API_VERSION, SHARE_API_VERSION, WOKE_API_VERSION, STARTED_BY_API_VERSION, SECTIONS_API_VERSION, MODELS_API_VERSION, REPLY_IMAGES_API_VERSION, REPLY_IMAGES_LOOKBACK_MS, REPLY_IMAGES_SCANS_PER_FLUSH, toAccountDoc, PRESENCE_MS, SYNC_COALESCE_MS, HEARTBEAT_MS, SHARED_USAGE_POLL_MS, SYNC_BATCH, ensureRunnerId, toThreadDoc, convexPoster, convexUploader, pictureName, type ThreadDoc } from '../../src/sync.ts';
 import type { ModelChoice, Project, ThreadSummary } from '../../src/protocol.ts';
 import { phoneCommands } from '../../src/handover.ts';
 import { Scheduler, type ScheduleBackend } from '../../src/schedules.ts';
@@ -4880,7 +4880,7 @@ test('Bot erasure cannot be acknowledged by an older backend or an unrecognized 
 });
 
 test('successful heartbeats retry the saved note erasure queue only on compatible backends', async () => {
-  for (const apiVersion of [BACKEND_API_VERSION - 1, BACKEND_API_VERSION]) {
+  for (const apiVersion of [BOT_NOTE_ERASURE_API_VERSION - 1, BOT_NOTE_ERASURE_API_VERSION]) {
     let runs = 0;
     const { h, sync } = setup({ answer: method => method === 'sync:heartbeat' ? { apiVersion } : null,
       extra: { resumeBotNoteErasures: async () => { runs++; } } });
@@ -4889,7 +4889,7 @@ test('successful heartbeats retry the saved note erasure queue only on compatibl
       await tick(20);
       h.clock.advance(HEARTBEAT_MS);
       await tick(20);
-      assert.equal(runs, apiVersion < BACKEND_API_VERSION ? 0 : 2);
+      assert.equal(runs, apiVersion < BOT_NOTE_ERASURE_API_VERSION ? 0 : 2);
     } finally {
       await sync.stop();
     }
