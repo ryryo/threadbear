@@ -89,6 +89,17 @@ Feature: Bot workspace
     When I stop the Group's work
     Then the Group can be resumed
 
+  @bots.group_search @bots @swift-pending
+  Scenario: The owner can continue Group history search beyond the newest page
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Writer" from the Bots page
+    And I create a Group called "Editorial" with "Writer"
+    And I save 21 Group history posts matching "検索語"
+    And I search Group history for "検索語"
+    Then the Group history offers older results
+    When I open the older Group search results
+    Then the Group search shows "検索語 item 0"
+
   @bots.schedules @bots @swift-pending
   Scenario: Run a saved schedule in a new conversation with the same Bot
     Given the app is connected to an isolated Bot Runner

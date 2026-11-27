@@ -2111,6 +2111,8 @@ Open **Groups** to choose Bots on the same team and name the admin. A message go
 to the admin by default. Type `@Name` to call a member by name, or choose
 **Notify everyone in order** in Group settings. The Group keeps partial replies
 as they arrive, and you can open a member’s Thread to answer its approval.
+**Search history** looks through full replies. Use **Older results** to see
+earlier matches or **Open full result** to read a reply.
 **Stop work** freezes queued messages until you select **Resume**. Use **Review
 as note** on a reply to edit and approve it for the Group’s shared memory.
 

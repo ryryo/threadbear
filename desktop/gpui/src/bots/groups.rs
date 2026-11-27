@@ -72,6 +72,19 @@ struct Row {
     result: Option<Value>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchPage {
+    events: Vec<Row>,
+    #[serde(default)]
+    has_more: bool,
+}
+
+struct Search {
+    query: String,
+    page: SearchPage,
+}
+
 struct Draft {
     operation: String,
     old: Option<Group>,
@@ -98,7 +111,7 @@ pub(super) struct GroupsState {
     fields: Option<Fields>,
     draft: Option<Draft>,
     note: Option<(u64, Entity<TextareaState>)>,
-    found: Option<Vec<Row>>,
+    found: Option<Search>,
     reply: Option<(u64, String)>,
     pending_post: Option<(String, String, String)>,
     unsent: std::collections::HashMap<String, String>,
@@ -404,7 +417,13 @@ impl Threadbear {
         }), window, cx);
     }
 
-    fn query_group(&mut self, method: &'static str, number: Option<u64>, cx: &mut Context<Self>) {
+    fn query_group(
+        &mut self,
+        method: &'static str,
+        number: Option<u64>,
+        before: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
         if self.bots.busy {
             return;
         }
@@ -413,16 +432,28 @@ impl Threadbear {
             return;
         };
         let mut params = json!({ "groupId": id });
+        let mut search = None;
         if let Some(seq) = number {
             params["seq"] = json!(seq);
         } else if let Some(fields) = &groups.fields {
-            let query = fields.search.read(cx).value().trim().to_owned();
+            let query = if before.is_some() {
+                let Some(found) = &groups.found else {
+                    return;
+                };
+                found.query.clone()
+            } else {
+                fields.search.read(cx).value().trim().to_owned()
+            };
             if query.is_empty() {
                 self.bots.groups.found = None;
                 cx.notify();
                 return;
             }
             params["query"] = json!(query);
+            if let Some(before) = before {
+                params["before"] = json!(before);
+            }
+            search = Some(query);
         }
         self.bots.busy = true;
         self.bots.error = None;
@@ -439,9 +470,25 @@ impl Threadbear {
                                 if let Some(text) = value["text"].as_str() {
                                     this.bots.groups.reply = Some((seq, text.to_owned()));
                                 }
-                            } else {
-                                this.bots.groups.found =
-                                    serde_json::from_value(value["events"].clone()).ok();
+                            } else if let Some(query) = search {
+                                match serde_json::from_value::<SearchPage>(value) {
+                                    Ok(next) => {
+                                        if let Some(found) = this
+                                            .bots
+                                            .groups
+                                            .found
+                                            .as_mut()
+                                            .filter(|_| before.is_some())
+                                        {
+                                            found.page.events.extend(next.events);
+                                            found.page.has_more = next.has_more;
+                                        } else {
+                                            this.bots.groups.found =
+                                                Some(Search { query, page: next });
+                                        }
+                                    }
+                                    Err(error) => this.bots.error = Some(error.to_string()),
+                                }
                             }
                         }
                         Err(error) => this.bots.error = Some(error.message),
@@ -854,6 +901,13 @@ impl Threadbear {
             );
         }
         if let Some(fields) = &self.bots.groups.fields {
+            let before = self
+                .bots
+                .groups
+                .found
+                .as_ref()
+                .filter(|found| found.page.has_more)
+                .and_then(|found| found.page.events.last().map(|row| row.seq));
             if group.archived_at.is_none() {
                 page = page
                     .child(
@@ -876,12 +930,28 @@ impl Threadbear {
             page = page.child(
                 h_flex()
                     .gap(px(6.))
-                    .child(Textarea::new(&fields.search))
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .id("group-search-field")
+                            .test_support()
+                            .aria_label("Search Group history")
+                            .a11y_role(gpui_kit::Role::GenericContainer)
+                            .tip("Search Group history")
+                            .child(Textarea::new(&fields.search)),
+                    )
                     .child(
                         bot_button("group-find", "Search history", busy).on_click(cx.listener(
-                            |this, _, _, cx| this.query_group("bots.groups.find", None, cx),
+                            |this, _, _, cx| this.query_group("bots.groups.find", None, None, cx),
                         )),
-                    ),
+                    )
+                    .children(before.map(|before| {
+                        bot_button("group-find-more", tr!("Older results"), busy).on_click(
+                            cx.listener(move |this, _, _, cx| {
+                                this.query_group("bots.groups.find", None, Some(before), cx)
+                            }),
+                        )
+                    })),
             );
         }
         page.child(self.render_group_rows(detail, cx))
@@ -892,7 +962,8 @@ impl Threadbear {
         let group = &detail.group;
         let busy = self.bots.busy;
         let mut page = v_flex().gap(px(10.));
-        let rows = self.bots.groups.found.as_ref().unwrap_or(&detail.events);
+        let search = self.bots.groups.found.as_ref();
+        let rows = search.map_or(&detail.events, |found| &found.page.events);
         for row in rows {
             if let Some(text) = &row.text {
                 let author = row
@@ -909,6 +980,7 @@ impl Threadbear {
                     .reply
                     .as_ref()
                     .filter(|(opened, _)| *opened == seq);
+                let shown = expanded.map_or(text, |(_, full)| full);
                 let note: String = text.chars().take(250).collect();
                 let reply = row.result.is_some();
                 page = page.child(
@@ -928,7 +1000,7 @@ impl Threadbear {
                                 )
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {
-                                        this.query_group("bots.groups.result", Some(seq), cx)
+                                        this.query_group("bots.groups.result", Some(seq), None, cx)
                                     },
                                 )),
                             )
@@ -947,7 +1019,14 @@ impl Threadbear {
                                 )),
                             )
                         })
-                        .child(expanded.map_or_else(|| text.clone(), |(_, full)| full.clone())),
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("group-event-{seq}")))
+                                .test_support()
+                                .a11y_role(gpui_kit::Role::GenericContainer)
+                                .aria_label(shown.clone())
+                                .child(shown.clone()),
+                        ),
                 );
             }
         }

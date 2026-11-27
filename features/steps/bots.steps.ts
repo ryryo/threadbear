@@ -306,6 +306,51 @@ When('I create a Group called {string} with {string}', async function (this: Gro
   await click(this, 'Save group');
 });
 
+When('I save {int} Group history posts matching {string}', async function (this: GroupWorld, count: number, keyword: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { groups } = await client.call<{ groups: { id: string }[] }>('bots.groups.list', {});
+    assert.equal(groups.length, 1);
+    const groupId = groups[0].id;
+    await client.call('bots.groups.stop', { groupId });
+    for (let i = 0; i < count; i += 1) {
+      await client.call('bots.groups.post', { groupId, text: `${keyword} item ${i}`, operationId: `history-${i}` });
+    }
+  });
+});
+
+When('I search Group history for {string}', async function (this: GroupWorld, keyword: string) {
+  await click(this, 'Search Group history');
+  await this.app.do({ cmd: 'type', here: true, text: keyword });
+  await click(this, 'Search history');
+});
+
+Then('the Group history offers older results', async function (this: GroupWorld) {
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string; disabled?: boolean }[];
+    if (labels.some(row => row.label === 'Older results' && !row.disabled)) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail('The Group search did not offer an older page.');
+});
+
+When('I open the older Group search results', async function (this: GroupWorld) {
+  await click(this, 'Older results');
+});
+
+Then('the Group search shows {string}', async function (this: GroupWorld, line: string) {
+  // The older row is below the first twenty, so scroll the Group pane there.
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+    if (labels.some(row => row.label === line)) return;
+    await this.app.do({ cmd: 'point', x: 620, y: 665, scrollY: -500 });
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail(`The Group search did not show "${line}".`);
+});
+
 When('I post {string} to the Group', async function (this: GroupWorld, body: string) {
   assert.ok(this.app instanceof GpuiDriver);
   await click(this, 'Group message');
