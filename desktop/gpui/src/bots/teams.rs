@@ -329,7 +329,7 @@ impl Threadbear {
             let line = format!(
                 "{title}{} · {}",
                 who.map_or_else(String::new, |name| format!(" for {name}")),
-                &event.at
+                event.at
             );
             history = history.child(div().text_color(style::secondary_text(cx)).child(line));
             if let Some(reason) = &event.reason {
