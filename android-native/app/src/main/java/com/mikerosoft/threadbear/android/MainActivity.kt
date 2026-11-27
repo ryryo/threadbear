@@ -152,15 +152,34 @@ private fun Root(model: AppModel, openThread: MutableStateFlow<String?>) {
     }
 
     pending?.let { request ->
+        val replacesHost = request.replacesHost
+        val connection = when {
+            replacesHost != null -> stringResource(R.string.pair_moves_phone, replacesHost, request.host)
+            request.samePairedServer -> stringResource(R.string.pair_renews_token, request.host)
+            else -> stringResource(R.string.pair_connects_phone, request.host)
+        }
+        val added = request.addedKeys
+        val changed = request.changedKeys
+        val keys = when {
+            added == 0 && changed == 0 -> stringResource(R.string.pair_keys_unchanged)
+            changed == 0 -> stringResource(R.string.pair_adds_keys, pairingMacCount(added))
+            added == 0 -> stringResource(R.string.pair_changes_keys, pairingMacCount(changed))
+            else -> stringResource(R.string.pair_adds_and_changes_keys, pairingMacCount(added), pairingMacCount(changed))
+        }
+        val warning = stringResource(R.string.pair_security_warning)
         AlertDialog(
             onDismissRequest = { model.cancelPair() },
-            title = { Text(breakable(request.title, request.host), style = MaterialTheme.typography.titleLarge) },
-            text = { Text(breakable(request.message, request.host)) },
+            title = { Text(breakable(stringResource(R.string.pair_with_host, request.host), request.host), style = MaterialTheme.typography.titleLarge) },
+            text = { Text(breakable("$connection $keys $warning", request.host)) },
             confirmButton = { TextButton(onClick = { model.acceptPair(request) }) { Text(stringResource(R.string.pair)) } },
             dismissButton = { TextButton(onClick = { model.cancelPair() }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
+
+@Composable
+private fun pairingMacCount(count: Int): String =
+    stringResource(if (count == 1) R.string.pair_mac_count_one else R.string.pair_mac_count_many, count)
 
 /**
  * A Convex host is longer than a dialog line, and Android broke it

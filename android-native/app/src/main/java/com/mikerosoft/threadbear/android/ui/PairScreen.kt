@@ -52,7 +52,7 @@ fun PairScreen() {
     val busy by model.pairingBusy.collectAsStateWithLifecycle()
     // Each store's own scanner (QrScanner.kt in src/github, src/fdroid).
     val scan = rememberQrScanner(failed = { model.note(it) }) {
-        if (!model.ask(it, PairingSource.SCANNED)) model.note("That code isn't a Threadbear pairing code.")
+        if (!model.ask(it, PairingSource.SCANNED)) model.note(context.getString(R.string.pair_code_invalid))
     }
 
     Scaffold(snackbarHost = { SnackbarHost(LocalSnackbar.current) }) { inner ->
@@ -90,7 +90,7 @@ fun PairScreen() {
                     OutlinedButton(
                         onClick = {
                             val text = clipboardText(context)
-                            if (text == null || !model.ask(text, PairingSource.PASTED)) model.note("There's no pairing code on the clipboard.")
+                            if (text == null || !model.ask(text, PairingSource.PASTED)) model.note(context.getString(R.string.pair_clipboard_empty))
                         },
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                     ) {

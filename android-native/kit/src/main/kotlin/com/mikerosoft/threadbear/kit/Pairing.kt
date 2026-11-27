@@ -228,26 +228,6 @@ data class PairingRequest(
     val changedKeys: Int,
 ) {
     val host get() = pairing.serverName
-    val title get() = "Pair with $host?"
-
-    val message: String
-        get() {
-            val lines = mutableListOf<String>()
-            lines += when {
-                replacesHost != null -> "This link moves the phone from $replacesHost to $host, with a new token."
-                samePairedServer -> "This link gives the phone a new token for $host."
-                else -> "This link pairs the phone with the server at $host."
-            }
-            lines += when {
-                addedKeys == 0 && changedKeys == 0 -> "The Macs the phone can send secrets to stay the same."
-                changedKeys == 0 -> "It adds ${macs(addedKeys)} the phone can send secrets to."
-                addedKeys == 0 -> "It changes the key of ${macs(changedKeys)} the phone sends secrets to."
-                else -> "It adds ${macs(addedKeys)} and changes the key of ${macs(changedKeys)} the phone sends secrets to."
-            }
-            lines += "Only say yes if you just scanned the code on your own Mac."
-            return lines.joinToString(" ")
-        }
-
     companion object {
         /** Null for anything that isn't a pairing, and for any opened from outside ([PairingSource.OPENED]). */
         fun of(link: String, source: PairingSource, allowLocal: Boolean, current: Pairing?, keptKey: (String) -> String?): PairingRequest? {
@@ -272,6 +252,5 @@ data class PairingRequest(
             )
         }
 
-        private fun macs(n: Int) = if (n == 1) "1 Mac" else "$n Macs"
     }
 }

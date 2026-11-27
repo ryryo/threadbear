@@ -71,10 +71,11 @@ fun ShareThreadSheet(thread: PhoneThread, close: () -> Unit) {
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
 
+    val shareLabel = stringResource(R.string.share_with_a_link)
     ModalBottomSheet(onDismissRequest = close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = colors.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.share_with_a_link), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(shareLabel, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 if (view.switching) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.onSurfaceVariant)
                     Spacer(Modifier.width(12.dp))
@@ -83,7 +84,7 @@ fun ShareThreadSheet(thread: PhoneThread, close: () -> Unit) {
                     checked = view.on,
                     onCheckedChange = { model.share(thread.threadId, view.toggle) },
                     enabled = !view.locked,
-                    modifier = Modifier.semantics { contentDescription = "Share with a link" },
+                    modifier = Modifier.semantics { contentDescription = shareLabel },
                 )
             }
             Text(view.says, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
