@@ -1,6 +1,6 @@
 import Foundation
 
-public let botWorkspaceAPIVersion = 106
+public let botWorkspaceAPIVersion = 108
 
 public struct PhoneBotProfile: Codable, Sendable, Identifiable, Equatable {
     public let id: String

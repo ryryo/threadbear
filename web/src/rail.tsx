@@ -29,7 +29,7 @@ export function Rail({ token, route }: { token: string; route: Route }) {
   const wakes = useLiveQuery(api.phone.wakes, { token });
   const runners = useLiveQuery(api.phone.runners, { token });
   const apiVersion = useLiveQuery(api.phone.me, { token })?.apiVersion ?? 0;
-  const botsAvailable = useLiveQuery(api.phone.botWorkspaceAvailable, apiVersion >= 106 ? { token } : 'skip');
+  const botsAvailable = useLiveQuery(api.phone.botWorkspaceAvailable, apiVersion >= 108 ? { token } : 'skip');
   const now = Date.now();
   if (route.page === 'thread') lastThread = route.threadId;
   const waiting = build(inbox ?? [], now, wakesOf(wakes ?? []), 'needsYou').inbox.length;

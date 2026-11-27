@@ -315,7 +315,7 @@ or a conflict: ID, name, role, instructions and revision. Local settings
 such as model bindings and work folders stay on the owning Runner. Editing in a
 connected browser or app keeps the draft until the owner settles it.
 
-Backend API 106 and Bot storage format 8 add device editing. A Bot Thread
+Backend API 108 and Bot storage format 8 add device editing. A Bot Thread
 row sent to that backend carries `botLink` with its existing Bot,
 conversation, and optional task and Group IDs. Older backends receive
 the usual Thread row. Private Bot threads and their links stay local.

@@ -403,7 +403,7 @@ phone names must be one that has heartbeated (or `"any"`), else
   stay.
 - `phone:registerDevice({ token, apnsToken, environment: "sandbox" |
   "production", pushKey?, platform?, locale? })`. `apnsToken` is the device token in hex.
-  `locale` (API 104) selects the language for standard notification text.
+  `locale` (API 106) selects the language for standard notification text.
   The backend uses Japanese for Japanese language tags and English for
   other tags. If the field is absent, a previously saved choice stays in use.
   `platform: "android"` (API 66) says it is instead the phone's Firebase token

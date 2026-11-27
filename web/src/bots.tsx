@@ -274,7 +274,7 @@ function TaskView({ token, workspace, task }: { token: string; workspace: Worksp
 
 export default function BotsPage({ token }: { token: string }) {
   const me = useLiveQuery(api.phone.me, { token });
-  const capable = (me?.apiVersion ?? 0) >= 106;
+  const capable = (me?.apiVersion ?? 0) >= 108;
   const workspaces = useLiveQuery(api.phone.botWorkspaces, capable ? { token } : 'skip');
   return <main className="bot-device-page">
     <a href="/" onClick={e => { e.preventDefault(); go('/'); }}><T>Threads</T></a>
