@@ -301,7 +301,7 @@ test('a supervised handover keeps a running Bot request and the new primary read
   const fake = installBotFixtureCli(home, gate);
   const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_RESTART_MS: '50', THREADBEAR_LOG_STDERR: '1' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       const { bot: editor } = await c.call('bots.create', { name: '編集者' });
       const { bot: writer } = await c.call('bots.create', { name: 'ライター' });
@@ -314,7 +314,7 @@ test('a supervised handover keeps a running Bot request and the new primary read
       assert.ok(fs.existsSync(gate + '.waiting'), 'the fixture CLI received the request and is still waiting to reply');
       const restart = await c.call('runner.restart', { when: 'idle', reason: 'Isolated Bot handover verification' });
       assert.ok(restart.handover?.keeps.includes(target.threadId));
-      const { c: primary } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      const { c: primary } = await connect(home, await nthListening(run.out, 2));
       try {
         const status = await primary.call('runner.status');
         assert.ok(status.draining?.some((peer: { threads: string[] }) => peer.threads.includes(target.threadId)), 'the new primary should see the old process keeping the receiving thread');
@@ -363,7 +363,7 @@ test('a kept Bot uses its original tools to save a note and send a new request t
   const fake = installBotFixtureCli(home, gate, { trigger, calls: [note, note, request, request] });
   const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_PORT: String(port), THREADBEAR_LOG_STDERR: '1' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       const { bot: editor } = await c.call('bots.create', { name: 'Editor' });
       const { bot: writer } = await c.call('bots.create', { name: 'Writer' });
@@ -375,7 +375,7 @@ test('a kept Bot uses its original tools to save a note and send a new request t
       assert.ok(fs.existsSync(gate + '.waiting'), 'the kept CLI should hold its original tool bindings');
       const restart = await c.call('runner.restart', { when: 'idle', reason: 'Isolated Bot tools handover' });
       assert.ok(restart.handover?.keeps.includes(source.threadId));
-      const { c: primary } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      const { c: primary } = await connect(home, await nthListening(run.out, 2));
       try {
         const status = await primary.call('runner.status');
         assert.ok(status.draining?.some((peer: { threads: string[] }) => peer.threads.includes(source.threadId)));
