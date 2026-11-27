@@ -38,8 +38,12 @@ mkdir -p "$dir"
 archive="$dir/$file"
 if [[ ! -f "$archive" ]]; then
   # Spotify's CDN, as the app downloads it (web_runtime.rs, Archive::url).
-  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$archive.part" "https://cef-builds.spotifycdn.com/${file//+/%2B}"
-  mv "$archive.part" "$archive"
+  part="$(mktemp "$archive.part.XXXXXX")"
+  trap 'rm -f "$part"' EXIT
+  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$part" "https://cef-builds.spotifycdn.com/${file//+/%2B}"
+  got="$(shasum -a 256 "$part" | awk '{ print $1 }')"
+  [ "$got" = "$sha256" ] || { echo "The downloaded archive did not match its pinned SHA-256." >&2; exit 1; }
+  mv "$part" "$archive"
 fi
 got="$(shasum -a 256 "$archive" | awk '{ print $1 }')"
 if [[ "$got" != "$sha256" ]]; then

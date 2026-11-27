@@ -1,5 +1,5 @@
-// CEF's sandbox is off (Mike's choice, docs/gpui-port.md). Notice a stale
-// pin even when nobody remembers to check. This never installs a runtime.
+// Notice when the CEF pin behind the Mac app's web runtime is stale.
+// This never installs a runtime.
 import path from 'node:path';
 import fs from 'node:fs';
 import type { Clock, TimerHandle } from '../clock.ts';
@@ -17,7 +17,8 @@ type Checked = { latest: string; behindSince?: number };
 type Saved = Partial<Checked> & { pin: string; bindings?: string; checkedAt?: number; attemptedAt?: number; failingSince?: number };
 type Deps = { home: string; clock: Clock; platform: string; changed(): void; fetchIndex?: () => Promise<unknown>; fetchBindings?: () => Promise<string>; installed?: () => boolean };
 
-export function runtimeInstalled(root: string): boolean {
+export function runtimeInstalled(root: string, appBundle?: string): boolean {
+  if (appBundle && fs.existsSync(path.join(appBundle, 'Contents', 'Frameworks', 'Chromium Embedded Framework.framework', 'Chromium Embedded Framework'))) return true;
   try {
     return fs.readdirSync(root, { withFileTypes: true }).some((e) => e.isDirectory() && fs.existsSync(path.join(root, e.name, 'installed.json')));
   } catch { return false; }

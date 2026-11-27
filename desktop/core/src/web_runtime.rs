@@ -111,9 +111,8 @@ pub struct Pin {
     pub top: String,
 }
 
-/// Where the runtime lives: the app's own data folder, never inside the app
-/// (an app bundle that changes after it's signed stops being the one that was
-/// signed, and a 330 MB app would be the bundled choice Mike turned down).
+/// The runtime's writable data (profile and log), outside the app bundle.
+/// Unbundled developer binaries also keep their downloaded framework here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub root: PathBuf,
@@ -122,12 +121,10 @@ pub struct Layout {
 /// The framework's folder, inside the archive's `Release` and once unpacked.
 pub const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
 /// The bundle the runtime is laid out in, as an app bundle would hold it:
-/// Contents/Frameworks with the framework and the helpers. Chromium is told
-/// it's the main bundle. Its sandbox lets a helper read only inside that
-/// bundle, so the framework has to be in it (a framework beside the helpers
-/// and nothing round them was refused: "file system sandbox blocked
-/// open()"), and a helper works out which process started it from the
-/// bundle it's in. Not an `.app`, so nothing offers to open it.
+/// Contents/Frameworks with the framework and the helpers. Unbundled builds
+/// tell Chromium to use it as the main bundle so it can find its resources.
+/// The sandbox requires the real enclosing app bundle (see make-bundle.sh).
+/// Not an `.app`, so nothing offers to open it.
 pub const RUNTIME_BUNDLE: &str = "Threadbear Web.bundle";
 /// The helper processes' name: CEF starts "<name>.app", "<name> (GPU).app",
 /// and so on, from beside the framework.
@@ -479,24 +476,7 @@ fn install_checked(
     layout: &Layout,
     between: impl FnOnce(),
 ) -> Result<(), InstallError> {
-    // One handle, hashed and then unpacked from its start again: opened a
-    // second time by name, a file swapped in between would be unpacked
-    // under the pinned hash's name (Codex review, 11 Nov).
-    let mut file = std::fs::File::open(archive)
-        .map_err(|e| failed(format!("couldn't open the download: {e}")))?;
-    let (len, sha1, sha256) =
-        file_hashes(&mut file).map_err(|e| failed(format!("couldn't read the download: {e}")))?;
-    if len != pin.bytes
-        || sha1 != pin.sha1.to_ascii_lowercase()
-        || sha256 != pin.sha256.to_ascii_lowercase()
-    {
-        return Err(failed(
-            "the archive didn't match the pinned build's hash, so it wasn't unpacked",
-        ));
-    }
-    between();
-    file.seek(SeekFrom::Start(0))
-        .map_err(|e| failed(format!("couldn't read the download: {e}")))?;
+    let file = checked_archive(archive, pin, between)?;
     let partial = layout.partial_dir();
     if partial.exists() {
         std::fs::remove_dir_all(&partial).map_err(|e| disk("couldn't clear an earlier try", e))?;
@@ -519,6 +499,43 @@ fn install_checked(
     std::fs::rename(&partial, &dir).map_err(|e| disk("couldn't put the runtime in place", e))?;
     remove_other_builds(layout);
     Ok(())
+}
+
+fn checked_archive(
+    archive: &Path,
+    pin: &Pin,
+    between: impl FnOnce(),
+) -> Result<std::fs::File, InstallError> {
+    // One handle, hashed and then unpacked from its start again: opened a
+    // second time by name, a file swapped in between would be unpacked
+    // under the pinned hash's name (Codex review, 11 Nov).
+    let mut file = std::fs::File::open(archive)
+        .map_err(|e| failed(format!("couldn't open the download: {e}")))?;
+    let (len, sha1, sha256) =
+        file_hashes(&mut file).map_err(|e| failed(format!("couldn't read the download: {e}")))?;
+    if len != pin.bytes
+        || sha1 != pin.sha1.to_ascii_lowercase()
+        || sha256 != pin.sha256.to_ascii_lowercase()
+    {
+        return Err(failed(
+            "the archive didn't match the pinned build's hash, so it wasn't unpacked",
+        ));
+    }
+    between();
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| failed(format!("couldn't read the download: {e}")))?;
+    Ok(file)
+}
+
+/// Put the pinned framework in a fresh Mac application. The application
+/// bundle is signed by make-bundle.sh after all its code is in place.
+pub fn unpack_for_application(
+    archive: &Path,
+    pin: &Pin,
+    bundle: &Path,
+) -> Result<(), InstallError> {
+    let file = checked_archive(archive, pin, || {})?;
+    unpack_framework(file, pin, &bundle.join("Contents/Frameworks"))
 }
 
 /// Older builds' folders, and anything half-made. The profile, the log and
@@ -673,9 +690,30 @@ pub fn make_helpers(layout: &Layout, binary: &Path, bundle_id: &str) -> Result<P
         runtime_bundle_plist(&bundle_id),
     )
     .map_err(|e| format!("couldn't write the runtime's Info.plist: {e}"))?;
+    write_helpers(&dir, &bytes, &bundle_id)?;
+    std::fs::write(&stamp, &stamped).map_err(|e| format!("couldn't finish the helpers: {e}"))?;
+    Ok(layout.helper_executable())
+}
+
+/// Build the same helper bundles inside the application before signing it.
+pub fn make_application_helpers(
+    bundle: &Path,
+    binary: &Path,
+    bundle_id: &str,
+) -> Result<(), String> {
+    let bytes = std::fs::read(binary)
+        .map_err(|e| format!("couldn't read the web helper ({}): {e}", binary.display()))?;
+    write_helpers(&bundle.join("Contents/Frameworks"), &bytes, bundle_id)
+}
+
+pub fn application_helper(bundle: &Path) -> PathBuf {
+    helper_executable_in(&bundle.join("Contents/Frameworks"), "")
+}
+
+fn write_helpers(dir: &Path, bytes: &[u8], bundle_id: &str) -> Result<(), String> {
     for (suffix, id_end) in HELPER_KINDS {
         let name = format!("{HELPER_NAME}{suffix}");
-        let exe = helper_executable_in(&dir, suffix);
+        let exe = helper_executable_in(dir, suffix);
         let contents = exe
             .parent()
             .and_then(Path::parent)
@@ -686,7 +724,7 @@ pub fn make_helpers(layout: &Layout, binary: &Path, bundle_id: &str) -> Result<P
         // Written beside and renamed over, so a helper another copy of the
         // app is running from keeps its old file until it's done.
         let fresh = exe.with_extension("new");
-        std::fs::write(&fresh, &bytes).map_err(|e| format!("couldn't write {name}: {e}"))?;
+        std::fs::write(&fresh, bytes).map_err(|e| format!("couldn't write {name}: {e}"))?;
         set_mode(&fresh, 0o755);
         std::fs::rename(&fresh, &exe).map_err(|e| format!("couldn't write {name}: {e}"))?;
         std::fs::write(
@@ -695,8 +733,7 @@ pub fn make_helpers(layout: &Layout, binary: &Path, bundle_id: &str) -> Result<P
         )
         .map_err(|e| format!("couldn't write {name}'s Info.plist: {e}"))?;
     }
-    std::fs::write(&stamp, &stamped).map_err(|e| format!("couldn't finish the helpers: {e}"))?;
-    Ok(layout.helper_executable())
+    Ok(())
 }
 
 fn xml(text: &str) -> String {

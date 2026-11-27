@@ -1,9 +1,7 @@
-// The web runtime for the GPUI app (docs/gpui-port.md, "Choice 1: the web
-// view"): CEF's official Chromium build, fetched the first time something
-// needs it (download.rs, checked by threadbear_core::web_runtime), started
-// from the data folder in the app's own process (mac/host.rs), and the pages
-// it shows, all sealed the way the Swift app seals its web views (mac/sealed.rs).
-//
+// The web runtime for the GPUI app: CEF's official Chromium build and the
+// pages it shows. The signed Mac app bundles CEF for sandboxed subprocesses.
+// Unbundled developer builds can fetch a runtime (download.rs). Sealed
+// pages keep the restrictions in mac/sealed.rs with both layouts.//
 // Nothing here draws GPUI; desktop/gpui shows the state and hosts the pages.
 // On Windows and Linux there's no runtime yet, so everything says so and the
 // app shows source and offers the browser, as it does before an install.
@@ -90,6 +88,7 @@ mod elsewhere {
         pub helper: PathBuf,
         pub profile: PathBuf,
         pub log_file: PathBuf,
+        pub sandboxed: bool,
     }
 
     pub fn status() -> Status {

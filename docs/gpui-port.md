@@ -513,7 +513,7 @@ option, published the same way with a signature checked before it's unpacked.
 
 ## Choice 1: the web view
 
-Decided: **A, CEF downloaded on first use.**
+The first version used **A**. The installed Mac app now uses **B** so Chromium can run sandboxed. Unbundled developer builds still use **A**.
 
 Threadbear shows web pages in patch panels, the Convex dashboard, sealed HTML
 and mermaid blocks and the options window. Whichever we pick, GPUI's own
@@ -592,18 +592,13 @@ specs; Rust builds stay on check hosts. Update this checked-date note.
   itself, from the bindings' own declarations, with a check the compiler
   makes that each one matches (`desktop/web/scripts/gen-loader.mjs`). The
   app builds as before, with no extra tools.
-- **Chromium's sandbox stays off, Mike's decision (13 Nov).** Downloading
-  CEF on first use keeps the app small. On a Mac the sandbox lets a helper
-  read only inside the bundle macOS started the app from; helpers couldn't
-  read the framework in the data folder. Enabling it would require the
-  framework inside the app bundle, option B. Ghostex also sets `no_sandbox:
-  1` on every platform (`apps/desktop/src/cef/shell/lifecycle.rs` in
-  [Ghostex](https://github.com/maddada/Ghostex)); its Linux build deliberately
-  omits chrome-sandbox. A page that exploits a Chromium bug can run code as
-  the user, so keeping the runtime current matters. Sealed pages still
-  forbid agent scripts, network and navigation, and panels start from the
-  sites a trusted patch or Convex names. These rules don't contain a
-  Chromium exploit.
+- **The installed Mac app runs Chromium's subprocess sandbox.** macOS
+  permits Chromium helpers to read the framework from the enclosing app
+  bundle. `make-bundle.sh` therefore stages the same pinned archive and
+  helper executable in `Contents/Frameworks` before signing. The installed
+  app does not fall back to the unbundled runtime. Unbundled developer
+  builds use the old external layout. Sealed pages keep their script,
+  network and navigation restrictions in both builds.
 - **Pages beside a thread.** A web panel's page is a native view over its
   panel's layout slot (`desktop/gpui/src/web_panels.rs`). The side pane is
   a cached view, redrawn only when it changes, so a page panel is drawn by

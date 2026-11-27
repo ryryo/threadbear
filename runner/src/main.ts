@@ -1473,7 +1473,7 @@ async function main(): Promise<void> {
     lastUpdates = key;
     runner.publish({ method: 'runner.updates', params: { updates } });
   }
-  const webRuntimeUpdates = new WebRuntimeUpdates({ home: cfg.home, clock: realClock, platform: process.arch === 'arm64' ? 'macosarm64' : 'macosx64', installed: () => runtimeInstalled(path.join(cfg.home, 'web-runtime')), changed: publishUpdates });
+  const webRuntimeUpdates = new WebRuntimeUpdates({ home: cfg.home, clock: realClock, platform: process.arch === 'arm64' ? 'macosarm64' : 'macosx64', installed: () => runtimeInstalled(path.join(cfg.home, 'web-runtime'), path.join(os.homedir(), 'Applications', 'Threadbear GPUI.app')), changed: publishUpdates });
   updaterReady = true;
 
   runner.attachClis(updates);

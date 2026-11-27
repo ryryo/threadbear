@@ -55,3 +55,14 @@ The first implementation used a screenshot for selection and queried the live DO
 - Port the compact editor placement from T3 Code's pinned `PickPreload.ts` (`getAnnotationBounds`, `positionCompactEditor`, `clampEditorPosition`). Show the app's comment field after a valid element or region is selected. Use the clipped target bounds and try right, left, below and above in that order, ranking by overflow, then clamp to the viewport. Reposition when the target moves or the viewport changes.
 - Keep the input in GPUI and reuse its focus, cancellation, image review and draft flow. Keep selection mode and cancel controls reachable before a target exists. Use a native Browser-view cutout for the compact editor so the page keeps its original size and never hosts the field, while clicks on the card go to the app. Keep the selection and crop paths independent of editor placement.
 - Test that selection does not resize or shift the page, that the editor stays near the target after scrolling and resizing, and that AppKit typing goes into the app's comment. Keep the existing image preview and draft regression coverage.
+
+### Sandbox on the locally installed Mac app
+
+- Build the pinned CEF framework and helper apps into the signed Mac app.
+  Reuse the archive verification, extraction and helper plist code. Keep
+  the existing profile directory, and fail startup if the app's runtime is
+  missing. The installed app never falls back to unbundled CEF.
+- In the packaged app, verify a real renderer is denied read access to a
+  harmless file outside the app that the browser process may read. Verify
+  the page still renders, element selection works, and attaching a comment
+  and crop leaves them in the originating draft.

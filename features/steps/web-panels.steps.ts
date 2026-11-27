@@ -3,6 +3,7 @@
 // opening outside it, the bar's Back, Reload and Open in browser, and the
 // Convex dashboard given its deploy key.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import type { ThreadbearWorld } from '../support/world.ts';
 import { okValue, sleep, type Dump } from '../support/driver.ts';
 import { pane } from '../support/pane.ts';
 import { sites } from '../support/web-runtime.ts';
+import { GpuiDriver } from '../support/gpui.ts';
 
 type PageInfo = { key: string; url?: string; title?: string; address?: string; loading?: boolean; loads?: number; canGoBack?: boolean; hidden?: boolean; muted?: boolean; placedThisFrame?: boolean; slot?: [number, number, number, number]; frame?: [number, number, number, number]; picture?: [number, number] | null };
 type ConvexInfo = { project?: string | null; label?: string; deployment?: string; choices?: string[]; note?: string | null; failure?: string | null; code?: string | null; signInFailure?: string | null };
@@ -50,6 +52,34 @@ Then('the Browser panel shows the page {string}', async function (this: Threadbe
       && page?.title === title && page.loading === false && page.hidden === false
       && page.placedThisFrame === true;
   }, LOADED_MS);
+});
+
+Then('Chromium renderers cannot read a file outside the app', function (this: ThreadbearWorld) {
+  assert.ok(this.app instanceof GpuiDriver && this.app.pid, 'the test app has no PID');
+  const app = this.app.pid;
+  const processes = execFileSync('/bin/ps', ['-ww', '-axo', 'pid=,ppid=,command='], { encoding: 'utf8' });
+  const renderers = processes.split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\d+)\s+.*\s--type=renderer(?:\s|$)/.exec(line);
+    return match && Number(match[2]) === app ? [match[1]] : [];
+  });
+  assert.ok(renderers.length, 'Chromium started no renderer child');
+  const folder = fs.mkdtempSync(path.join(fs.realpathSync(os.homedir()), '.tb-sandbox-probe-'));
+  try {
+    const probe = path.join(folder, 'outside-the-app.txt');
+    fs.writeFileSync(probe, 'sandbox test');
+    execFileSync('/usr/bin/python3', ['-I', '-c', `
+import ctypes, os, sys
+check = ctypes.CDLL('/usr/lib/libsandbox.1.dylib', use_errno=True).sandbox_check
+check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+for pid in sys.argv[2:]:
+    result = check(int(pid), b'file-read-data', 1, ctypes.c_char_p(os.fsencode(sys.argv[1])))
+    expected = 0 if pid == sys.argv[2] else 1
+    if result != expected:
+        raise SystemExit(f'PID {pid}: expected sandbox_check={expected}, got {result}, errno={ctypes.get_errno()}')
+`, probe, String(app), ...renderers]);
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
 });
 
 Then('the page server was opened outside the app', async function (this: ThreadbearWorld) {

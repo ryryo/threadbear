@@ -15,6 +15,21 @@ Feature: Web pages in a thread's panels
   Background:
     Given the app is connected to a runner with the demo threads
 
+  @panel.web @web-runtime @web-sandbox @swift-pending
+  Scenario: A packaged Mac app isolates the renderer and still accepts page comments
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    And Chromium renderers cannot read a file outside the app
+    When I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "Keep the renderer isolated"
+    And I review the selected page area
+    And I press the browser control "Attach to this thread's draft"
+    Then my draft includes the page comment text "Keep the renderer isolated"
+    And my draft contains a page comment about "Element: <a>" with a picture
+
   @panel.web @web-runtime @swift-pending
   Scenario: Open in Panel on a reply link loads the page beside the thread
     Given the web runtime is installed

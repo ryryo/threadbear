@@ -1,16 +1,15 @@
 // The processes Chromium starts besides the app's own (renderers, the GPU
 // process and so on): this, as the threadbear-web-helper binary, copied into
-// the five "Threadbear Helper*.app" bundles beside the framework in the data
-// folder (threadbear_core::web_runtime::make_helpers). As CEF's own
+// the five "Threadbear Helper*.app" bundles beside the framework. As CEF's own
 // process_helper_mac.cc: the sandbox if Chromium asks for one, then the
 // framework, relative to the helper, then CEF takes over.
 use cef::{args::Args, library_loader::LibraryLoader, sandbox::Sandbox, *};
 
 pub fn run() -> i32 {
     let args = Args::new();
-    // The browser runs without Chromium's sandbox for now (host.rs says why)
-    // and says so with --no-sandbox; set up otherwise, it has to come before
-    // the framework loads. Both are found from this binary:
+    // The unbundled development browser passes --no-sandbox. In the Mac
+    // application, initialize the sandbox before the framework loads. Both
+    // libraries are found from this binary:
     // ../../../Chromium Embedded Framework.framework.
     let sandboxed = !std::env::args().any(|a| a == "--no-sandbox");
     let sandbox = sandboxed.then(|| {

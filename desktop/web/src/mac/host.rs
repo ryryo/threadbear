@@ -250,6 +250,7 @@ pub struct Launch {
     pub helper: PathBuf,
     pub profile: PathBuf,
     pub log_file: PathBuf,
+    pub sandboxed: bool,
 }
 
 /// The app's bundle id, for the helpers', or None outside a bundle (a cargo
@@ -326,20 +327,10 @@ pub fn start(launch: Launch) -> Result<(), String> {
     }
     let (profile, log_file) = (launch.profile.clone(), launch.log_file.clone());
     let settings = Settings {
-        // Chromium's own sandbox is off. On a Mac it lets a helper read only
-        // inside the app bundle macOS started (the browser's real main
-        // bundle; CEF's main_bundle_path below doesn't change that), and the
-        // runtime lives in the data folder, so every sandboxed helper was
-        // refused the framework ("file system sandbox blocked open()") and
-        // Chromium gave up. The sealed pages keep their own rules
-        // (sealed.rs), an agent's html runs no script at all, and the panels
-        // show the sites a patch or Convex names. Turning it on means the
-        // framework inside the app (the bundled choice), which is Mike's
-        // call (docs/gpui-port.md, "Choice 1").
-        no_sandbox: 1,
-        // Chromium's "main bundle" is the runtime's (RUNTIME_BUNDLE in
-        // web_runtime.rs says why), not the app's: its helpers and the
-        // framework are in it, and the sandbox lets them read only that.
+        // A signed Mac application carries the framework inside its own
+        // outer bundle, where the macOS sandbox allows Chromium to load it.
+        // Unbundled development builds still use the separate runtime.
+        no_sandbox: i32::from(!launch.sandboxed),
         main_bundle_path: text(&launch.bundle),
         browser_subprocess_path: text(&launch.helper),
         framework_dir_path: text(&launch.framework),

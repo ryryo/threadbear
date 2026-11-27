@@ -128,6 +128,20 @@ test('no CDN request or warning until a runtime is installed', async () => {
   } finally { check.stop(); fs.rmSync(home, { recursive: true, force: true }); }
 });
 
+test('a Mac application with a bundled web runtime also enables update checks', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-cef-bundled-'));
+  const app = path.join(home, 'Threadbear GPUI.app');
+  const framework = path.join(app, 'Contents', 'Frameworks', 'Chromium Embedded Framework.framework');
+  try {
+    fs.mkdirSync(framework, { recursive: true });
+    assert.equal(runtimeInstalled(path.join(home, 'web-runtime'), app), false);
+    fs.writeFileSync(path.join(framework, 'Chromium Embedded Framework'), 'test binary');
+    assert.equal(runtimeInstalled(path.join(home, 'web-runtime'), app), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 const crate = (vers: string, yanked = false) => JSON.stringify({ name: 'cef', vers, yanked });
 
 test('reads the newest CEF cef-rs binds, skipping yanked and prerelease crates', () => {

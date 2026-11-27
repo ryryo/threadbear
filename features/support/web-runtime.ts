@@ -35,6 +35,7 @@ let shown: Sites | undefined;
 
 export async function webRuntimeSetup(tags: string[]): Promise<'skipped' | undefined> {
   const mac = process.platform === 'darwin';
+  if (tags.includes('@web-sandbox') && !process.env.TB_WEB_SANDBOX_SPEC) return 'skipped';
   // The GPUI app's pictures of diagrams and pages, kept on disk under the
   // same names as the Swift app's: a folder of its own each time, or one
   // scenario's drawing shows in the next without it being drawn.

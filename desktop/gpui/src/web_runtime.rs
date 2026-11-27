@@ -1,10 +1,7 @@
-// The web runtime from the app's side (docs/gpui-port.md, "Choice 1: the web
-// view", decided as A: CEF downloaded on first use). One per app: where it's
-// got to on this machine (threadbear_core::web_runtime), its download when
-// it's asked for, Chromium started in this process the first time a page
-// needs it (threadbear_web), and the question each place that needs it asks
-// until then, with Not now. Until it's installed, diagrams and pages show
-// their source and panels offer the browser, so the app works without it.
+// The installed Mac app bundles its own Chromium so its children can run
+// sandboxed. Developer binaries use the separately installed runtime. Both
+// start Chromium in the app's process on demand and keep their profile in
+// the runtime data folder (threadbear_core::web_runtime).
 use crate::push_button::PushButton;
 use crate::spinner::Spinner;
 use crate::style::{self, px};
@@ -33,6 +30,7 @@ pub(crate) enum Engine {
 
 pub(crate) struct WebRuntime {
     pub(crate) layout: Option<Layout>,
+    app_bundle: Option<std::path::PathBuf>,
     pub(crate) state: State,
     /// Not now, for this run of the app: what needs the runtime shows its
     /// source or offers the browser without asking again until a relaunch.
@@ -66,7 +64,9 @@ enum Update {
 
 pub(crate) fn init(cx: &mut App) {
     let layout = Layout::default_root().map(Layout::new);
+    let app_bundle = application_bundle();
     let state = match (core::this_archive(), &layout) {
+        (Some(_), Some(_)) if app_bundle.is_some() => State::Ready,
         (Some(archive), Some(layout)) if core::is_installed(layout, &archive.pin()) => State::Ready,
         // A runtime only exists for the Mac so far.
         (Some(_), Some(_)) if cfg!(target_os = "macos") => State::Missing,
@@ -74,6 +74,7 @@ pub(crate) fn init(cx: &mut App) {
     };
     let entity = cx.new(|_| WebRuntime {
         layout,
+        app_bundle,
         state,
         not_now: false,
         cancelling: false,
@@ -89,9 +90,21 @@ pub(crate) fn runtime(cx: &App) -> Option<Entity<WebRuntime>> {
     cx.try_global::<Shared>().map(|s| s.0.clone())
 }
 
-/// The helper Chromium's processes run as: beside the app's own binary, in
-/// its bundle (desktop/scripts/install-app.sh puts it there) or a cargo
-/// target folder.
+/// The actual Mac application, which must carry its own sandboxed runtime.
+/// Cargo binaries live outside an application and use the development install.
+fn application_bundle() -> Option<std::path::PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.ends_with("MacOS") && contents.ends_with("Contents") && bundle.extension()? == "app")
+        .then(|| bundle.to_path_buf())
+}
+
+/// The unbundled development helper is built next to the app's binary.
 fn helper_binary() -> Result<std::path::PathBuf, String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("couldn't find the app's own binary: {e}"))?;
@@ -234,18 +247,7 @@ impl WebRuntime {
                 return false;
             }
         }
-        let started = helper_binary().and_then(|helper| {
-            let bundle = threadbear_web::bundle_identifier()
-                .unwrap_or_else(|| "threadbear.desktop.dev".into());
-            let helper = core::make_helpers(&layout, &helper, &bundle)?;
-            threadbear_web::start(threadbear_web::Launch {
-                bundle: layout.runtime_bundle(),
-                framework: layout.framework(),
-                helper,
-                profile: layout.profile(),
-                log_file: layout.log_file(),
-            })
-        });
+        let started = self.launch(&layout).and_then(threadbear_web::start);
         match started {
             Ok(()) => {
                 self.engine = Engine::Starting;
@@ -320,6 +322,30 @@ impl WebRuntime {
             });
         })
         .detach();
+    }
+
+    fn launch(&self, layout: &Layout) -> Result<threadbear_web::Launch, String> {
+        let (bundle, framework, helper, sandboxed) = if let Some(bundle) = &self.app_bundle {
+            (
+                bundle.clone(),
+                bundle.join("Contents/Frameworks").join(core::FRAMEWORK),
+                core::application_helper(bundle),
+                true,
+            )
+        } else {
+            let bundle_id = threadbear_web::bundle_identifier()
+                .unwrap_or_else(|| "threadbear.desktop.dev".into());
+            let helper = core::make_helpers(layout, &helper_binary()?, &bundle_id)?;
+            (layout.runtime_bundle(), layout.framework(), helper, false)
+        };
+        Ok(threadbear_web::Launch {
+            bundle,
+            framework,
+            helper,
+            profile: layout.profile(),
+            log_file: layout.log_file(),
+            sandboxed,
+        })
     }
 
     /// Whether Try again can start Chromium in this run of the app. Once

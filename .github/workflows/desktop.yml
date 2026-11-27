@@ -226,6 +226,15 @@ jobs:
           cargo build --locked --manifest-path desktop/Cargo.toml -p threadbear-gpui --features automation
           cd features
           TB_APP=gpui TB_RETRY=1 TB_SHARD=${{ matrix.shard }} node_modules/.bin/cucumber-js
+      - name: Packaged Chromium sandbox
+        if: runner.os == 'macOS' && !matrix.specsOnly
+        run: |
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          app="$scratch/Threadbear Sandbox Test.app"
+          THREADBEAR_BUILT_ON= THREADBEAR_SIGN_IDENTITY=- desktop/scripts/make-bundle.sh "${CARGO_TARGET_DIR:-desktop/target}/debug" "$app"
+          cd features
+          TB_APP=gpui TB_WEB_SANDBOX_SPEC=1 TB_GPUI_BIN="$app/Contents/MacOS/threadbear-gpui" TB_TAGS=@web-sandbox node_modules/.bin/cucumber-js
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

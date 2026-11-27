@@ -42,15 +42,19 @@ if [ -z "${THREADBEAR_BUILT_ON+set}" ]; then
   done
 fi
 
+# Archive used by the existing runtime installer and behaviour tests. Its
+# contents also pass through the helper's pinned, path-checked extraction.
+archive="${TB_WEB_RUNTIME_ARCHIVE:-}"
+if [ -z "$archive" ]; then
+  archive="$("$root/desktop/scripts/web-runtime-archive.sh" "$HOME/Library/Caches/Threadbear/web-runtime-archive")"
+fi
+
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp "$bins/threadbear-gpui" "$bundle/Contents/MacOS/threadbear-gpui"
-# Beside the app, where it looks for it: the web runtime's helper processes
-# are copies of it, made in the data folder when Chromium first starts
-# (desktop/gpui/src/web_runtime.rs). Signed first, so the bundle's own
-# signature takes it in as signed code.
+# Older Swift-to-GPUI installers check for this file to recognize an install.
 cp "$bins/threadbear-web-helper" "$bundle/Contents/MacOS/threadbear-web-helper"
-codesign --force --sign - "$bundle/Contents/MacOS/threadbear-web-helper" 2>/dev/null
+"$bins/threadbear-web-helper" --stage-runtime "$archive" "$bundle" "$bundle_id"
 cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -134,5 +138,17 @@ if [ -z "$identity" ]; then
   identity="-"
   requirements=(--requirements "=designated => identifier \"$bundle_id\"")
 fi
+# Sign inside out. The official archive has a flat framework, whose
+# original signature does not verify in an application's nested code.
+framework="$bundle/Contents/Frameworks/Chromium Embedded Framework.framework"
+for library in "$framework"/Libraries/*.dylib; do
+  codesign --force --timestamp=none --sign "$identity" "$library" 2>/dev/null
+done
+codesign --force --timestamp=none --sign "$identity" "$framework" 2>/dev/null
+for helper in "$bundle"/Contents/Frameworks/Threadbear\ Helper*.app; do
+  codesign --force --timestamp=none --sign "$identity" "$helper" 2>/dev/null
+done
+codesign --force --timestamp=none --sign "$identity" "$bundle/Contents/MacOS/threadbear-web-helper" 2>/dev/null
 codesign --force --timestamp=none --sign "$identity" ${requirements[@]+"${requirements[@]}"} "$bundle" >/dev/null 2>&1
+codesign --verify --deep --strict "$bundle"
 echo "Made $bundle ($short, signed: $identity)"

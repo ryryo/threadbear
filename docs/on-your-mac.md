@@ -113,34 +113,21 @@ the owning runner.
   checks there's room for all that before it starts. Its
   output is in setup's terminal, or that thread. Deleting
   `~/Library/Caches/Threadbear/rust` takes that Rust off again.
-- **The GPUI app's web runtime, only if you install it** (its Install web
-  runtime button, or Settings > General > Web runtime; nothing is fetched
-  until you press one): Chromium, as CEF's official minimal build 156.0.31,
-  downloaded once from Spotify's CEF builds (135 MB, checked against the
-  size and hashes pinned in `desktop/core/src/web_runtime.rs` before
-  anything is unpacked), into
-  `~/Library/Application Support/Threadbear/web-runtime/` (about 330 MB):
-  the framework and five small "Threadbear Helper" apps beside it, copies
-  of the GPUI app's own `threadbear-web-helper`, in `Threadbear
-  Web.bundle` in a folder named for the build; `profile/`, Chromium's own
-  folder, where the web panels' sign-ins and site storage are kept between
-  launches (its cookies aren't locked with a Keychain key, as Chromium
-  would otherwise ask the Keychain for one: like the Swift app's WebKit
-  storage, they're protected by your account's file permissions); and
-  `web-runtime.log`, Chromium's warnings. The download goes through
-  `download/` and is deleted once it's unpacked. Chromium runs inside the
-  GPUI app's own process, started the first time something needs it, and
-  its helpers as child processes of the app (its renderers, GPU and network
-  processes), all stopping when the app quits. The same runtime displays
-  web links opened in the side pane, including links an agent pins with
-  Show. Its own process sandbox is
-  off for now, as it only covers a runtime inside the app's bundle
-  (`desktop/web/src/mac/host.rs`). Removing the `web-runtime` folder
-  uninstalls it. The pictures it draws of ```` ```mermaid ```` and
-  ```` ```html ```` blocks go in `~/Library/Caches/Threadbear/rich`, the
-  same files, under the same names, as the Mac app's (below), so a block
-  either app has drawn shows straight away in the other. Diagrams use the
-  Pele bundled with the app, as the Mac app's do.
+- **The GPUI app's web runtime:** The Mac app is built with Chromium, from
+  CEF's pinned minimal archive. Setup or an app update fetches the archive
+  from Spotify's CEF builds (about 135 MB), checks its pinned hashes, and
+  keeps one copy per CEF version in
+  `~/Library/Caches/Threadbear/web-runtime-archive/`. The signed app includes
+  the framework and its helper apps in `Contents/Frameworks` so Chromium's
+  macOS subprocess sandbox can run. The app never loads the old download
+  from its data folder. Its Chromium profile and log still live in
+  `~/Library/Application Support/Threadbear/web-runtime/`, so existing panel
+  sign-ins and storage survive the update. The cookies use your account's
+  file permissions, without a Keychain prompt. Chromium runs on first use,
+  and its child processes stop when the app quits. Unbundled developer builds
+  can still install and use the separate runtime with their existing settings.
+  Pictures of mermaid and HTML blocks still go in
+  `~/Library/Caches/Threadbear/rich`, shared with the Swift app.
 - **A LaunchAgent:** `~/Library/LaunchAgents/com.mikerosoft.threadbear.runner.plist`,
   which keeps the runner going while you're logged in. A runner on a Linux
   server (INSTALL.md, section 6) has a systemd user service in its place,
@@ -1048,7 +1035,7 @@ the owning runner.
 | threadbear.mikecann.app | Mike (the What's new page) | Only in a fork, while one of Mike's releases is waiting: at each release check (every 6 hours) the runner reads `/changelog.json` (about 20 KB, 15-second timeout, nothing sent with it), and the GPUI app then downloads the pictures of the cards its Updates panel shows (at most 4 MB each, public addresses only), once each while it runs. Nothing from it is run or merged. |
 | GitHub | Mike's repo | Release tags fetched every 6 hours (15 minutes after a failed look); the fork at setup; from `tb land`, through your `gh`, a marked workflow's recent runs on main; when you open a PR link in the desktop app, through your `gh`, that PR, its diff, its checks and its repo's merge settings, and the open or merged state of other PRs a thread links to; a check-up comment on Mike's check-ups Discussion, through your `gh`, only after you say Send on its card (`runner/src/checkup.ts`); and only when you press its button, a merge, close, reopen, review or the comment you typed (`runner/src/github-pr.ts`) |
 | index.crates.io | crates.io (Rust's package registry) | With the daily CEF check above, the installed Mac runner reads `/3/c/cef`, the list of published releases of cef-rs (CEF's Rust bindings), so the warning can say whether a newer CEF can be moved to yet. It sends nothing else and keeps only the newest version in `<home>/runner/web-runtime-check.json`. |
-| cef-builds.spotifycdn.com | Spotify (CEF's official builds) | The installed Mac runner, only while a web runtime is installed, reads `/index.json` once a day, a minute after starting if due, to warn when this release's CEF pin is over 14 days behind stable (or checks fail for 3 days). Dev runners/tests do not poll; `THREADBEAR_CLI_UPDATES=off` disables it too. It sends no user content and stores the check in `<home>/runner/web-runtime-check.json`. From the GPUI app, only when you press Install web runtime: one download of the pinned build (135 MB), which nothing is sent with. Threadbear will publish its own signed copy later. Chromium itself then goes online only for the pages the GPUI app's web panels show; its own background requests are off (`--disable-background-networking`), and an agent's html and diagrams reach nothing (`desktop/web/src/mac/sealed.rs`). |
+| cef-builds.spotifycdn.com | Spotify (CEF's official builds) | The installed Mac runner, only while a web runtime is installed, reads `/index.json` once a day, a minute after starting if due, to warn when this release's CEF pin is over 14 days behind stable (or checks fail for 3 days). Dev runners/tests do not poll; `THREADBEAR_CLI_UPDATES=off` disables it too. It sends no user content and stores the check in `<home>/runner/web-runtime-check.json`. The Mac GPUI app build downloads the pinned archive (about 135 MB) when it is absent from the build cache. Unbundled developer builds can also download it on request. Chromium itself then goes online only for the pages the GPUI app's web panels show; its own background requests are off (`--disable-background-networking`), and an agent's html and diagrams reach nothing (`desktop/web/src/mac/sealed.rs`). |
 | downloads.claude.ai, registry.npmjs.org | Anthropic, npm | CLI version checks and installs; `npm ci` |
 | Anthropic, OpenAI | yours | Your threads, through the official CLIs on your own logins, and small jobs' text (titles, summaries, the librarian and fuzzy Wake when…) on whichever pool and provider order you pick in Settings > Models (Claude first, then Codex by default, using isolated `codex exec` with tools disabled). An approval card in a thread on Auto, with the thread's first and latest messages, goes to Opus through the same CLI so it can decide in your place. With the `inboxGuess` experiment on (off by default), when one of your own threads finishes with nothing for you, your last message to it and the agent's reply go to Haiku and to Opus through the same CLI, each to guess whether you needed to see it (not for a thread in a private folder). Unless you turn off Settings > General > Code review (`"labReview": false`), a thread's code change, with your message and the agent's reply, goes to your other provider's CLI as a review thread, as if you'd started one (or a fresh session of the same provider, with no other login). After a turn fails because the API couldn't be reached, the runner itself opens (and straight away closes) a connection to api.anthropic.com or chatgpt.com on port 443, at most once a minute, until one opens and the thread carries on. Nothing is sent over it (`runner/src/net-probe.ts`). |
 | OpenCode's Zen (opencode.ai), models.dev, and whichever providers you've logged it into | theirs | Only with a thread on OpenCode: that thread's prompts and tool output, through the official CLI, and small jobs' text when a pool with OpenCode logins is picked for them in Settings (according to your provider order, or when earlier providers in the pool are out of room) |
