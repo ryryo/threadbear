@@ -52,14 +52,18 @@ test('a saved intent completes the real journal and resumes the same remote dele
   const saved = readFileSync(join(f.home, 'bot-note-erasures.json'), 'utf8');
   assert.ok(saved.includes(f.input.operationId));
   assert.ok(!saved.includes(f.phrase));
+  assert.equal(f.queue(outage).progress(f.input, f.input.scope)[0]?.state, 'queued');
   f.interrupt();
   await assert.rejects(f.queue(outage).resume(), /reply lost/);
+  assert.equal(f.queue(outage).progress(f.input, f.input.scope)[0]?.state, 'waitingForSync');
   assert.deepEqual(f.memory.list('2026-11-27'), []);
   assert.deepEqual(await f.queue(async () => ({ done: false, waitingForLegacy: true })).resume(),
     { done: false, waitingForLegacy: true });
+  assert.equal(f.queue(outage).progress(f.input, f.input.scope)[0]?.state, 'waitingForLegacy');
   assert.equal(f.queue(outage).pending(), true);
   assert.deepEqual(await f.queue(async () => ({ done: true })).resume(), { done: true });
   assert.equal(f.queue(outage).pending(), false);
+  assert.deepEqual(f.queue(outage).progress(f.input, f.input.scope), []);
   assert.equal(await f.queue(outage).resume(), undefined);
   assert.equal(f.calls.length, 3);
   assert.deepEqual(f.calls[0], f.calls[1]);
@@ -98,6 +102,11 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     import { readFileSync } from 'node:fs';
     import { join } from 'node:path';
     import { BotRuntime } from ${modulePath('../../../src/bots/runtime.ts')};
+    import { RpcServer } from ${modulePath('../../../src/rpc.ts')};
+    import { threadKey } from ${modulePath('../../../src/rpc-auth.ts')};
+    import { CallerGate } from ${modulePath('../../../src/rpc-gate.ts')};
+    import { nullLogger } from ${modulePath('../../../src/log.ts')};
+    import { RunnerClient } from ${modulePath('../../../src/client.ts')};
     import { openManagedMemoryBackup } from ${modulePath('../../../src/bots/managed-memory-restore.ts')};
     import { PersonalMemory } from ${modulePath('../../../src/bots/ported/personal-memory.js')};
     import { makeHarness } from ${modulePath('../../helpers/fakes.ts')};
@@ -108,6 +117,7 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
       home, runner: () => harness.runner, owner: () => 'runner',
       enabled: () => true, guarded: () => true, owns: () => true,
       canChangePrivacy: () => true,
+      readyForNoteErasure: () => mode !== 'offline',
       eraseNoteFromMirror: async (sent) => {
         assert.deepEqual(sent, { workspaceId: input.workspaceId, epoch: input.epoch, scope: input.scope, entryId: input.entryId });
         if (mode === 'lost') throw new Error('interrupted after sync submission');
@@ -117,6 +127,9 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     const savedQueue = () => JSON.parse(readFileSync(join(home, 'bot-note-erasures.json'), 'utf8'));
     if (mode === 'old') {
       assert.throws(() => runtime.beginNoteErasure(input), /current Bot workspace owner/);
+    } else if (mode === 'offline') {
+      assert.equal(runtime.methods['bots.memory.erasureStatus']({ scope: input.scope }).available, false);
+      assert.throws(() => runtime.methods['bots.memory.erase']({ ...input, confirmed: true }), /updated backend/);
     } else if (mode === 'backup') {
       const memory = new PersonalMemory(join(home, 'bots', 'memory', input.scope.id));
       const create = { scope: input.scope, expectedRevision: input.expectedRevision, operationId: 'create-backup' };
@@ -136,7 +149,27 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
       await assert.rejects(runtime.createMemoryBackup({ ...backup, expectedRevision: memory.revision() }, async () => assert.fail('operation conflict')), /different Bot backup/);
     } else if (mode === 'lost') {
       input.expectedRevision = new PersonalMemory(join(home, 'bots', 'memory', input.scope.id)).revision();
-      runtime.beginNoteErasure(input);
+      assert.throws(() => runtime.methods['bots.memory.erase']({ ...input }), /confirmed/);
+      assert.throws(() => runtime.methods['bots.memory.erase']({ ...input, confirmed: true, epoch: 2 }), /ownership/);
+      const token = 'isolated-note-erasure-owner';
+      const server = new RpcServer({ host: '127.0.0.1', port: 0, token, runner: harness.runner,
+        log: nullLogger, gate: new CallerGate({ runner: harness.runner }), methods: runtime.methods });
+      const { port } = await server.listen();
+      const url = 'ws://127.0.0.1:' + port + '/rpc';
+      const caller = harness.runner.makeThread({ text: '', permissionMode: 'full' }).st.rec.id;
+      const client = await RunnerClient.connect(url, token);
+      const thread = await RunnerClient.connect(url, threadKey(token, caller), { threadId: caller });
+      try {
+        await assert.rejects(thread.call('bots.memory.erase', { ...input, confirmed: true }), /owner/);
+        await assert.rejects(thread.call('bots.memory.erasureStatus', { scope: input.scope }), /owner/);
+        const first = await client.call('bots.memory.erase', { ...input, confirmed: true });
+        assert.deepEqual(await client.call('bots.memory.erase', { ...input, confirmed: true }), first);
+      } finally {
+        thread.close();
+        client.close();
+        await server.close();
+      }
+      assert.equal(runtime.methods['bots.memory.erasureStatus']({ scope: input.scope }).pending[0].entryId, input.entryId);
       assert.equal(runtime.workspaceIdleForMove(), false);
       await assert.rejects(runtime.resumeNoteErasures(), /interrupted after sync submission/);
       assert.equal(savedQueue().length, 1);
@@ -151,7 +184,7 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     }
     process.disconnect();
   `);
-  for (const [mode, guard] of [['old', '10'], ['backup', '11'], ['lost', '11'], ['resume', '11']]) {
+  for (const [mode, guard] of [['old', '10'], ['offline', '11'], ['backup', '11'], ['lost', '11'], ['resume', '11']]) {
     const child = fork(script, [f.home, mode!], {
       env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1',
         THREADBEAR_BOT_FORMAT_GUARD_VERSION: guard, THREADBEAR_BOT_FORMAT_HOME: f.home, TB_BOT_ERASE_TEST_INPUT: JSON.stringify(f.input) },
@@ -213,6 +246,7 @@ test('all linked review files are cleared before the mirror can acknowledge the 
   });
   reopen().begin(f.input);
   await assert.rejects(reopen().resume(), /checkpoint interrupted/);
+  assert.equal(reopen().progress(f.input, f.input.scope)[0]?.state, 'waitingForLocalCopies');
   assert.equal(f.calls.length, 0);
   assert.equal(store.reports(first.id)[0]?.changes[0]?.op, 'erased');
   assert.equal(store.reports(second.id)[0]?.changes[0]?.op, 'edit');

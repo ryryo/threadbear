@@ -4,7 +4,7 @@ import type { BotConversations } from './conversations.ts';
 import { botOperationId, type Bot, type BotRepository } from './repository.ts';
 import { rosterMark } from './roster-mark.mjs';
 import type { BotReviews } from './reviews.ts';
-import { MEMORY_LIMITS } from './ported/memory-entries.js';
+import { entryId, MEMORY_LIMITS, parseMemory } from './ported/memory-entries.js';
 import type { ScopeChange } from './ported/personal-memory.js';
 import type { ScopeRef } from './scoped-memory.ts';
 import type { BotRequests } from './request-service.ts';
@@ -109,7 +109,15 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.scope.add': method(scopeWrite.extend({ text: z.string(), until: z.iso.date().optional() }), p => change(p, { op: 'add', text: p.text, until: p.until })),
     'bots.memory.scope.edit': method(scopeWrite.extend({ entryId: z.string().min(1), text: z.string() }), p => change(p, { op: 'edit', entryId: p.entryId, text: p.text })),
     'bots.memory.scope.remove': method(scopeWrite.extend({ entryId: z.string().min(1) }), p => change(p, { op: 'remove', entryId: p.entryId })),
-    'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => memory(scope, 'read').historyPage(before)),
+    'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => {
+      const page = memory(scope, 'read').historyPage(before);
+      if (scope.kind !== 'bot' && scope.kind !== 'group') return page;
+      return { ...page, rows: page.rows.map(row => {
+        if (row.op !== 'remove' || !row.before || row.erasedEntryId) return row;
+        const [entry, ...rest] = parseMemory(row.before).entries;
+        return entry && !rest.length ? { ...row, erasureTarget: entryId(entry) } : row;
+      }) };
+    }),
     'bots.memory.scope.restore': method(scopeWrite.extend({ changeId: z.uuid() }), p => change(p, { op: 'restore', changeId: p.changeId })),
     ...(reviews && protectFormat && { 'bots.memory.scope.tidy': method(scopeWrite.extend({ botId }), p => reviews().tidy(p.botId, () => memory(p.scope, 'write'), p.expectedRevision, p.operationId, protectFormat)) }),
     ...(makePrivate && { 'bots.settings.privacy': method(privacy, async p => ({ bot: await makePrivate(p) })) }),

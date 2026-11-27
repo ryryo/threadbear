@@ -436,6 +436,18 @@ heartbeats resume the journal, linked review checkpoints and mirror steps
 with the same identity. A failure to sanitize a linked review leaves the
 intent pending, and the next pass can continue after a partial write.
 Running a workspace move waits for the saved erasure intent to clear.
+
+The local owner can start a permanent erasure with `bots.memory.erase`
+when `bots.memory.erasureStatus` reports `available` for a Bot or Group
+scope. Pass the returned workspace ID and epoch, exact scope and note
+ID, the current memory revision, a stable operation ID and
+`confirmed: true`. A changed revision or ownership invalidates the
+confirmation. Retrying a submitted operation preserves the receipt.
+The status includes the pending note IDs, operation IDs and progress.
+The history keeps a body-free receipt and shows completion once the
+local and registered copies are confirmed. Conversation transcripts,
+provider histories, external backups and unregistered drafts are managed
+separately.
 A workspace that has erased notes must carry the authority’s current note
 erasure revision in both its offer and its claim. Only the owner and that
 move's intended recipient can read the paged requirements. Before accepting

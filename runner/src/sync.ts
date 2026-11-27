@@ -5194,8 +5194,12 @@ export class ConvexSync {
     return this.running && (this.backendApiVersion ?? 0) >= BOT_RETIRED_NOTE_ERASURE_API_VERSION;
   }
 
+  botManagedNoteErasuresAvailable(): boolean {
+    return this.running && (this.backendApiVersion ?? 0) >= BOT_DRAFT_ERASURE_API_VERSION;
+  }
+
   async eraseBotWorkspaceNote(input: import('./bots/device-workspace.ts').BotNoteErasure): Promise<import('./bots/device-workspace.ts').BotNoteErasureReply> {
-    if (!this.running || (this.backendApiVersion ?? 0) < BOT_DRAFT_ERASURE_API_VERSION) {
+    if (!this.botManagedNoteErasuresAvailable()) {
       throw new Error('Sync needs an updated backend to erase a Bot note.');
     }
     return this.orderBotWorkspace(async () => {

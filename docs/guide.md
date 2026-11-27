@@ -2153,6 +2153,14 @@ To restore from a backup, choose the backup, select a note and
 confirm **Restore this note**. The Runner checks the scope, current note
 revision and deletion records before bringing back that one note.
 
+To erase a Bot or Group note and its managed copies, choose
+**Erase note permanently** next to that note. For a note you already
+removed from memory, use the same action in **History**. Confirm the scope
+and note in the dialog. **Check note erasure status** shows whether this
+Runner, a previous Runner or a paired device still has a registered copy.
+Conversation history, provider copies, external backups and
+unregistered drafts can still contain the note.
+
 Use **Move Bot workspace** to transfer ownership of the entire workspace.
 Choose the destination Runner and decide where each Project's Bot notes and
 conversation links should go. You can leave a Project on the original Runner.

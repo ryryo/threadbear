@@ -616,6 +616,7 @@ async function main(): Promise<void> {
     threadUnavailableForAttachment: id => Boolean(movesRef?.gone(id) || movesRef?.movingOf(id)),
     archiveExporting: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT),
     eraseNoteFromMirror: box ? undefined : input => sync.eraseBotWorkspaceNote(input),
+    readyForNoteErasure: () => !box && sync.botManagedNoteErasuresAvailable(),
     withdrawDeviceProfile: async id => {
       if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json'))) return sync.withdrawBotProfile(id);
       return () => {};

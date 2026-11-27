@@ -213,6 +213,10 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   assert.equal(rows[0].op, 'replace');
   await owner.call('bots.memory.restore', { ...input, changeId: rows[0].id });
   await owner.call('bots.memory.remove', { ...input, entryId: note.id });
+  const scope = { kind: 'bot', id: bot.id };
+  const scopedHistory = await owner.call<{ rows: { op: string; erasureTarget?: string }[] }>('bots.memory.scope.history', { scope });
+  assert.equal(scopedHistory.rows[0].op, 'remove');
+  assert.equal(scopedHistory.rows[0].erasureTarget, note.id);
   await owner.call('bots.archive', { botId: bot.id, expectedRevision: bot.revision });
   await assert.rejects(owner.call('bots.memory.add', { ...input, text: 'One more' }), /archived/);
   await assert.rejects(owner.call('bots.conversations.create', { botId: bot.id, operationId: 'b' }), /archived/);

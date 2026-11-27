@@ -432,12 +432,45 @@ Then('I see the existing Thread with its saved reply and new Bot link', async fu
 });
 
 async function openBotBackups(world: BotWorld) {
+  await openEditorialNotes(world);
+  await click(world, 'Open note backups');
+}
+
+async function openEditorialNotes(world: BotWorld) {
   await click(world, 'Bots: assistants with their own settings and notes');
   await click(world, 'Editorial Bot');
   await click(world, 'Memory');
   await click(world, 'Bot: Editorial Bot');
-  await click(world, 'Open note backups');
 }
+
+When('I open the scoped notes for the Editorial Bot', async function (this: BotWorld) {
+  await openEditorialNotes(this);
+});
+When('I click the permanent erasure control for its note', async function (this: BotWorld) {
+  await click(this, 'Erase note permanently');
+});
+When('I cancel permanent note erasure', async function (this: BotWorld) {
+  await click(this, 'Cancel');
+});
+When('I confirm permanent note erasure', async function (this: BotWorld) {
+  await click(this, 'Erase permanently');
+});
+When('I check note erasure status again', async function (this: BotWorld) {
+  await click(this, 'Check note erasure status');
+});
+Then('the note erasure says {string}', async function (this: BotWorld, expected: string) {
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+    if (labels.some(row => row.label === expected)) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail(`Could not see the note erasure status: ${expected}`);
+});
+Then('the erased note has no undo action', async function (this: BotWorld) {
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+  assert.equal(labels.some(row => row.label === 'Undo change'), false);
+});
 
 When("I view the backup for the Bot's memory", async function (this: BotWorld) {
   await openBotBackups(this);

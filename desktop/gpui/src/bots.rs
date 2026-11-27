@@ -19,6 +19,7 @@ use threadbear_core::tr;
 mod groups;
 mod managed_restore;
 mod marks;
+mod note_erasure;
 mod profile_panel;
 mod roster;
 mod schedules;
@@ -199,6 +200,7 @@ struct Note {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Change {
     id: String,
     time: String,
@@ -206,6 +208,9 @@ struct Change {
     before: Option<String>,
     after: Option<String>,
     restored: Option<String>,
+    entry_id: Option<String>,
+    erased_entry_id: Option<String>,
+    erasure_target: Option<String>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -317,6 +322,7 @@ pub(crate) struct BotsState {
     workspace_move: workspace_move::WorkspaceMove,
     roster: roster::RosterOperations,
     restore: managed_restore::ManagedRestore,
+    note_erasure: Option<note_erasure::ErasureStatus>,
     profile_panel: profile_panel::ProfilePanel,
     teams: Vec<TeamCard>,
     selected_team: Option<String>,
@@ -528,8 +534,14 @@ impl Threadbear {
     fn load_bot_memory(&mut self, append: bool, cx: &mut Context<Self>) {
         if !append {
             self.bots.restore.close();
+            self.bots.note_erasure = None;
         }
         let scoped = self.bots.scope.is_some();
+        let erasure_scope = self
+            .bots
+            .scope
+            .as_ref()
+            .is_some_and(|scope| matches!(scope.kind.as_str(), "bot" | "group"));
         let catalog = !append
             && self
                 .bots
@@ -586,9 +598,17 @@ impl Threadbear {
                     } else {
                         "bots.memory.history"
                     };
-                    let notes = call(client.clone(), read, source).await?;
-                    let history = call(client, recent, history).await?;
-                    Some((notes, history))
+                    let notes = call(client.clone(), read, source.clone()).await?;
+                    let history = call(client.clone(), recent, history).await?;
+                    let erasure = if erasure_scope {
+                        call(client, "bots.memory.erasureStatus", source)
+                            .await
+                            .ok()
+                            .and_then(|value| serde_json::from_value(value).ok())
+                    } else {
+                        None
+                    };
+                    Some((notes, history, erasure))
                 } else {
                     None
                 };
@@ -603,7 +623,7 @@ impl Threadbear {
                             this.bots.scopes = serde_json::from_value(scopes["scopes"].clone())
                                 .unwrap_or_default();
                         }
-                        if let Some((notes, history)) = memory {
+                        if let Some((notes, history, erasure)) = memory {
                             this.bots.notes =
                                 serde_json::from_value(notes["notes"].clone()).unwrap_or_default();
                             this.bots.memory_revision =
@@ -615,6 +635,7 @@ impl Threadbear {
                             }
                             this.bots.changes.extend(rows);
                             this.bots.more = history["more"].as_str().map(str::to_owned);
+                            this.bots.note_erasure = erasure;
                         }
                         this.bots.error = None;
                     }
@@ -1725,6 +1746,7 @@ impl Threadbear {
         for note in &self.bots.notes {
             section = section.child(self.render_bot_note(note, &target, disabled, cx));
         }
+        section = section.children(self.render_note_erasure_pending(cx));
         section
             .child(self.render_bot_history(&target, disabled, cx))
             .into_any_element()
@@ -2011,6 +2033,7 @@ impl Threadbear {
             (None, false) => String::new(),
         };
         let topic = note.topic.as_ref().map(|topic| format!("Topic: {topic}"));
+        let erase = self.note_erase_button(&note.id, &note.text, &note.id, cx);
         v_flex()
             .gap(px(7.))
             .p(px(12.))
@@ -2061,7 +2084,8 @@ impl Threadbear {
                                 this.bot_write(remove, params.clone(), After::Memory, window, cx)
                             },
                         )),
-                    ),
+                    )
+                    .children(erase),
             )
             .into_any_element()
     }
@@ -2090,6 +2114,7 @@ impl Threadbear {
                 "add" => tr!("Added"),
                 "remove" => tr!("Removed"),
                 "tidy" => tr!("Tidied"),
+                "erase" => tr!("Note erasure"),
                 _ => tr!("Edited"),
             };
             let text = change
@@ -2115,6 +2140,15 @@ impl Threadbear {
             } else {
                 "bots.memory.restore"
             };
+            let erasure_status = (change.op == "erase")
+                .then(|| self.note_erasure_caption(change.entry_id.as_deref(), cx));
+            let erase = change.erasure_target.as_ref().and_then(|entry| {
+                if self.bots.notes.iter().any(|note| note.id == *entry) {
+                    None
+                } else {
+                    self.note_erase_button(entry, text, &change.id, cx)
+                }
+            });
             history = history.child(
                 h_flex()
                     .gap(px(10.))
@@ -2123,20 +2157,35 @@ impl Threadbear {
                             .flex_1()
                             .gap(px(2.))
                             .child(div().text_color(style::secondary_text(cx)).child(caption))
-                            .child(div().child(text.to_owned())),
+                            .when(!text.is_empty(), |row| {
+                                row.child(div().child(text.to_owned()))
+                            })
+                            .children(erasure_status),
                     )
-                    .child(
-                        bot_button(
-                            SharedString::from(format!("bot-restore-{}", change.id)),
-                            tr!("Undo change"),
-                            disabled || restored,
-                        )
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                this.bot_write(restore, params.clone(), After::Memory, window, cx)
-                            },
-                        )),
-                    ),
+                    .when(
+                        change.op != "erase" && change.erased_entry_id.is_none(),
+                        |row| {
+                            row.child(
+                                bot_button(
+                                    SharedString::from(format!("bot-restore-{}", change.id)),
+                                    tr!("Undo change"),
+                                    disabled || restored,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.bot_write(
+                                            restore,
+                                            params.clone(),
+                                            After::Memory,
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            )
+                        },
+                    )
+                    .children(erase),
             );
         }
         if self.bots.more.is_some() {
@@ -2460,6 +2509,7 @@ impl Threadbear {
                         | "bots.conversations.attach"
                         | "bots.memory.createBackup"
                         | "bots.memory.recoverFromBackup"
+                        | "bots.memory.erase"
                 ))
         {
             let operation = match &self.bots.pending_write {

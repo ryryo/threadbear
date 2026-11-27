@@ -98,6 +98,21 @@ Feature: Bot workspace
     And I back up the current Bot notes
     Then I can open the newly created backup
 
+  @bots.note_erasure @swift-pending
+  Scenario: Permanent erasure needs a confirmation and shows the pending copies in history
+    Given the app is connected to an isolated Bot Runner
+    When I open the scoped notes for the Editorial Bot
+    And I click the permanent erasure control for its note
+    And I cancel permanent note erasure
+    Then the Bot's notes show "現在の覚書"
+    When I click the permanent erasure control for its note
+    And I confirm permanent note erasure
+    Then the note erasure says "Waiting for registered devices"
+    When I check note erasure status again
+    Then the note erasure says "Managed copies erased"
+    And the Bot's notes do not show "現在の覚書"
+    And the erased note has no undo action
+
   @bots.scoped_notes @bots @swift-pending
   Scenario: A workspace note stays in the workspace's memory
     Given the app is connected to an isolated Bot Runner

@@ -382,6 +382,8 @@ const workerBot = { id: 'editorial-bot', name: 'Editorial Bot', role: '', instru
 let botWorkspaceMove = null;
 let restoredBotNote = false;
 let createdBotBackup;
+let erasedBotNote;
+let botErasureChecks = 0;
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true, labReview: true, labReviewers: [{ provider: 'codex', model: 'gpt-6.1-sol' }, { provider: 'claude', effort: 'xhigh' }], labPanel: [], labPanelLines: 150, keepAwake: true, fullSync: false, spareWeek: true,
   models: {
@@ -1056,17 +1058,32 @@ async function dispatch(client, method, p) {
     const note = { id: 'restored-note', text: '復元する覚書' };
     const revision = '10000000-0000-4000-8000-000000000002';
     const nextRevision = '10000000-0000-4000-8000-000000000003';
+    const workspaceId = '10000000-0000-4000-8000-000000000004';
     const correctScope = p.scope?.kind === scope.kind && p.scope?.id === scope.id;
     switch (method) {
       case 'bots.status': return { enabled: true, available: true, managedMemoryRestore: true };
       case 'bots.list': return { bots: [workerBot] };
       case 'bots.get': return { bot: workerBot, conversations: [], capabilities: { scopedMemory: true } };
       case 'bots.memory.scopes': return { scopes: [{ ...scope, title: workerBot.name, archived: false }] };
-      case 'bots.memory.scope.history': return { rows: [] };
+      case 'bots.memory.scope.history': return { rows: erasedBotNote
+        ? [{ id: nextRevision, entryId: 'current-note', time: '2026-11-27T11:00:00.000Z', op: 'erase' }] : [] };
       case 'bots.memory.scope.read': return {
-        notes: [{ id: 'current-note', text: '現在の覚書', pinned: false }, ...(restoredBotNote ? [{ ...note, pinned: false }] : [])],
-        revision: restoredBotNote ? nextRevision : revision,
+        notes: [...(erasedBotNote ? [] : [{ id: 'current-note', text: '現在の覚書', pinned: false }]),
+          ...(restoredBotNote ? [{ ...note, pinned: false }] : [])],
+        revision: restoredBotNote || erasedBotNote ? nextRevision : revision,
       };
+      case 'bots.memory.erasureStatus':
+        if (!correctScope) throw rpcError(-32602, 'Expected the selected Bot memory scope.');
+        return { workspaceId, epoch: 1, available: process.env.TB_MOCK_BOT_ERASURE === '1',
+          pending: erasedBotNote && botErasureChecks++ === 0
+            ? [{ entryId: 'current-note', operationId: erasedBotNote, state: 'waitingForDevices' }] : [] };
+      case 'bots.memory.erase':
+        if (!process.env.TB_MOCK_BOT_ERASURE || !correctScope || p.workspaceId !== workspaceId || p.epoch !== 1 ||
+            p.entryId !== 'current-note' || p.expectedRevision !== revision || p.confirmed !== true || !p.operationId) {
+          throw rpcError(-32602, 'Expected exact scope, note, revision, and confirmation.');
+        }
+        erasedBotNote = p.operationId;
+        return { revision: nextRevision };
       case 'bots.memory.backups': return { backups: createdBotBackup ? [createdBotBackup, olderBackup] : [olderBackup] };
       case 'bots.memory.createBackup':
         if (!correctScope || p.expectedRevision !== revision || !p.operationId) throw rpcError(-32602, 'Expected the chosen scope and revision.');

@@ -5,17 +5,24 @@ import { atomicWriteFileSync } from '../fsutil.ts';
 import type { BotNoteErasure, BotNoteErasureReply } from './device-workspace.ts';
 import { botOperationId, type BotWorkspaceIdentity } from './repository.ts';
 
+const erasureScope = z.object({ kind: z.enum(['bot', 'group']), id: z.uuid() });
 const intentSchema = z.object({
   workspaceId: z.uuid(),
   epoch: z.int().positive(),
-  scope: z.object({ kind: z.enum(['bot', 'group']), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/) }),
+  scope: erasureScope,
   entryId: z.string().min(1).max(128),
   operationId: botOperationId,
   expectedRevision: z.string().min(1).max(128),
   time: z.iso.datetime({ offset: true }),
 });
-const intentsSchema = z.array(intentSchema);
+const progress = z.enum(['queued', 'waitingForLocalCopies', 'waitingForSync', 'waitingForLegacy', 'waitingForSources', 'waitingForDevices']);
+const savedIntent = intentSchema.extend({ state: progress.default('queued') });
+const intentsSchema = z.array(savedIntent);
 export type NoteErasureIntent = z.infer<typeof intentSchema>;
+type SavedIntent = z.infer<typeof savedIntent>;
+export const noteErasureStatusInput = z.object({ scope: erasureScope });
+export const noteErasureInput = intentSchema.omit({ time: true }).extend({ confirmed: z.literal(true) });
+export type ConfirmedNoteErasure = z.infer<typeof noteErasureInput>;
 type Options = {
   home: string;
   identity: () => BotWorkspaceIdentity;
@@ -40,14 +47,14 @@ export class BotNoteErasureQueue {
     this.file = join(options.home, 'bot-note-erasures.json');
   }
 
-  private read(): NoteErasureIntent[] {
+  private read(): SavedIntent[] {
     const file = lstatSync(this.file, { throwIfNoEntry: false });
     if (!file) return [];
     if (!file.isFile()) throw new Error('The Bot note erasure queue must be a regular file.');
     return intentsSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
   }
 
-  private save(intents: NoteErasureIntent[]): void {
+  private save(intents: SavedIntent[]): void {
     atomicWriteFileSync(this.file, JSON.stringify(intents) + '\n', 0o600);
   }
 
@@ -61,6 +68,17 @@ export class BotNoteErasureQueue {
     return this.read().length !== 0;
   }
 
+  progress(identity: Pick<BotWorkspaceIdentity, 'workspaceId' | 'epoch'>, scope: NoteErasureIntent['scope']) {
+    return this.read().filter(row => row.workspaceId === identity.workspaceId && row.epoch === identity.epoch &&
+      row.scope.kind === scope.kind && row.scope.id === scope.id)
+      .map(({ operationId, entryId, state }) => ({ operationId, entryId, state }));
+  }
+
+  private updateProgress(intent: SavedIntent, state: SavedIntent['state']): void {
+    if (!this.sameOwnership(intent) || intent.state === state) return;
+    this.save(this.read().map(row => row.operationId === intent.operationId ? { ...row, state } : row));
+  }
+
   begin(raw: NoteErasureIntent): { revision: string } {
     const intent = intentSchema.parse(raw);
     if (!this.sameOwnership(intent)) throw new Error('Only the current Bot workspace owner can start erasure.');
@@ -71,7 +89,7 @@ export class BotNoteErasureQueue {
       throw new Error('This operation ID belongs to another note erasure.');
     }
     return this.options.eraseLocal(saved ?? intent, () => {
-      if (!saved) this.save([...queue, intent]);
+      if (!saved) this.save([...queue, { ...intent, state: 'queued' }]);
     });
   }
 
@@ -92,8 +110,13 @@ export class BotNoteErasureQueue {
     if (!this.sameOwnership(intent)) return undefined;
     // An interruption before the journal changed is retried at the recorded
     // revision. A finished local write reuses the journal's operation receipt.
-    this.options.eraseLocal(intent, () => {});
-    this.options.eraseLocalReviews?.(intent);
+    try {
+      this.options.eraseLocal(intent, () => {});
+      this.options.eraseLocalReviews?.(intent);
+    } catch (error) {
+      this.updateProgress(intent, 'waitingForLocalCopies');
+      throw error;
+    }
     // Scrub local packs even when sync is offline, and still send the
     // tombstone to the mirror if a local archive needs attention.
     const backups = Promise.resolve().then(() => {
@@ -101,11 +124,22 @@ export class BotNoteErasureQueue {
     });
     const { workspaceId, epoch, scope, entryId } = intent;
     const [remote, local] = await Promise.allSettled([this.options.eraseMirror({ workspaceId, epoch, scope, entryId }), backups]);
-    if (local.status === 'rejected') throw local.reason;
-    if (remote.status === 'rejected') throw remote.reason;
+    if (local.status === 'rejected') {
+      this.updateProgress(intent, 'waitingForLocalCopies');
+      throw local.reason;
+    }
+    if (remote.status === 'rejected') {
+      this.updateProgress(intent, 'waitingForSync');
+      throw remote.reason;
+    }
     const reply = remote.value;
     if (!this.sameOwnership(intent)) return { done: false };
-    if (!reply.done) return reply;
+    if (!reply.done) {
+      const state = reply.waitingForLegacy ? 'waitingForLegacy' : reply.waitingForSources ? 'waitingForSources'
+        : reply.waitingForDevices ? 'waitingForDevices' : 'waitingForSync';
+      this.updateProgress(intent, state);
+      return reply;
+    }
     this.save(this.read().filter(row => row.operationId !== intent.operationId));
     return reply;
   }

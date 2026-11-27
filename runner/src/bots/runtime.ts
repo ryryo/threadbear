@@ -28,7 +28,7 @@ import { GroupStore } from './group-store.ts';
 import { BotGroups } from './groups.ts';
 import { groupMethods } from './group-rpc.ts';
 import { DeviceBotWorkspace, type BotNoteErasure, type BotNoteErasureReply } from './device-workspace.ts';
-import { BotNoteErasureQueue, type NoteErasureIntent } from './memory-erasure-queue.ts';
+import { BotNoteErasureQueue, noteErasureInput, noteErasureStatusInput, type ConfirmedNoteErasure, type NoteErasureIntent } from './memory-erasure-queue.ts';
 import { deviceAction } from './device-actions.ts';
 import type { BotScheduleScope } from './schedule-rpc.ts';
 import { BotScheduleTargets } from './schedule-target.ts';
@@ -57,6 +57,7 @@ type Options = {
   withdrawShared?: (threadIds: readonly string[]) => Promise<void>;
   withdrawDeviceProfile?: (botId: string) => Promise<() => void>;
   eraseNoteFromMirror?: (input: BotNoteErasure) => Promise<BotNoteErasureReply>;
+  readyForNoteErasure?: () => boolean;
   archiveExporting?: () => boolean;
   peerOwns?: (threadId: string) => boolean;
   threadUnavailableForAttachment?: (threadId: string) => boolean;
@@ -94,6 +95,8 @@ export class BotRuntime {
       protect: () => this.protectTeamData(), setCeiling: (bot, rev, cap) => this.setBotCeiling(bot, rev, cap),
     })), groupMethods(() => this.groups(), (groupId, seq, operationId, text) => this.approveGroupNote(groupId, seq, operationId, text)), {
     'bots.status': (_params: Record<string, unknown>) => this.status(),
+    'bots.memory.erasureStatus': method(noteErasureStatusInput, ({ scope }) => this.noteErasureStatus(scope)),
+    'bots.memory.erase': method(noteErasureInput, input => this.eraseConfirmedNote(input)),
   });
 
   constructor(options: Options) {
@@ -437,6 +440,23 @@ export class BotRuntime {
 
   beginNoteErasure(intent: NoteErasureIntent): { revision: string } {
     return this.noteErasures().begin(intent);
+  }
+
+  private noteErasureStatus(scope: NoteErasureIntent['scope']) {
+    const { repo, conversations } = this.getWorkspace();
+    conversations.scopedMemory.open(scope, { kind: 'owner' }, 'read');
+    const { workspaceId, epoch } = repo.workspaceIdentity();
+    return { workspaceId, epoch, available: this.canEraseNotes() && this.options.readyForNoteErasure?.() === true,
+      pending: this.noteErasures().progress({ workspaceId, epoch }, scope) };
+  }
+
+  private eraseConfirmedNote(input: ConfirmedNoteErasure): { revision: string } {
+    if (!this.options.readyForNoteErasure?.()) throw new RpcError(ErrorCode.notAllowed, 'Bot note erasure needs an updated backend.');
+    const identity = this.getWorkspace().repo.workspaceIdentity();
+    if (identity.workspaceId !== input.workspaceId || identity.epoch !== input.epoch) {
+      throw new RpcError(ErrorCode.notAllowed, 'Bot workspace ownership changed. Reload the notes before erasing.');
+    }
+    return this.beginNoteErasure({ ...input, time: this.options.runner().isoNow() });
   }
 
   async resumeNoteErasures(): Promise<void> {
