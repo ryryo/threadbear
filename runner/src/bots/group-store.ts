@@ -202,7 +202,10 @@ export class GroupStore {
     if (book.frozen || book.group.archivedAt || !book.posts.length || book.round?.status === 'running' || book.round?.status === 'finalizing') return undefined;
     const post = book.posts.shift()!;
     const peers = post.calleeIds.flatMap(id => this.member(book.group, id) ?? []);
-    const round: GroupRound = { id: randomUUID(), roomId: id, sourceSeq: post.seq, status: 'running', batches: 0, slots: [], schedule: post.schedule };
+    const round: GroupRound = {
+      id: randomUUID(), roomId: id, sourceSeq: post.seq, status: 'running', batches: 0, slots: [],
+      ...(post.schedule && { schedule: post.schedule }),
+    };
     callIn(round, peers, post.text, undefined, { ordered: post.ordered });
     book.round = round;
     book.batches = [];
