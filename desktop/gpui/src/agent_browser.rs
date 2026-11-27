@@ -250,7 +250,12 @@ impl Pipe {
                 still_connecting.store(false, std::sync::atomic::Ordering::SeqCst);
                 let (mut writing, mut reader, kept) = match connected {
                     Ok(c) => c,
-                    Err(e) => return die(format!("Couldn't reach BrowserBear: {e}")),
+                    Err(e) => {
+                        return die(threadbear_core::trf!(
+                            "Couldn't reach BrowserBear: {error}",
+                            error = e
+                        ))
+                    }
                 };
                 {
                     let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
@@ -1126,7 +1131,11 @@ impl SidePane {
         );
         let input = self.browser_address(window, cx);
         input.update(cx, |s, cx| {
-            s.set_placeholder(format!("Open a page in {browser_name}"), window, cx)
+            s.set_placeholder(
+                threadbear_core::trf!("Open a page in {browser_name}", browser_name = browser_name),
+                window,
+                cx,
+            )
         });
         let field = div()
             .flex_1()
@@ -1279,9 +1288,9 @@ impl SidePane {
         let show = PushButton::new(
             SharedString::from(format!("browser-show-{}", tab.id())),
             tr!("Show window"),
-            format!(
-                "Bring this page's window to the front, in {}",
-                tab.place(browser_name)
+            threadbear_core::trf!(
+                "Bring this page's window to the front, in {browser}",
+                browser = tab.place(browser_name)
             ),
         )
         .small()
@@ -1377,13 +1386,13 @@ fn still_tip(at: Option<f64>) -> String {
     };
     let ago = ((crate::now_ms() as f64 - at) / 1000.).max(0.);
     let when = match ago as u64 {
-        0..=9 => "just now".to_owned(),
-        s @ 10..=59 => format!("{s} seconds ago"),
-        60..=119 => "a minute ago".to_owned(),
-        s @ 120..=7199 => format!("{} minutes ago", s / 60),
-        s => format!("{} hours ago", s / 3600),
+        0..=9 => tr!("just now").to_owned(),
+        s @ 10..=59 => threadbear_core::trf!("{seconds} seconds ago", seconds = s),
+        60..=119 => tr!("a minute ago").to_owned(),
+        s @ 120..=7199 => threadbear_core::trf!("{minutes} minutes ago", minutes = s / 60),
+        s => threadbear_core::trf!("{hours} hours ago", hours = s / 3600),
     };
-    format!("As the page looked {when}")
+    threadbear_core::trf!("As the page looked {when}", when = when)
 }
 
 // ---------------------------------------------------------------- the rail

@@ -1246,59 +1246,60 @@ impl Threadbear {
         cx: &mut Context<Self>,
     ) -> Div {
         let edit_project = project.id.clone();
+        let caption = threadbear_core::tr!(
+            "Read and written by coordinator and helpers · hidden from your brief"
+        );
         let mut body = v_flex()
             .w_full()
             .gap(px(10.))
             .px(px(16.))
             .pb(px(18.))
             .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .gap(px(8.))
-                .px(px(11.))
-                .py(px(8.))
-                .rounded(px(8.))
-                .bg(style::card_background(cx))
-                .border_1()
-                .border_color(style::card_border(cx))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(px(11.5))
-                        .text_color(style::secondary_text(cx))
-                        .child(threadbear_core::tr!(
-                            "Read and written by coordinator and helpers · hidden from your brief"
-                        )),
-                )
-                .child(
-                    crate::highlights::tipped(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(8.))
+                    .px(px(11.))
+                    .py(px(8.))
+                    .rounded(px(8.))
+                    .bg(style::card_background(cx))
+                    .border_1()
+                    .border_color(style::card_border(cx))
+                    .child(
                         div()
-                            .id("edit-Notes")
-                            .role(Role::Button)
-                            .flex_none()
-                            .cursor_pointer()
-                            .px(px(6.))
-                            .py(px(2.))
-                            .rounded(px(5.))
+                            .flex_1()
+                            .min_w_0()
                             .text_size(px(11.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(style::needs_you_text(cx))
-                            .hover(|s| s.bg(style::hover_fill(cx)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.start_editing_project(
-                                    &edit_project,
-                                    TextField::Notes,
-                                    window,
-                                    cx,
-                                )
-                            })),
-                        "Edit the notes (or double-click it)",
+                            .text_color(style::secondary_text(cx))
+                            .child(caption),
                     )
-                    .child(threadbear_core::tr!("Edit raw")),
-                ),
-        );
+                    .child(
+                        crate::highlights::tipped(
+                            div()
+                                .id("edit-Notes")
+                                .role(Role::Button)
+                                .flex_none()
+                                .cursor_pointer()
+                                .px(px(6.))
+                                .py(px(2.))
+                                .rounded(px(5.))
+                                .text_size(px(11.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(style::needs_you_text(cx))
+                                .hover(|s| s.bg(style::hover_fill(cx)))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.start_editing_project(
+                                        &edit_project,
+                                        TextField::Notes,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                            "Edit the notes (or double-click it)",
+                        )
+                        .child(threadbear_core::tr!("Edit raw")),
+                    ),
+            );
 
         if sections.is_empty() {
             let empty_project = project.id.clone();

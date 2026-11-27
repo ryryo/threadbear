@@ -62,6 +62,10 @@ When('I press {string} on {string}', async function (this: ThreadbearWorld, butt
   await this.app.do({ cmd: 'click', tipPrefix: tips[button] });
 });
 
+When('I press the Japanese browser window control', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'click', tip: 'Heliumでこのページのウインドウを前面に表示する' });
+});
+
 async function heard(world: ThreadbearWorld, what: string, check: (h: { cmd: string; args: Record<string, unknown>; thread?: string }) => boolean): Promise<void> {
   for (let i = 0; i < 100; i += 1) {
     if (bear(world).heard.some(check)) return;

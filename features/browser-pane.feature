@@ -30,6 +30,17 @@ Feature: The Browser pane
     And I press "Show window" on "Example Domain"
     Then BrowserBear was asked to show that page for "Morning brief"
 
+  @browserbear @windows-pending @browser.show @settings.language @swift-pending
+  Scenario: The Japanese Browser window control still shows a page
+    Given BrowserBear has "Example Domain" at "https://example.com/" open for "Morning brief"
+    When I open the thread "Morning brief"
+    And I click the right rail's Browser button
+    And I open Settings
+    And I choose Japanese as the desktop language
+    Then the Settings title is "一般" in "ja"
+    When I press the Japanese browser window control
+    Then BrowserBear was asked to show that page for "Morning brief"
+
   @browserbear @windows-pending @browser.handoff @swift-pending
   Scenario: A page handed to me opens the pane by itself, and Done tells the agent
     Given BrowserBear has "Sign in" at "https://login.example.com/" open for "Morning brief"
