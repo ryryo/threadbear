@@ -123,7 +123,7 @@ impl SidePane {
                     pick.ready = true;
                 } else {
                     this.cancel_browser_note();
-                    this.browser_note_error = Some("Couldn't start selection on this page.");
+                    this.browser_note_error = Some(tr!("Couldn't start selection on this page."));
                 }
                 cx.notify();
             });
@@ -146,11 +146,11 @@ impl SidePane {
                     }
                     pick.target = target;
                     this.browser_note_error = if selection.frame {
-                        Some("Use Select area to mark something inside a frame.")
+                        Some(tr!("Use Select area to mark something inside a frame."))
                     } else if selection.small {
-                        Some("Drag a larger area to mark it.")
+                        Some(tr!("Drag a larger area to mark it."))
                     } else if selection.lost {
-                        Some("The page moved. Choose the area again.")
+                        Some(tr!("The page moved. Choose the area again."))
                     } else {
                         None
                     };
@@ -335,18 +335,18 @@ impl SidePane {
         let pick = self.browser_pick.as_ref()?;
         let p = palette(cx);
         let summary = self.browser_note_error.unwrap_or(match &pick.phase {
-            Phase::Selecting if !pick.ready => "Starting selection…",
+            Phase::Selecting if !pick.ready => tr!("Starting selection…"),
             Phase::Selecting => pick.target.as_deref().unwrap_or(if pick.element {
-                "Click an element to select it."
+                tr!("Click an element to select it.")
             } else {
-                "Drag over the area to select it."
+                tr!("Drag over the area to select it.")
             }),
-            Phase::Capturing => "Capturing the selected area…",
+            Phase::Capturing => tr!("Capturing the selected area…"),
             Phase::Review { capture: None, .. } => {
-                "No image was captured. You can still add the comment."
+                tr!("No image was captured. You can still add the comment.")
             }
-            Phase::Review { .. } => "Review the image and comment.",
-            Phase::Saving => "Adding the comment to the draft…",
+            Phase::Review { .. } => tr!("Review the image and comment."),
+            Phase::Saving => tr!("Adding the comment to the draft…"),
         });
         let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
             this.cancel_browser_note();
@@ -367,11 +367,15 @@ impl SidePane {
                 let review =
                     cx.listener(|this, _: &ClickEvent, _, cx| this.review_browser_note(cx));
                 controls = controls.child(
-                    PushButton::new("browser-note-review", "Review", "Review selected page area")
-                        .small()
-                        .busy(matches!(pick.phase, Phase::Capturing))
-                        .disabled(pick.target.is_none())
-                        .render(cx, review),
+                    PushButton::new(
+                        "browser-note-review",
+                        tr!("Review"),
+                        tr!("Review selected page area"),
+                    )
+                    .small()
+                    .busy(matches!(pick.phase, Phase::Capturing))
+                    .disabled(pick.target.is_none())
+                    .render(cx, review),
                 );
                 let mode = cx.listener(|this, _: &ClickEvent, _, cx| {
                     if let Some(pick) = &mut this.browser_pick {
@@ -390,7 +394,7 @@ impl SidePane {
                         } else {
                             tr!("Pick element")
                         },
-                        "Switch selection mode without clearing the comment",
+                        tr!("Switch selection mode without clearing the comment"),
                     )
                     .small()
                     .disabled(!pick.ready || !matches!(pick.phase, Phase::Selecting))
@@ -422,8 +426,8 @@ impl SidePane {
                     .child(
                         PushButton::new(
                             "browser-note-retry",
-                            "Choose again",
-                            "Return to page selection",
+                            tr!("Choose again"),
+                            tr!("Return to page selection"),
                         )
                         .small()
                         .render(cx, retry),
@@ -500,7 +504,7 @@ impl SidePane {
                     .into_any_element(),
             ),
             Phase::Review { .. } => Some(
-                crate::files::pane_note("No image will be attached.", palette(cx))
+                crate::files::pane_note(tr!("No image will be attached."), palette(cx))
                     .into_any_element(),
             ),
             Phase::Saving => Some(div().into_any_element()),
