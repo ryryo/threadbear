@@ -18,6 +18,7 @@ use threadbear_core::tr;
 
 mod groups;
 mod managed_restore;
+mod marks;
 mod profile_panel;
 mod roster;
 mod schedules;
@@ -37,6 +38,11 @@ struct Profile {
     role: String,
     instructions: String,
     revision: u64,
+    #[serde(default)]
+    avatar: Value,
+    roster_mark: Option<marks::RosterMark>,
+    #[serde(skip)]
+    pictures: std::sync::OnceLock<marks::Pictures>,
     archived_at: Option<String>,
     model_binding: Option<ModelBinding>,
     permission_ceiling: Option<String>,
@@ -396,7 +402,7 @@ impl Threadbear {
         let client = self.client.clone();
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let result = call(client, "bots.list", json!({})).await;
+            let result = call(client, "bots.list", json!({ "includeRosterMarks": true })).await;
             this.update(cx, |this, cx| {
                 this.bots.busy = false;
                 match result {
@@ -456,7 +462,12 @@ impl Threadbear {
         let client = self.client.clone();
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let result = call(client, "bots.get", json!({ "botId": id })).await;
+            let result = call(
+                client,
+                "bots.get",
+                json!({ "botId": id, "includeRosterMarks": true }),
+            )
+            .await;
             this.update(cx, |this, cx| {
                 this.bots.busy = false;
                 match result {
@@ -800,7 +811,18 @@ impl Threadbear {
                 bot.name.clone()
             };
             let target = id.clone();
-            let row = bot_button(SharedString::from(format!("bot-{id}")), name, disabled)
+            let row = Button::new(SharedString::from(format!("bot-{id}")))
+                .small()
+                .tooltip(name.clone())
+                .accessibility_label(name.clone())
+                .disabled(disabled)
+                .child(
+                    h_flex()
+                        .gap(px(6.))
+                        .min_w_0()
+                        .children(marks::roster_picture(bot, cx.theme().mode.is_dark()))
+                        .child(div().min_w_0().text_ellipsis().child(name)),
+                )
                 .when(selected, |button| button.primary())
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.select_bot(target.clone(), None, cx)),

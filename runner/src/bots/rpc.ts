@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { BotConversations } from './conversations.ts';
-import { botOperationId, type BotRepository } from './repository.ts';
+import { botOperationId, type Bot, type BotRepository } from './repository.ts';
+import { rosterMark } from './roster-mark.mjs';
 import type { BotReviews } from './reviews.ts';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
 import type { ScopeChange } from './ported/personal-memory.js';
@@ -51,6 +52,8 @@ export function botRequestMethods(requests: () => BotRequests): Record<string, (
 }
 
 const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: botOperationId });
+const rosterMarks = z.object({ includeRosterMarks: z.boolean().optional() });
+const withRosterMark = (bot: Bot) => ({ ...bot, rosterMark: rosterMark(bot) });
 
 export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown, protectFormat?: () => void, requestsAvailable?: () => boolean): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
@@ -65,11 +68,14 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     }),
   }));
   return {
-    'bots.list': () => ({ bots: repo().list() }),
-    'bots.get': method(identity, ({ botId }) => {
+    'bots.list': method(rosterMarks, ({ includeRosterMarks }) => {
+      const bots = repo().list();
+      return { bots: includeRosterMarks ? bots.map(withRosterMark) : bots };
+    }),
+    'bots.get': method(identity.extend(rosterMarks.shape), ({ botId, includeRosterMarks }) => {
       const store = repo();
       const bot = store.get(botId);
-      return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
+      return { bot: includeRosterMarks ? withRosterMark(bot) : bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
     }),
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
     'bots.duplicate': method(identity.extend({ expectedRevision: z.int().positive(), operationId: botOperationId }),

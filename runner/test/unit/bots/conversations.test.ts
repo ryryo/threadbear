@@ -179,6 +179,13 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   t.after(async () => { owner.close(); full.close(); await server.close(); });
   const { bot } = await owner.call<{ bot: { id: string; revision: number } }>('bots.create', { name: 'Editor' });
   await assert.rejects(full.call('bots.list', {}), /owner/);
+  await assert.rejects(full.call('bots.list', { includeRosterMarks: true }), /owner/);
+  const markless = await owner.call<{ bots: { id: string; rosterMark?: unknown }[] }>('bots.list', {});
+  assert.equal(markless.bots[0].rosterMark, undefined);
+  const marks = await owner.call<{ bots: { id: string; rosterMark: { light: string; dark?: string } }[] }>('bots.list', { includeRosterMarks: true });
+  assert.match(marks.bots[0].rosterMark.light, /<mask id="bot-mark"/);
+  const detail = await owner.call<{ bot: { rosterMark: unknown } }>('bots.get', { botId: bot.id, includeRosterMarks: true });
+  assert.deepEqual(detail.bot.rosterMark, marks.bots[0].rosterMark);
   await assert.rejects(full.call('bots.create', { name: 'Intruder' }), /owner/);
   const copy = { botId: bot.id, expectedRevision: bot.revision, operationId: 'rpc-copy' };
   await assert.rejects(full.call('bots.duplicate', copy), /owner/);

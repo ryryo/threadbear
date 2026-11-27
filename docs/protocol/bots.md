@@ -60,6 +60,11 @@ the Thread, Highlights or the project's patch summary.
 Bot RPCs require the owner's credential. A Thread key cannot use them at any
 permission level.
 
+For the native roster, `bots.list` and `bots.get` accept `includeRosterMarks`.
+When true, each returned Bot includes a static `rosterMark` with a `light`
+SVG and, when the color changes with the theme, a `dark` SVG. The Bot's
+existing `avatar.image` takes priority when it is a drawable raster image.
+
 `bots.status` reports whether the owner can open the local Bot workspace and,
 when unavailable, gives a reason. Bot conversations stay on the workspace's
 owning Runner. A local copy of real threads keeps them as a read-only transcript.

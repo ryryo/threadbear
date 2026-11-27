@@ -2136,7 +2136,7 @@ field. Instructions can have multiple lines and save when you leave the
 field. Escape restores the saved text. The **Memory** card shows how many
 notes this Bot has. Choose **Manage** to open the Bot's Memory tab.
 Select the Bot's picture to choose a character and color, upload a photo,
-or reset its appearance.
+or reset its appearance. The list uses the same character or photo.
 In the avatar editor, use **Library** to keep photos on this Runner and reuse
 them for another Bot. A Bot keeps the photo it adopted when you remove that
 photo from the Library.
