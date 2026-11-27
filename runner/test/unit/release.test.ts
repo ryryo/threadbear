@@ -79,7 +79,7 @@ function startRunner(entry: string, home: string, extra: Record<string, string> 
   return { proc, out: () => out, listening, exited };
 }
 
-async function connect(home: string, port: number) {
+async function connectOnce(home: string, port: number) {
   const token = fs.readFileSync(path.join(home, 'secrets', 'runner-token'), 'utf8').trim();
   // The supervised child runs at background priority during the check.
   const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token, { authTimeoutMs: PATIENCE_MS });
@@ -90,11 +90,11 @@ async function connect(home: string, port: number) {
   return { c, hello, notices };
 }
 
-async function connectAfterRestart(home: string, port: number) {
+async function connect(home: string, port: number) {
   const until = Date.now() + PATIENCE_MS;
   for (;;) {
     try {
-      return await connect(home, port);
+      return await connectOnce(home, port);
     } catch (error) {
       // A busy machine can time out identifying the socket's process. The
       // desktop retries that specific refusal without changing credentials.
@@ -207,7 +207,7 @@ test('a managed Bot release protects both storage formats and reopens its privat
   const marker = path.join(home, 'bots-format.json');
   const r = startRunner(launch, home, { THREADBEAR_RESTART_MS: '50' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(r.out, 1));
+    const { c } = await connect(home, await nthListening(r.out, 1));
     try {
       assert.equal((await c.call('bots.status')).available, true);
       assert.deepEqual(await c.call('bots.list'), { bots: [] });
@@ -223,7 +223,7 @@ test('a managed Bot release protects both storage formats and reopens its privat
       assert.equal(protectedBot.privacy.moving, undefined);
       assert.equal(fs.readFileSync(marker, 'utf8').trim(), '2');
       await c.call('runner.restart', { reason: 'Bot workspace verification' });
-      const { c: after } = await connectAfterRestart(home, await nthListening(r.out, 2));
+      const { c: after } = await connect(home, await nthListening(r.out, 2));
       try {
         assert.deepEqual(await after.call('bots.list'), { bots: [protectedBot] });
         assert.deepEqual(await after.call('bots.memory.read', { botId: bot.id, threadId: b.threadId }), { notes: [note] });
@@ -253,7 +253,7 @@ test('a managed Bot request keeps its full result and receipt after a Runner res
   const marker = path.join(home, 'bots-format.json');
   const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: fake, THREADBEAR_RESTART_MS: '50' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       assert.equal((await c.call('bots.status')).requests, true);
       const { bot: editor } = await c.call('bots.create', { name: '編集者' });
@@ -270,7 +270,7 @@ test('a managed Bot request keeps its full result and receipt after a Runner res
       await patiently(() => fs.existsSync(statePath) && fs.readFileSync(statePath, 'utf8').includes('"status":"returned"'));
       assert.deepEqual((await c.call('bots.requests.get', read)).result, { text: BOT_FIXTURE_REPLY, whole: true }, run.out());
       await c.call('runner.restart', { reason: 'Bot request receipt verification' });
-      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      const { c: reopened } = await connect(home, await nthListening(run.out, 2));
       try {
         assert.deepEqual(await reopened.call('bots.requests.send', params), accepted);
         assert.deepEqual((await reopened.call('bots.requests.get', read)).result, { text: BOT_FIXTURE_REPLY, whole: true });
@@ -505,7 +505,7 @@ test('a managed Bot background task reopens its own Thread and result without re
   const cli = installBotFixtureCli(home);
   const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: cli, THREADBEAR_RESTART_MS: '50' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       assert.equal((await c.call('bots.status')).tasks, true);
       const { bot } = await c.call('bots.create', { name: '編集者' });
@@ -518,7 +518,7 @@ test('a managed Bot background task reopens its own Thread and result without re
       await patiently(() => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('"sent":true'));
       assert.deepEqual((await c.call('bots.tasks.read', { taskId: task.id })).result, { text: BOT_FIXTURE_REPLY, whole: true }, run.out());
       await c.call('runner.restart', { reason: 'Bot task verification' });
-      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      const { c: reopened } = await connect(home, await nthListening(run.out, 2));
       try {
         const { task: replayed } = await reopened.call('bots.tasks.start', input);
         assert.equal(replayed.id, task.id);
@@ -550,7 +550,7 @@ test('a managed Bot team and permission limit persist after restart and a failed
   const cli = installBotFixtureCli(home);
   const run = startRunner(launch, home, { THREADBEAR_CLAUDE_PATH: cli, THREADBEAR_RESTART_MS: '50' });
   try {
-    const { c } = await connectAfterRestart(home, await nthListening(run.out, 1));
+    const { c } = await connect(home, await nthListening(run.out, 1));
     try {
       assert.equal((await c.call('bots.status')).teams, true);
       const { bot } = await c.call('bots.create', { name: '編集者' });
@@ -575,7 +575,7 @@ test('a managed Bot team and permission limit persist after restart and a failed
       const { team: assigned } = await c.call('bots.teams.setChief', { teamId: team.id, expectedRevision: team.revision, botId: bot.id, main: true });
       assert.equal(fs.readFileSync(path.join(home, 'bots-format.json'), 'utf8').trim(), '5');
       await c.call('runner.restart', { reason: 'Bot team verification' });
-      const { c: reopened } = await connectAfterRestart(home, await nthListening(run.out, 2));
+      const { c: reopened } = await connect(home, await nthListening(run.out, 2));
       try {
         assert.deepEqual((await reopened.call('bots.teams.get', { teamId: team.id })).team, assigned);
         assert.equal((await reopened.call('bots.get', { botId: bot.id })).bot.permissionCeiling, 'ask');
