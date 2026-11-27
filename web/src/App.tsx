@@ -49,7 +49,7 @@ export function App() {
   if (route.page === 'bots')
     return (
       <Catch key={token}>
-        <Suspense fallback={<main className="signin"><p>Loading Bots…</p></main>}>
+        <Suspense fallback={<main className="signin"><p><T>Loading Bots…</T></p></main>}>
           <BotsPage token={token} />
         </Suspense>
       </Catch>

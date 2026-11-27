@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { msg, T, useMessages } from 'gt-react';
 import { useMutation } from 'convex/react';
 import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
@@ -37,28 +38,36 @@ function ProfileEditor({ token, workspaceId, runnerId, epoch, profile }: {
   token: string; workspaceId: string; runnerId: string; epoch: number; profile: Profile;
 }) {
   const key = `bot-device-draft:${runnerId}:${workspaceId}:${epoch}:${profile.id}`;
+  const translate = useMessages();
   const mutation = useMutation(api.phone.editBotProfile);
-  const [draft, setDraft] = useState(() => load(key));
+  const [editState, setEditState] = useState<Draft | 'saved' | null>(() => load(key));
+  const draft = editState === 'saved' ? null : editState;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const report = useLiveQuery(api.phone.command, draft?.commandId ? { token, commandId: draft.commandId } : 'skip');
   const answer = report?.state === 'done' ? report.result as Result | undefined : undefined;
+  const confirmed = answer?.outcome === 'saved';
+  if (draft && confirmed && profile.revision >= answer.bot.revision) {
+    setEditState('saved');
+  }
   const settings = draft?.settings ?? profile;
   const conflict = answer?.outcome === 'conflict' ? answer.current : undefined;
   const changed = draft ? fields.filter(field => draft.base[field] !== settings[field]) : [];
-  const waiting = saving || !!draft?.commandId && (report === undefined || report?.state === 'pending' || report?.state === 'taken');
+  const waiting = saving || !!draft?.commandId &&
+    (report === undefined || report?.state === 'pending' || report?.state === 'taken' || confirmed);
+  const labels = {
+    name: translate(msg('Bot name')),
+    role: translate(msg('Role')),
+    instructions: translate(msg('Instructions')),
+  };
 
   useEffect(() => {
     persist(key, draft);
   }, [key, draft]);
 
-  useEffect(() => {
-    if (answer?.outcome === 'saved' && profile.revision >= answer.bot.revision) setDraft(null);
-  }, [answer, profile.revision]);
-
   function edit(field: keyof Settings, value: string) {
     const base = draft?.base ?? profile;
-    setDraft({
+    setEditState({
       base,
       settings: { name: settings.name, role: settings.role, instructions: settings.instructions, [field]: value },
       operationId: crypto.randomUUID(),
@@ -75,7 +84,7 @@ function ProfileEditor({ token, workspaceId, runnerId, epoch, profile }: {
       const commandId = await mutation({ token, runnerId,
         edit: { workspaceId, epoch, botId: profile.id, expectedRevision: draft.base.revision, operationId: draft.operationId, settings: partial },
       });
-      setDraft({ ...draft, commandId });
+      setEditState({ ...draft, commandId });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -86,25 +95,25 @@ function ProfileEditor({ token, workspaceId, runnerId, epoch, profile }: {
   return <article className="bot-device-profile">
     <h2>{profile.name}</h2>
     <form onSubmit={e => { e.preventDefault(); void save(); }}>
-      <label>Bot name<input value={settings.name} onChange={e => edit('name', e.target.value)} disabled={waiting} required /></label>
-      <label>Role<input value={settings.role} onChange={e => edit('role', e.target.value)} disabled={waiting} /></label>
-      <label>Instructions<textarea value={settings.instructions} onChange={e => edit('instructions', e.target.value)} disabled={waiting} rows={4} /></label>
-      <button type="submit" disabled={!changed.length || waiting || !!conflict || answer?.outcome === 'saved'}>{waiting ? 'Waiting for Runner…' : 'Save settings'}</button>
-      {error || report?.state === 'failed' ? <p role="alert">{error || report?.note || 'The Runner could not confirm the edit.'}</p> : null}
-      {answer?.outcome === 'saved' ? <p role="status">Settings saved.</p> : null}
+      <label>{labels.name}<input value={settings.name} onChange={e => edit('name', e.target.value)} disabled={waiting} required /></label>
+      <label>{labels.role}<input value={settings.role} onChange={e => edit('role', e.target.value)} disabled={waiting} /></label>
+      <label>{labels.instructions}<textarea value={settings.instructions} onChange={e => edit('instructions', e.target.value)} disabled={waiting} rows={4} /></label>
+      <button type="submit" disabled={!changed.length || waiting || !!conflict}>{waiting ? <T>Waiting for Runner…</T> : <T>Save settings</T>}</button>
+      {error || report?.state === 'failed' ? <p role="alert">{error || report?.note || <T>The Runner could not confirm the edit.</T>}</p> : null}
+      {editState === 'saved' ? <p role="status"><T>Settings saved.</T></p> : null}
       {conflict && draft ? <div role="status">
-        <h3>Settings changed on the Runner</h3>
+        <h3><T>Settings changed on the Runner</T></h3>
         {changed.map(field => <div key={field}>
-          <strong>{field}</strong>
-          <p>Saved: {conflict[field]}</p>
-          <p>Draft: {settings[field]}</p>
+          <strong>{labels[field]}</strong>
+          <p>{translate(msg('Saved: {value}'), { value: conflict[field] })}</p>
+          <p>{translate(msg('Draft: {value}'), { value: settings[field] })}</p>
         </div>)}
-        <button type="button" onClick={() => setDraft(null)}>Use saved settings</button>
-        <button type="button" onClick={() => setDraft({
+        <button type="button" onClick={() => setEditState(null)}><T>Use saved settings</T></button>
+        <button type="button" onClick={() => setEditState({
           base: conflict,
           settings: { ...conflict, ...Object.fromEntries(changed.map(field => [field, settings[field]])) },
           operationId: crypto.randomUUID(),
-        })}>Continue editing my draft</button>
+        })}><T>Continue editing my draft</T></button>
       </div> : null}
     </form>
   </article>;
@@ -138,6 +147,7 @@ type ActionResult = { outcome: string; rows?: { id: string; text: string }[]; re
 
 function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
   const key = `bot-action-draft:${workspace.ownerRunnerId}:${workspace.workspaceId}:${workspace.epoch}:${scopeKey}`;
+  const translate = useMessages();
   const mutation = useMutation(api.phone.actOnBotWorkspace);
   const [draft, setDraft] = useState<ActionDraft | null>(() => {
     try {
@@ -182,10 +192,11 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
   }
 
   return { draft: draft?.action, result, waiting, edit, submit,
-    problem: problem || (reply?.state === 'failed' ? reply.note || 'The Runner refused the action.' : '') };
+    problem: problem || (reply?.state === 'failed' ? reply.note || translate(msg('The Runner refused the action.')) : '') };
 }
 
 function Notes({ token, workspace, scope }: { token: string; workspace: Workspace; scope: Workspace['notes'][number] }) {
+  const translate = useMessages();
   const action = useActionDraft(token, workspace, `notes:${scope.scope}:${scope.scopeId}`);
   const initial = { scope: { kind: scope.scope, id: scope.scopeId }, expectedRevision: scope.revision };
   const draft = action.draft?.kind === 'note.edit' || action.draft?.kind === 'note.add' ? action.draft : undefined;
@@ -194,57 +205,58 @@ function Notes({ token, workspace, scope }: { token: string; workspace: Workspac
   const disabled = action.waiting || conflict;
   const removal = action.draft?.kind === 'note.remove' ? action.draft : undefined;
   return <details>
-    <summary>Notes</summary>
+    <summary><T>Notes</T></summary>
     {scope.rows.map(row => <p key={row.id}>{row.text}{row.pinned ? null : <>
-      {' '}<button disabled={disabled} onClick={() => action.edit({ kind: 'note.edit', ...initial, entryId: row.id, text: row.text })}>Edit</button>
-      {' '}<button disabled={disabled || !!draft && !saved} onClick={() => void action.submit({ kind: 'note.remove', ...initial, entryId: row.id })}>Remove</button>
+      {' '}<button disabled={disabled} onClick={() => action.edit({ kind: 'note.edit', ...initial, entryId: row.id, text: row.text })}><T>Edit</T></button>
+      {' '}<button disabled={disabled || !!draft && !saved} onClick={() => void action.submit({ kind: 'note.remove', ...initial, entryId: row.id })}><T>Remove</T></button>
     </>}</p>)}
     {removal && !saved && !scope.rows.some(row => row.id === removal.entryId) ?
-      <button type="button" disabled={disabled} onClick={() => void action.submit()}>Retry removal</button> : null}
+      <button type="button" disabled={disabled} onClick={() => void action.submit()}><T>Retry removal</T></button> : null}
     <form onSubmit={event => {
       event.preventDefault();
       if (draft?.text.trim() && !disabled && !saved) void action.submit();
     }}>
-      <label>{draft?.kind === 'note.edit' ? 'Edit note' : 'Add note'}<textarea value={draft?.text ?? ''} onChange={event => {
+      <label>{draft?.kind === 'note.edit' ? <T>Edit note</T> : <T>Add note</T>}<textarea value={draft?.text ?? ''} onChange={event => {
         const text = event.target.value;
         action.edit(draft && !saved ? { ...draft, text } : { kind: 'note.add', ...initial, text });
       }} rows={3} maxLength={300} disabled={disabled} /></label>
-      <button disabled={disabled || saved || !draft?.text.trim()} type="submit">Save note</button>
+      <button disabled={disabled || saved || !draft?.text.trim()} type="submit"><T>Save note</T></button>
     </form>
-    {action.waiting ? <p role="status">Waiting for Runner…</p> : null}
+    {action.waiting ? <p role="status"><T>Waiting for Runner…</T></p> : null}
     {action.problem ? <p role="alert">{action.problem}</p> : null}
-    {saved ? <button onClick={() => action.edit(null)}>Clear saved draft</button> : null}
+    {saved ? <button onClick={() => action.edit(null)}><T>Clear saved draft</T></button> : null}
     {conflict ? <div role="status">
-      <h3>Notes changed on the Runner</h3>
-      {action.result?.rows?.map(row => <p key={row.id}>Saved: {row.text}</p>)}
-      {draft?.text ? <p>Draft: {draft.text}</p> : null}
-      <button onClick={() => action.edit(null)}>Use saved notes</button>
+      <h3><T>Notes changed on the Runner</T></h3>
+      {action.result?.rows?.map(row => <p key={row.id}>{translate(msg('Saved: {value}'), { value: row.text })}</p>)}
+      {draft?.text ? <p>{translate(msg('Draft: {value}'), { value: draft.text })}</p> : null}
+      <button onClick={() => action.edit(null)}><T>Use saved notes</T></button>
       {draft ? <button onClick={() => {
         if (action.result?.revision) action.edit({ ...draft, expectedRevision: action.result.revision });
-      }}>Continue editing my draft</button> : null}
+      }}><T>Continue editing my draft</T></button> : null}
     </div> : null}
   </details>;
 }
 
 function GroupView({ token, workspace, group }: { token: string; workspace: Workspace; group: Workspace['groups'][number] }) {
+  const translate = useMessages();
   const action = useActionDraft(token, workspace, `group:${group.id}`);
   const text = action.draft?.kind === 'group.post' ? action.draft.text : '';
   const saved = action.result?.outcome === 'saved';
   const scope = workspace.notes.find(row => row.scope === 'group' && row.scopeId === group.id);
   return <details className="bot-device-profile">
     <summary>{group.title}</summary>
-    <p>{group.status}{group.queued ? ` · ${group.queued} queued` : ''}</p>
+    <p>{group.status}{group.queued ? <> · {translate(msg('{count} queued'), { count: group.queued })}</> : null}</p>
     {group.events.map(row => <p key={row.id}>{row.text}</p>)}
     {scope ? <Notes token={token} workspace={workspace} scope={scope} /> : null}
     <form onSubmit={event => { event.preventDefault(); if (text.trim() && !saved) void action.submit(); }}>
-      <label>Message the Group<textarea value={text} rows={3} maxLength={30_000} onChange={event => {
+      <label><T>Message the Group</T><textarea value={text} rows={3} maxLength={30_000} onChange={event => {
         action.edit({ kind: 'group.post', groupId: group.id, text: event.target.value });
       }} disabled={action.waiting} /></label>
-      <button type="submit" disabled={!text.trim() || action.waiting || saved}>Post to Group</button>
+      <button type="submit" disabled={!text.trim() || action.waiting || saved}><T>Post to Group</T></button>
     </form>
-    {action.waiting ? <p role="status">Waiting for Runner…</p> : null}
+    {action.waiting ? <p role="status"><T>Waiting for Runner…</T></p> : null}
     {action.problem ? <p role="alert">{action.problem}</p> : null}
-    {saved ? <button onClick={() => action.edit(null)}>Clear sent draft</button> : null}
+    {saved ? <button onClick={() => action.edit(null)}><T>Clear sent draft</T></button> : null}
   </details>;
 }
 
@@ -255,7 +267,7 @@ function TaskView({ token, workspace, task }: { token: string; workspace: Worksp
     <a href={threadPath(task.threadId)}>{task.title}</a> · {task.status}
     {busy ? <button disabled={action.command.busy} onClick={() => void action.send({
       kind: 'task.stop', taskId: task.id, expectedRevision: task.revision,
-    })}>Stop task</button> : null}
+    })}><T>Stop task</T></button> : null}
     <CommandNote command={action.command} />
   </div>;
 }
@@ -265,11 +277,11 @@ export default function BotsPage({ token }: { token: string }) {
   const capable = (me?.apiVersion ?? 0) >= 106;
   const workspaces = useLiveQuery(api.phone.botWorkspaces, capable ? { token } : 'skip');
   return <main className="bot-device-page">
-    <a href="/" onClick={e => { e.preventDefault(); go('/'); }}>Threads</a>
-    <h1>Bots</h1>
-    {me && !capable ? <p>This backend needs an update to show Bots.</p> : null}
-    {capable && workspaces === undefined ? <p>Loading Bots…</p> : null}
-    {workspaces?.length === 0 ? <p>No Bot workspace is available on this device.</p> : null}
+    <a href="/" onClick={e => { e.preventDefault(); go('/'); }}><T>Threads</T></a>
+    <h1><T>Bots</T></h1>
+    {me && !capable ? <p><T>This backend needs an update to show Bots.</T></p> : null}
+    {capable && workspaces === undefined ? <p><T>Loading Bots…</T></p> : null}
+    {workspaces?.length === 0 ? <p><T>No Bot workspace is available on this device.</T></p> : null}
     {workspaces?.map(workspace => <section key={workspace.workspaceId}>
       {workspace.profiles.map(profile => <div key={`${workspace.epoch}:${profile.id}`}>
         <ProfileEditor token={token} workspaceId={workspace.workspaceId} runnerId={workspace.ownerRunnerId} epoch={workspace.epoch} profile={profile} />
@@ -278,7 +290,7 @@ export default function BotsPage({ token }: { token: string }) {
       </div>)}
       {workspace.groups.map(group => <GroupView key={group.id} token={token} workspace={workspace} group={group} />)}
       {workspace.tasks.map(task => <TaskView key={task.id} token={token} workspace={workspace} task={task} />)}
-      {workspace.requests.map(request => <p key={request.id}><a href={threadPath(request.targetThreadId)}>Bot request</a> · {request.status}</p>)}
+      {workspace.requests.map(request => <p key={request.id}><a href={threadPath(request.targetThreadId)}><T>Bot request</T></a> · {request.status}</p>)}
     </section>)}
   </main>;
 }
