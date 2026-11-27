@@ -81,7 +81,8 @@ function startRunner(entry: string, home: string, extra: Record<string, string> 
 
 async function connect(home: string, port: number) {
   const token = fs.readFileSync(path.join(home, 'secrets', 'runner-token'), 'utf8').trim();
-  const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token);
+  // The supervised child runs at background priority during the check.
+  const c = await RunnerClient.connect(`ws://127.0.0.1:${port}/rpc`, token, { authTimeoutMs: PATIENCE_MS });
   const notices: string[] = [];
   c.onNotification((m, p) => m === 'runner.notice' && notices.push(p.message));
   const hello = await c.call('hello', { client: 'test', version: '1' });

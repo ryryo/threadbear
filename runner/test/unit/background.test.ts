@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { makeHarness, tmpDir } from '../helpers/fakes.ts';
+import { PATIENCE_MS, patiently } from '../helpers/patience.ts';
 import { asAgent, inBackground, jobPriority, TASKPOLICY, unwrapped } from '../../src/background.ts';
 import { AcpProcess } from '../../src/adapters/acp/connection.ts';
 import { AppServerProcess } from '../../src/adapters/codex/appserver.ts';
@@ -141,7 +142,7 @@ test('runner: a turn hook runs at background priority unless the runner is told 
     fs.mkdirSync(path.join(project, '.git'), { recursive: true });
     fs.mkdirSync(path.join(project, '.threadbear', 'patches'), { recursive: true });
     fs.writeFileSync(path.join(project, '.threadbear', 'patches', 'hooks.ts'), `export default { hooks: [{ title: "Pri", on: "turn.end", run: "${PRI}", tell: "never" }] };\n`);
-    const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: 20_000, backgroundJobs });
+    const h = makeHarness(undefined, {}, { panelsRoot: root, actionShell: ['/bin/sh', '-c'], actionTimeoutMs: PATIENCE_MS, backgroundJobs });
     const { thread } = h.runner.create({ text: 'hi', accountId: 'claude-3', cwd: project });
     await new Promise((r) => setImmediate(r));
     await h.runner.patchesIdle();
@@ -149,7 +150,7 @@ test('runner: a turn hook runs at background priority unless the runner is told 
     s.init();
     s.result('completed');
     const runs = () => h.events(thread.id).filter((e) => e.type === 'action.run');
-    for (let i = 0; i < 2000 && !runs().length; i++) await new Promise((r) => setTimeout(r, 10));
+    await patiently(() => runs().length > 0);
     return (runs()[0] as { text?: string } | undefined)?.text?.trim();
   };
   assert.equal(await pri(true), '4');
