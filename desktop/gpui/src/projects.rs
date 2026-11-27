@@ -419,11 +419,14 @@ impl Threadbear {
         if self.projects.busy.contains("new") {
             return;
         }
-        let field = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+        let field =
+            cx.new(|cx| InputState::new(window, cx).placeholder(threadbear_core::tr!("Name")));
         let (entity, typed) = (cx.entity().downgrade(), field.clone());
         window.open_alert_dialog(cx, move |dialog, _, _| {
             let (entity, field, thread) = (entity.clone(), typed.clone(), thread.clone());
-            let dialog = dialog.title("New project").width(px(340.));
+            let dialog = dialog
+                .title(threadbear_core::tr!("New project"))
+                .width(px(340.));
             let dialog = if thread.is_some() {
                 dialog.description("The thread goes in it.")
             } else {
@@ -1080,7 +1083,7 @@ impl Threadbear {
         }
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Title")
+                .placeholder(threadbear_core::tr!("Title"))
                 .default_value(project.title.clone())
         });
         // A new title typed and not yet saved: an update's restart waits for it.

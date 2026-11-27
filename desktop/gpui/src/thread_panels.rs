@@ -443,7 +443,9 @@ impl Threadbear {
                     .text_size(px(style::size::LABEL))
                     .line_height(px(style::natural_line(style::size::LABEL)))
                     .text_color(style::secondary_text(cx))
-                    .child("This thread is open in its own panel."),
+                    .child(threadbear_core::tr!(
+                        "This thread is open in its own panel."
+                    )),
             )
             .child(h_flex().gap(px(8.)).child(go).child(here))
             .into_any_element()

@@ -109,7 +109,7 @@ pub(crate) fn pending_chips(
                 .aria_label(VIEW_TIP)
                 .cursor_pointer()
                 .text_color(accent)
-                .child("View")
+                .child(threadbear_core::tr!("View"))
                 .tip(VIEW_TIP)
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();

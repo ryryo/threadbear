@@ -513,7 +513,7 @@ impl Composer {
             .unwrap_or_default();
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Say something else…")
+                .placeholder(threadbear_core::tr!("Say something else…"))
                 .auto_grow(1, 8)
                 .submit_on_enter(true)
         });
@@ -913,16 +913,17 @@ impl Composer {
                     // A thread it started links to it (`thread:<id>`).
                     if let Some(id) = end.thread_id.clone() {
                         let this = this.clone();
-                        line = line.cursor_pointer().tip("Open this thread").on_click(
-                            move |_, window, cx| {
+                        line = line
+                            .cursor_pointer()
+                            .tip(threadbear_core::tr!("Open this thread"))
+                            .on_click(move |_, window, cx| {
                                 if let Some(this) = this.upgrade() {
                                     let target = format!("thread:{id}");
                                     this.update(cx, |this, cx| {
                                         this.open_ask_link(&target, window, cx)
                                     });
                                 }
-                            },
-                        );
+                            });
                     }
                     column = column.child(line);
                 }
@@ -1034,7 +1035,7 @@ impl Composer {
                                             div()
                                                 .text_size(px(style::size::SMALL))
                                                 .text_color(style::secondary_label(cx))
-                                                .child("Recommended"),
+                                                .child(threadbear_core::tr!("Recommended")),
                                         ),
                                 )
                             }),
@@ -1061,7 +1062,7 @@ impl Composer {
                                         style::quiet_text(cx)
                                     }),
                             )
-                            .tip("Ask what this means")
+                            .tip(threadbear_core::tr!("Ask what this means"))
                             .on_click(move |_, window, cx| {
                                 cx.stop_propagation();
                                 if let Some(this) = this3.upgrade() {
@@ -1852,7 +1853,7 @@ pub(crate) trait AskHost: Sized + 'static {
                                                     div()
                                                         .text_size(px(style::size::SMALL))
                                                         .text_color(style::secondary_label(cx))
-                                                        .child("Recommended"),
+                                                        .child(threadbear_core::tr!("Recommended")),
                                                 ),
                                         )
                                     }),
@@ -2079,7 +2080,9 @@ impl AskHost for Composer {
                     .with_size(px(14.))
                     .text_color(style::secondary_label(cx)),
             )
-            .tip("Add pictures to this answer (or paste or drop them in the box)")
+            .tip(threadbear_core::tr!(
+                "Add pictures to this answer (or paste or drop them in the box)"
+            ))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.choose_answer_pictures(ask, window, cx)
             }))

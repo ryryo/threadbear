@@ -353,7 +353,7 @@ impl Threadbear {
                         .text_size(px(style::size::SIDEBAR_PREVIEW))
                         .line_height(px(style::natural_line(style::size::SIDEBAR_PREVIEW)))
                         .text_color(p.secondary)
-                        .child("No projects yet.")
+                        .child(threadbear_core::tr!("No projects yet."))
                         .into_any_element(),
                 };
                 list = list.child(far.row(&key, Some(el), 0.));
@@ -447,7 +447,7 @@ impl Threadbear {
                 .text_size(px(style::size::SIDEBAR_BUTTON))
                 .line_height(px(17.))
                 .text_color(fg)
-                .child("New project"),
+                .child(threadbear_core::tr!("New project")),
         )
         .into_any_element()
     }
@@ -663,7 +663,7 @@ impl Threadbear {
         .line_height(px(16.))
         .font_semibold()
         .text_color(secondary)
-        .child("Archived projects")
+        .child(threadbear_core::tr!("Archived projects"))
         .child(icon(
             if open {
                 "chevron.down"

@@ -17,6 +17,15 @@ Feature: Desktop language
     Then the Settings title is "General" in "en"
     And the "File" menu lists "Close"
 
+  @settings.language @swift-pending @mac-pending @windows-pending
+  Scenario: System follows the locale of the Linux desktop session
+    When I choose Japanese as the desktop language
+    And I choose the system language for the desktop
+    And I relaunch the desktop with a Japanese Linux session locale
+    And I open Settings
+    Then the desktop's language preference is "system"
+    And the Settings title is "一般" in "ja"
+
   @settings.language @swift-pending
   Scenario: Settings keeps its selected language when changing tabs
     When I choose Japanese as the desktop language

@@ -1110,7 +1110,7 @@ impl ReviewWindow {
                                                 .bg(white()),
                                         ),
                                 )
-                                .child("Notes"),
+                                .child(threadbear_core::tr!("Notes")),
                             if notes_on {
                                 "Hide the agent's notes (N)"
                             } else {
@@ -1132,7 +1132,7 @@ impl ReviewWindow {
                                 .text_size(px(13.))
                                 .text_color(label)
                                 .hover(|d| d.bg(style::hover_fill(cx)))
-                                .child("See everything"),
+                                .child(threadbear_core::tr!("See everything")),
                             "See everything (0)",
                         )
                         .on_click(
@@ -1202,7 +1202,7 @@ impl ReviewWindow {
                     .min_w_0()
                     .text_size(px(13.))
                     .text_color(style::faint_text(cx))
-                    .child("Drag to move, pinch to zoom, double-click to look closer. Circle, highlight or pin a part to talk about it."),
+                    .child(threadbear_core::tr!("Drag to move, pinch to zoom, double-click to look closer. Circle, highlight or pin a part to talk about it.")),
             )
             .into_any_element()
     }

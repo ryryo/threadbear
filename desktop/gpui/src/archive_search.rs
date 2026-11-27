@@ -287,7 +287,7 @@ impl Threadbear {
                 .text_size(px(style::size::SIDEBAR_PREVIEW))
                 .text_color(p.secondary)
                 .child(Spinner::new().color(p.secondary).with_size(px(11.)))
-                .child("Searching the archive")
+                .child(threadbear_core::tr!("Searching the archive"))
                 .into_any_element();
             out.push(("note:archive".into(), row));
         } else if let Some(e) = error {
@@ -316,7 +316,7 @@ impl Threadbear {
             .test_support()
             .role(gpui_kit::Role::Heading)
             .aria_label("Agent Archive")
-            .tip("Sessions in Agent Archive with these words: from every agent and machine, and from before Threadbear")
+            .tip(threadbear_core::tr!("Sessions in Agent Archive with these words: from every agent and machine, and from before Threadbear"))
             .pr(px(TRAILING))
             .pl(px(LEADING))
             .pt(px(18.))
@@ -331,7 +331,7 @@ impl Threadbear {
                     .line_height(px(16.))
                     .font_semibold()
                     .text_color(p.secondary)
-                    .child("Agent Archive"),
+                    .child(threadbear_core::tr!("Agent Archive")),
             )
             .when_some(count, |s, n| {
                 s.child(
@@ -662,7 +662,7 @@ impl Threadbear {
                         "A session from Agent Archive, read only",
                         gpui_kit::Role::GenericContainer
                     )
-                    .child("Agent Archive"),
+                    .child(threadbear_core::tr!("Agent Archive")),
                 )
                 .child(
                     div()
@@ -732,7 +732,7 @@ impl Threadbear {
                     .text_size(px(style::size::LABEL))
                     .text_color(secondary)
                     .child(Spinner::new().color(secondary).with_size(px(12.)))
-                    .child("Reading the archive"),
+                    .child(threadbear_core::tr!("Reading the archive")),
             );
         }
         if let Some(e) = page.error.clone() {
@@ -745,10 +745,12 @@ impl Threadbear {
                     .child(format!("Couldn't read this session: {e}"))
                     .child(
                         Button::new("archive-page-retry")
-                            .label("Try again")
+                            .label(threadbear_core::tr!("Try again"))
                             .small()
                             .secondary()
-                            .tooltip("Ask the archive for this session again")
+                            .tooltip(threadbear_core::tr!(
+                                "Ask the archive for this session again"
+                            ))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.load_archive_page(cx);
                                 cx.notify();
@@ -831,15 +833,15 @@ impl Threadbear {
                     "This session is in Agent Archive: read it here, or pick it up in a new thread",
                     gpui_kit::Role::GenericContainer
                 )
-                .child("Read only"),
+                .child(threadbear_core::tr!("Read only")),
             )
             .when_some(url, |s, url| {
                 s.child(
                     Button::new("archive-open-reader")
-                        .label("Open in the archive")
+                        .label(threadbear_core::tr!("Open in the archive"))
                         .small()
                         .secondary()
-                        .tooltip("Open this session in Agent Archive's reader, in your browser")
+                        .tooltip(threadbear_core::tr!("Open this session in Agent Archive's reader, in your browser"))
                         .on_click(move |_, _, cx| {
                             crate::open_gate::open_web(&url, cx);
                         }),
@@ -847,11 +849,11 @@ impl Threadbear {
             })
             .child(
                 Button::new("archive-new-thread")
-                    .label("New thread from this")
+                    .label(threadbear_core::tr!("New thread from this"))
                     .small()
                     .primary()
                     .disabled(loading)
-                    .tooltip("Start a new thread that picks this session up: its agent reads it from the archive")
+                    .tooltip(threadbear_core::tr!("Start a new thread that picks this session up: its agent reads it from the archive"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.start_thread_about(new_words.clone(), window, cx);
                     })),

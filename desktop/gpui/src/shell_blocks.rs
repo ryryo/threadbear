@@ -256,7 +256,7 @@ fn icon(which: Icon, command: &str, thread: &str, cx: &App) -> impl IntoElement 
         .on_click(move |_, window, cx| press(which, &command, &thread, window, cx))
         // SF Symbols at 12 pt, as ShellBlockIcons draws them.
         .child(glyph.with_size(px(style::size::DETAIL)))
-        .when(copied, |d| d.child("Copied"))
+        .when(copied, |d| d.child(threadbear_core::tr!("Copied")))
         .test_support()
 }
 

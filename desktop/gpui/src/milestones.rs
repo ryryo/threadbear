@@ -156,7 +156,7 @@ impl Threadbear {
             .test_support()
             .role(Role::Button)
             .aria_label("Dismiss milestone")
-            .tip("Dismiss milestone")
+            .tip(threadbear_core::tr!("Dismiss milestone"))
             .cursor_pointer()
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.milestone.note = None;

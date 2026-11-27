@@ -359,7 +359,7 @@ impl Threadbear {
                     .pt(px(10.))
                     .text_size(px(style::size::SIDEBAR_PREVIEW))
                     .text_color(p.secondary)
-                    .child("Loading…"),
+                    .child(threadbear_core::tr!("Loading…")),
             );
         }
         let added = rules::added(&list);
@@ -367,7 +367,7 @@ impl Threadbear {
             rows = rows.child(self.render_recipe_row(recipe, &p, cx));
         }
         if self.recipes.list.is_some() && added.is_empty() {
-            rows = rows.child(div().pl(px(LEADING)).pr(px(TRAILING)).pt(px(10.)).text_size(px(style::size::SIDEBAR_PREVIEW)).line_height(px(17.)).text_color(p.secondary).child("None added yet. Browse them and add one, and an agent sets it up with you."));
+            rows = rows.child(div().pl(px(LEADING)).pr(px(TRAILING)).pt(px(10.)).text_size(px(style::size::SIDEBAR_PREVIEW)).line_height(px(17.)).text_color(p.secondary).child(threadbear_core::tr!("None added yet. Browse them and add one, and an agent sets it up with you.")));
         }
         let gallery_lit =
             self.home_page() == Some(SidebarMode::Recipes) && self.recipes.open.is_none();
@@ -675,8 +675,8 @@ impl Threadbear {
                     .flex_1()
                     .min_w_0()
                     .gap(px(8.))
-                    .child(div().text_size(px(24.)).line_height(px(29.)).font_semibold().child("Recipes"))
-                    .child(div().text_size(px(style::size::LABEL)).line_height(px(17.)).text_color(secondary).child("Techniques worth keeping. Add one and an agent sets it up with you; switch it off and on whenever you like.")),
+                    .child(div().text_size(px(24.)).line_height(px(29.)).font_semibold().child(threadbear_core::tr!("Recipes")))
+                    .child(div().text_size(px(style::size::LABEL)).line_height(px(17.)).text_color(secondary).child(threadbear_core::tr!("Techniques worth keeping. Add one and an agent sets it up with you; switch it off and on whenever you like."))),
             )
             .child(div().mt(px(4.)).child(crate::projects_page::icon_push_button("recipes-new-home", "plus", "New recipe", "Write a recipe of your own with an agent", busy, cx, cx.listener(|this, _: &ClickEvent, _, cx| this.new_recipe(cx)))));
         let list = self.recipes.list.clone().unwrap_or_default();
@@ -684,13 +684,15 @@ impl Threadbear {
             div()
                 .text_size(px(style::size::LABEL))
                 .text_color(secondary)
-                .child("Loading…")
+                .child(threadbear_core::tr!("Loading…"))
                 .into_any_element()
         } else if list.is_empty() {
             div()
                 .text_size(px(style::size::LABEL))
                 .text_color(secondary)
-                .child("No recipes yet. Write one with New recipe.")
+                .child(threadbear_core::tr!(
+                    "No recipes yet. Write one with New recipe."
+                ))
                 .into_any_element()
         } else {
             self.render_recipe_cards(list, cx)
@@ -1052,7 +1054,7 @@ impl Threadbear {
             )
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.show_recipes(None, cx)))
             .child(icon("chevron.left", 11., secondary))
-            .child("All recipes"),
+            .child(threadbear_core::tr!("All recipes")),
         );
         v_flex()
             .w_full()
@@ -1126,7 +1128,7 @@ impl Threadbear {
                 div()
                     .text_size(px(style::size::DETAIL))
                     .text_color(faint)
-                    .child("Started by its schedule"),
+                    .child(threadbear_core::tr!("Started by its schedule")),
             );
         }
         let mut body = v_flex().px(px(18.)).pt(px(14.)).pb(px(18.)).gap(px(14.));
@@ -1259,7 +1261,7 @@ impl Threadbear {
                         div()
                             .text_size(px(style::size::DETAIL))
                             .text_color(faint)
-                            .child("An example, not yours"),
+                            .child(threadbear_core::tr!("An example, not yours")),
                     )
                     .child(nav),
             )
@@ -1312,14 +1314,14 @@ impl Threadbear {
                     div()
                         .text_size(px(style::size::DETAIL))
                         .text_color(faint)
-                        .child("What agents are told now"),
+                        .child(threadbear_core::tr!("What agents are told now")),
                 )
                 .child(quote(old).text_color(secondary))
                 .child(
                     div()
                         .text_size(px(style::size::DETAIL))
                         .text_color(faint)
-                        .child("The new wording"),
+                        .child(threadbear_core::tr!("The new wording")),
                 );
         }
         col = col.child(quote(habit.text));
@@ -1343,12 +1345,14 @@ impl Threadbear {
             foot = foot.child(
                 div().id("recipe-habit-take").test_support().child(
                     Button::new("recipe-habit-take-button")
-                        .label("Use the new wording")
+                        .label(threadbear_core::tr!("Use the new wording"))
                         .small()
                         .secondary()
                         .loading(busy)
                         .disabled(busy)
-                        .tooltip("Tell every thread's agent this wording from now on")
+                        .tooltip(threadbear_core::tr!(
+                            "Tell every thread's agent this wording from now on"
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.set_recipe_on(take_id.clone(), true, cx)
                         })),
@@ -1454,7 +1458,7 @@ impl Threadbear {
         let mut row = h_flex().gap(px(8.)).pt(px(6.)).child(
             div().id("recipe-change").test_support().child(
                 Button::new("recipe-change-button")
-                    .label("Change it with an agent")
+                    .label(threadbear_core::tr!("Change it with an agent"))
                     .small()
                     .secondary()
                     .loading(changing)
@@ -1476,7 +1480,7 @@ impl Threadbear {
             row = row.child(
                 div().id("recipe-remove").test_support().child(
                     Button::new("recipe-remove-button")
-                        .label("Remove")
+                        .label(threadbear_core::tr!("Remove"))
                         .small()
                         .secondary()
                         .loading(removing)
@@ -1619,7 +1623,7 @@ impl Threadbear {
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             this.open(thread.clone(), window, cx)
                         }))
-                        .child("Open"),
+                        .child(threadbear_core::tr!("Open")),
                     ),
             );
         }

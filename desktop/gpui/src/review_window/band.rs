@@ -500,7 +500,7 @@ impl ReviewWindow {
             none_tip,
         )
         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_none(cx)))
-        .child(div().pt(px(1.)).child("None of them"));
+        .child(div().pt(px(1.)).child(threadbear_core::tr!("None of them")));
         // Send says what will go, and while it goes says so with a spinner and
         // takes no more presses. Grey in a window that isn't in front, as a
         // Mac's own default button is.
@@ -553,7 +553,7 @@ impl ReviewWindow {
             column = column.child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("None of them"),
+                    .child(threadbear_core::tr!("None of them")),
             );
         }
         if let Some(reply) = sent.reply.filter(|r| !r.is_empty()) {

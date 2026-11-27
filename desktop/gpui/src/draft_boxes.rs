@@ -1180,7 +1180,7 @@ fn copied_bubble(serial: usize, cx: &App) -> AnyElement {
                 .line_height(px(style::natural_line(size::DETAIL)))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(label)
-                .child("Copied to clipboard"),
+                .child(threadbear_core::tr!("Copied to clipboard")),
         );
     // Over the button, 4 above it (the button is 20 tall), its right edge
     // the box's, 6 in from the button's.

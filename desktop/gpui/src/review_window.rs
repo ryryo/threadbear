@@ -483,7 +483,7 @@ impl ReviewWindow {
         let session_pictures = session.draft().images.len();
         let reply = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
-                .placeholder("Add a reply")
+                .placeholder(threadbear_core::tr!("Add a reply"))
                 .auto_grow(1, 8);
             state.set_value(content, window, cx);
             state
@@ -1245,7 +1245,7 @@ impl ReviewWindow {
                                 div()
                                     .text_size(gpui_kit::px(13.))
                                     .text_color(red)
-                                    .child("Cancel review"),
+                                    .child(threadbear_core::tr!("Cancel review")),
                             ),
                         ),
                 ),
@@ -1324,7 +1324,7 @@ impl ReviewWindow {
                 div()
                     .text_size(px(17.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("No images to compare"),
+                    .child(threadbear_core::tr!("No images to compare")),
             )
             .into_any_element()
     }
@@ -1693,7 +1693,11 @@ impl Threadbear {
             );
         }
         if !loading && shown.is_empty() && error.is_none() {
-            column = column.child(div().text_color(secondary).child("No reviews waiting."));
+            column = column.child(
+                div()
+                    .text_color(secondary)
+                    .child(threadbear_core::tr!("No reviews waiting.")),
+            );
         }
         deferred(
             anchored().child(

@@ -154,7 +154,7 @@ impl SidePane {
                 }
                 cx.notify();
             }))
-            .child("Open project"),
+            .child(threadbear_core::tr!("Open project")),
         );
         let card = v_flex()
             .w(px(280.))

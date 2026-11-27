@@ -386,7 +386,7 @@ impl ThreadPane {
                     line = line.child(
                         mark_box()
                             .id(("sending", ix))
-                            .tip("Sending to the runner")
+                            .tip(threadbear_core::tr!("Sending to the runner"))
                             .child(self.spinner(14., cx)),
                     )
                 }
@@ -394,7 +394,9 @@ impl ThreadPane {
                     line = line.child(
                         mark_box()
                             .id(("queued", ix))
-                            .tip("Waiting for the current turn to finish")
+                            .tip(threadbear_core::tr!(
+                                "Waiting for the current turn to finish"
+                            ))
                             .child(parts::icon("clock", 14., quiet)),
                     )
                 }
@@ -519,7 +521,9 @@ impl ThreadPane {
                     .h(px(WAITING_NOTE_HEIGHT))
                     .text_size(px(size::SMALL))
                     .text_color(faint)
-                    .child("Runner restarting. Sends when it's back."),
+                    .child(threadbear_core::tr!(
+                        "Runner restarting. Sends when it's back."
+                    )),
             );
         }
         let lift = self.send_lift(&row.id, &sent_text, pending, window, cx);
@@ -1304,7 +1308,7 @@ fn answers_body(ix: usize, words: &AnsweredWords, cx: &App) -> Div {
                 d.child(
                     div()
                         .id(("review-answer", ix))
-                        .tip("Review")
+                        .tip(threadbear_core::tr!("Review"))
                         .child(parts::icon("rectangle.on.rectangle", size::SMALL, question)),
                 )
             })

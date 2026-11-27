@@ -1536,7 +1536,9 @@ impl SidePane {
                 .text_center()
                 .text_size(px(style::size::SMALL))
                 .text_color(p.secondary)
-                .child("Only the start of this file came from the runner.")
+                .child(threadbear_core::tr!(
+                    "Only the start of this file came from the runner."
+                ))
         });
         let body: AnyElement = match &open.body {
             // A spinner so a click shows something at once; the header already

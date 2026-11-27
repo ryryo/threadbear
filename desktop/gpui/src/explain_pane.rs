@@ -212,7 +212,7 @@ impl SidePane {
                     .truncate()
                     .text_size(px(size::LABEL))
                     .font_semibold()
-                    .child("Explain"),
+                    .child(threadbear_core::tr!("Explain")),
             )
             .into_any_element()
     }
@@ -315,7 +315,7 @@ impl SidePane {
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.retry_explain(&thread_id, index, cx)
                             }))
-                            .child("Try again"),
+                            .child(threadbear_core::tr!("Try again")),
                         ),
                 );
             } else {
@@ -328,7 +328,7 @@ impl SidePane {
                             div()
                                 .text_size(px(size::LABEL))
                                 .text_color(secondary)
-                                .child("Thinking"),
+                                .child(threadbear_core::tr!("Thinking")),
                         ),
                 );
             }
@@ -413,7 +413,7 @@ impl SidePane {
         }
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .placeholder("Ask a follow-up")
+                .placeholder(threadbear_core::tr!("Ask a follow-up"))
                 .auto_grow(1, 5)
                 .submit_on_enter(true)
         });

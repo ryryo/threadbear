@@ -53,7 +53,7 @@ pub(crate) fn recommended_mark(cx: &App) -> AnyElement {
                 .text_size(px(style::size::DETAIL))
                 .line_height(px(style::natural_line(style::size::WORK)))
                 .text_color(style::secondary_text(cx))
-                .child("Recommended"),
+                .child(threadbear_core::tr!("Recommended")),
         )
         .into_any_element()
 }

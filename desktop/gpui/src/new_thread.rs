@@ -1034,7 +1034,7 @@ impl Threadbear {
                     .text_color(style::quiet_text(cx))
                     .hover(|s| s.text_color(cx.theme().foreground))
                     .child(Icon::from(IconName::X).with_size(px(9.)))
-                    .tip("Start it outside the project")
+                    .tip(threadbear_core::tr!("Start it outside the project"))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.new_thread.picks.project = None;
                         cx.notify();

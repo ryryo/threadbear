@@ -1169,7 +1169,7 @@ impl SidePane {
                     .text_size(px(style::size::LABEL))
                     .font_semibold()
                     .text_color(p.fg)
-                    .child("Activity"),
+                    .child(threadbear_core::tr!("Activity")),
             );
             for (i, a) in pr.activity.iter().enumerate() {
                 let what = match a.review.as_deref() {
@@ -1300,7 +1300,9 @@ impl SidePane {
         if let Some(c) = self.prs.ui.get(url).and_then(|u| u.comment.clone()) {
             return c;
         }
-        let c = cx.new(|cx| TextareaState::new(window, cx).placeholder("Comment on GitHub"));
+        let c = cx.new(|cx| {
+            TextareaState::new(window, cx).placeholder(threadbear_core::tr!("Comment on GitHub"))
+        });
         self.prs.ui.entry(url.to_owned()).or_default().comment = Some(c.clone());
         c
     }
@@ -1455,7 +1457,7 @@ impl SidePane {
                         .pl(px(16.))
                         .text_size(px(style::size::DETAIL))
                         .text_color(p.secondary)
-                        .child("Binary file"),
+                        .child(threadbear_core::tr!("Binary file")),
                 );
             } else if !f.hunks.is_empty() {
                 let diff = f.edit_diff(&format!("{url}#{i}"));
@@ -1605,7 +1607,7 @@ fn pr_checks(pr: &PrView, p: Palette, cx: &mut App) -> AnyElement {
             .pt(px(20.))
             .text_size(px(style::size::LABEL))
             .text_color(p.secondary)
-            .child("No checks on this PR.")
+            .child(threadbear_core::tr!("No checks on this PR."))
             .into_any_element();
     }
     let mut col = v_flex().pt(px(4.));

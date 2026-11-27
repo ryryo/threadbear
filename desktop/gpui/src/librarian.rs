@@ -157,7 +157,7 @@ impl Threadbear {
                         .text_size(px(style::size::SIDEBAR_PREVIEW))
                         .line_height(px(16.))
                         .text_color(p.secondary)
-                        .child("Loading…"),
+                        .child(threadbear_core::tr!("Loading…")),
                 )
                 .into_any_element(),
             Some(status) => {
@@ -310,12 +310,12 @@ impl Threadbear {
             .child(
                 div().id("librarian-run").test_support().a11y_role(Role::GenericContainer).aria_label("Queue a look at every thread it hasn't looked at yet, newest first".to_owned()).child(
                     Button::new("librarian-run-button")
-                        .label("Look at everything")
+                        .label(threadbear_core::tr!("Look at everything"))
                         .xsmall()
                         .secondary()
                         .loading(running)
                         .disabled(running)
-                        .tooltip("Queue a look at every thread it hasn't looked at yet, newest first")
+                        .tooltip(threadbear_core::tr!("Queue a look at every thread it hasn't looked at yet, newest first"))
                         .on_click(cx.listener(|this, _, _, cx| this.run_librarian(cx))),
                 ),
             );
@@ -702,7 +702,7 @@ impl Threadbear {
                     .text_size(px(17.))
                     .line_height(px(21.))
                     .font_semibold()
-                    .child("Settings"),
+                    .child(threadbear_core::tr!("Settings")),
             )
             .child(grid)
             .child(
@@ -713,10 +713,12 @@ impl Threadbear {
                     .aria_label("Private folders, whose threads are never sent anywhere".to_owned())
                     .child(
                         Button::new("librarian-more-settings-button")
-                            .label("More in Settings…")
+                            .label(threadbear_core::tr!("More in Settings…"))
                             .small()
                             .outline()
-                            .tooltip("Private folders, whose threads are never sent anywhere")
+                            .tooltip(threadbear_core::tr!(
+                                "Private folders, whose threads are never sent anywhere"
+                            ))
                             // Settings › Models, where the private folders are (`openModelSettings`).
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_settings(Some(crate::settings_window::Tab::Models), cx)

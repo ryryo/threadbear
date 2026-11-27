@@ -91,7 +91,7 @@ impl Threadbear {
                 || {
                     div()
                         .p(px(30.))
-                        .child("Loading the coordinator…")
+                        .child(threadbear_core::tr!("Loading the coordinator…"))
                         .into_any_element()
                 },
                 |pane| div().size_full().child(pane.clone()).into_any_element(),
@@ -338,7 +338,7 @@ impl Threadbear {
                     .text_size(px(13.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
-                    .child("Open loops"),
+                    .child(threadbear_core::tr!("Open loops")),
             )
             .child(div().flex_1());
 
@@ -363,7 +363,7 @@ impl Threadbear {
                 div()
                     .text_size(px(11.))
                     .text_color(style::faint_text(cx))
-                    .child("All caught up"),
+                    .child(threadbear_core::tr!("All caught up")),
             );
         }
 
@@ -482,7 +482,7 @@ impl Threadbear {
                             }),
                         "Reopen this closed loop",
                     )
-                    .child("Undo"),
+                    .child(threadbear_core::tr!("Undo")),
                 )
                 .child(
                     crate::highlights::tipped(
@@ -569,7 +569,7 @@ impl Threadbear {
                             .truncate()
                             .text_right()
                             .text_color(style::faint_text(cx))
-                            .child("Collapsed while inspecting memory"),
+                            .child(threadbear_core::tr!("Collapsed while inspecting memory")),
                     ),
             );
         }
@@ -620,7 +620,7 @@ impl Threadbear {
                 .text_size(px(11.5))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(style::needs_you_text(cx))
-                .child("Answer below"),
+                .child(threadbear_core::tr!("Answer below")),
         )
         .into_any_element()
     }
@@ -750,7 +750,7 @@ impl Threadbear {
                     .text_size(px(11.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(style::status_progress(cx))
-                    .child("Checking…"),
+                    .child(threadbear_core::tr!("Checking…")),
             )
             .child(
                 crate::highlights::tipped(
@@ -818,7 +818,7 @@ impl Threadbear {
                 })),
             "Jump to this answer in the conversation",
         )
-        .child("Jump")
+        .child(threadbear_core::tr!("Jump"))
         .child(
             icons::symbol("arrow.up.right")
                 .with_size(px(11.))
@@ -957,7 +957,7 @@ impl Threadbear {
                     .text_size(px(15.))
                     .font_weight(FontWeight::BOLD)
                     .text_color(cx.theme().foreground)
-                    .child("Project brief"),
+                    .child(threadbear_core::tr!("Project brief")),
             )
             .child(self.render_text_section(project, TextField::State, window, cx))
             .child(self.render_text_section(project, TextField::Goals, window, cx));
@@ -1089,7 +1089,7 @@ impl Threadbear {
                     .text_size(px(13.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(cx.theme().foreground)
-                    .child("Agent memory"),
+                    .child(threadbear_core::tr!("Agent memory")),
             )
             .child(div().flex_1())
             .child(
@@ -1121,7 +1121,7 @@ impl Threadbear {
                         "Hide agent memory notes"
                     },
                 )
-                .child("Hide")
+                .child(threadbear_core::tr!("Hide"))
                 .child(
                     icons::symbol("chevron.down")
                         .with_size(px(12.))
@@ -1202,7 +1202,7 @@ impl Threadbear {
                 .text_size(px(12.5))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(cx.theme().foreground)
-                .child("Agent memory"),
+                .child(threadbear_core::tr!("Agent memory")),
         )
         // The count never truncates; only the note titles after it give way
         // when the pane is narrow.
@@ -1229,7 +1229,7 @@ impl Threadbear {
                 .gap(px(4.))
                 .text_size(px(11.5))
                 .text_color(style::secondary_text(cx))
-                .child("Show")
+                .child(threadbear_core::tr!("Show"))
                 .child(
                     icons::symbol("chevron.up")
                         .with_size(px(12.))
@@ -1296,7 +1296,7 @@ impl Threadbear {
                             })),
                         "Edit the notes (or double-click it)",
                     )
-                    .child("Edit raw"),
+                    .child(threadbear_core::tr!("Edit raw")),
                 ),
         );
 
@@ -1460,7 +1460,9 @@ impl Threadbear {
                 div()
                     .text_size(px(13.))
                     .text_color(style::secondary_text(cx))
-                    .child("Helper results appear here as the coordinator works."),
+                    .child(threadbear_core::tr!(
+                        "Helper results appear here as the coordinator works."
+                    )),
             );
         }
         for helper in helpers.iter().rev() {
@@ -1683,7 +1685,7 @@ impl Render for CoordinatorSetupSheet {
                                     .text_size(px(size::LABEL))
                                     .line_height(px(18.))
                                     .text_color(style::secondary_text(cx))
-                                    .child("Starts from this project's goals, state and notes. Helpers report here, and it brings you decisions that need you."),
+                                    .child(threadbear_core::tr!("Starts from this project's goals, state and notes. Helpers report here, and it brings you decisions that need you.")),
                             ),
                     ),
             )
@@ -1713,7 +1715,7 @@ impl Render for CoordinatorSetupSheet {
                             .aria_label(cancel_tip.to_owned())
                             .child(
                                 Button::new("coordinator-cancel-add-button")
-                                    .label("Cancel")
+                                    .label(threadbear_core::tr!("Cancel"))
                                     .outline()
                                     .disabled(busy)
                                     .tooltip(cancel_tip)
@@ -1737,7 +1739,7 @@ impl Render for CoordinatorSetupSheet {
                             .aria_label(add_tip.to_owned())
                             .child(
                                 Button::new("coordinator-confirm-add-button")
-                                    .label("Add coordinator")
+                                    .label(threadbear_core::tr!("Add coordinator"))
                                     .primary()
                                     .loading(busy)
                                     .disabled(busy)

@@ -155,7 +155,7 @@ pub(crate) fn popover(facts: &Rc<ContextFacts>, cx: &mut Context<PopoverState>) 
                         .text_size(px(13.))
                         .line_height(px(style::natural_line(13.)))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("Context"),
+                        .child(threadbear_core::tr!("Context")),
                 )
                 .when(claude, |s| {
                     s.child(refresh_button(facts, answer.as_ref(), cx))

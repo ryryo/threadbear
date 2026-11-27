@@ -308,16 +308,20 @@ impl Threadbear {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let title = cx.new(|cx| InputState::new(window, cx).placeholder("What needs doing?"));
-        let done =
-            cx.new(|cx| InputState::new(window, cx).placeholder("What does finished look like?"));
+        let title = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(threadbear_core::tr!("What needs doing?"))
+        });
+        let done = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(threadbear_core::tr!("What does finished look like?"))
+        });
         let app = cx.weak_entity();
         let (project, typed, outcome) = (project.to_owned(), title.clone(), done);
         window.open_alert_dialog(cx, move |dialog, _, _| {
             let (app, project, title, done) =
                 (app.clone(), project.clone(), typed.clone(), outcome.clone());
             dialog
-                .title("Add a to-do")
+                .title(threadbear_core::tr!("Add a to-do"))
                 .width(px(430.))
                 .child(
                     v_flex()

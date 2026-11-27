@@ -163,7 +163,7 @@ pub(crate) fn words_card(title: &str, detail: &str, cx: &App) -> AnyElement {
                         .text_size(px(size::SMALL))
                         .line_height(px(style::natural_line(size::SMALL)))
                         .text_color(style::tertiary_label(cx))
-                        .child("Click to open"),
+                        .child(threadbear_core::tr!("Click to open")),
                 ),
         )
         .into_any_element()
@@ -1208,7 +1208,7 @@ impl ThreadPane {
             div()
                 .flex_none()
                 .whitespace_nowrap()
-                .child("From the agent in "),
+                .child(threadbear_core::tr!("From the agent in ")),
         );
         // The runner's header carries the sender's 8-character prefix
         // (threadbear-mcp.ts `from`), not its whole id, so it's looked up

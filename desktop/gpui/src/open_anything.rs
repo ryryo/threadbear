@@ -660,7 +660,9 @@ impl AnythingBox {
                 .py(px(14.))
                 .text_size(px(size::LABEL))
                 .text_color(style::secondary_text(cx))
-                .child("Nothing by that name. Try fewer letters.")
+                .child(threadbear_core::tr!(
+                    "Nothing by that name. Try fewer letters."
+                ))
                 .into_any_element();
         }
         // Headings and rows are the list's children in turn, so a row's place

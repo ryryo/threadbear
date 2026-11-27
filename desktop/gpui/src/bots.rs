@@ -100,16 +100,16 @@ struct RequestStatus {
 impl RequestStatus {
     fn label(&self) -> &'static str {
         match self.status.as_str() {
-            "admitted" => "Accepted",
-            "queued" => "Queued",
-            "running" => "In progress",
-            "returning" => "Returning result",
-            "returned" if self.failed => "Failed with result",
-            "returned" => "Result received",
-            "failed" => "Failed",
-            "uncertain" => "Delivery unconfirmed",
-            "cancelled" => "Cancelled",
-            _ => "Status unavailable",
+            "admitted" => tr!("Accepted"),
+            "queued" => tr!("Queued"),
+            "running" => tr!("In progress"),
+            "returning" => tr!("Returning result"),
+            "returned" if self.failed => tr!("Failed with result"),
+            "returned" => tr!("Result received"),
+            "failed" => tr!("Failed"),
+            "uncertain" => tr!("Delivery unconfirmed"),
+            "cancelled" => tr!("Cancelled"),
+            _ => tr!("Status unavailable"),
         }
     }
 }
@@ -218,9 +218,9 @@ impl Edit {
     fn label(&self) -> &'static str {
         match self {
             Self::New | Self::Name => tr!("Bot name"),
-            Self::Role => "Role",
+            Self::Role => tr!("Role"),
             Self::Instructions => tr!("Instructions"),
-            Self::Note(_) => "Note",
+            Self::Note(_) => tr!("Note"),
             Self::Privacy => tr!("Dedicated work folder"),
             Self::Review(_, _) => tr!("Proposed note"),
             Self::RequestRerun(_, _) => tr!("Instructions for the new run"),
@@ -532,7 +532,9 @@ impl Threadbear {
                             this.bots.requests = requests;
                             this.bots.error = None;
                         }
-                        Err(_) => this.bots.error = Some("Could not read the Bot requests.".into()),
+                        Err(_) => {
+                            this.bots.error = Some(tr!("Could not read the Bot requests.").into())
+                        }
                     },
                     Err(error) => this.bots.error = Some(error.message),
                 }
@@ -567,7 +569,7 @@ impl Threadbear {
                     Ok(value) => match serde_json::from_value(value["result"].clone()) {
                         Ok(result) => this.bots.request_result = Some((id, result)),
                         Err(_) => {
-                            this.bots.error = Some("Could not read the request result.".into())
+                            this.bots.error = Some(tr!("Could not read the request result.").into())
                         }
                     },
                     Err(error) => this.bots.error = Some(error.message),
@@ -747,7 +749,11 @@ impl Threadbear {
             .gap(px(8.))
             .children(
                 [
-                    (Tab::Conversations, "bot-tab-conversations", "Conversations"),
+                    (
+                        Tab::Conversations,
+                        "bot-tab-conversations",
+                        tr!("Conversations"),
+                    ),
                     (Tab::Memory, "bot-tab-memory", tr!("Memory")),
                     (Tab::Reviews, "bot-tab-reviews", tr!("Memory review")),
                     (Tab::Requests, "bot-tab-requests", tr!("Requests")),
@@ -788,7 +794,7 @@ impl Threadbear {
         let mut page = v_flex().gap(px(12.)).max_w(px(680.));
         if detail.conversations.is_empty() {
             return page
-                .child("Start a conversation to see its requests.")
+                .child(tr!("Start a conversation to see its requests."))
                 .into_any_element();
         }
         page = page.child(h_flex().gap(px(6.)).flex_wrap().children(
@@ -809,12 +815,12 @@ impl Threadbear {
             }),
         ));
         page = page.child(
-            bot_button("bot-refresh-requests", "Refresh requests", busy)
+            bot_button("bot-refresh-requests", tr!("Refresh requests"), busy)
                 .loading(busy)
                 .on_click(cx.listener(|this, _, _, cx| this.load_bot_requests(cx))),
         );
         if self.bots.requests.is_empty() && !busy {
-            page = page.child("No requests from this conversation yet.");
+            page = page.child(tr!("No requests from this conversation yet."));
         }
         for request in self.bots.requests.iter().rev() {
             page = page.child(self.render_bot_request_card(request, cx));
@@ -831,13 +837,13 @@ impl Threadbear {
             .list
             .iter()
             .find(|bot| bot.id == request.target_bot_id)
-            .map_or("Recipient Bot", |bot| bot.name.as_str());
+            .map_or(tr!("Recipient Bot"), |bot| bot.name.as_str());
         let target = request.target_thread_id.clone();
         let payload = json!({ "threadId": self.bots.source, "requestId": id, "expectedRevision": request.revision });
         let presentation = if request.when == "now" {
-            "Joined a running turn"
+            tr!("Joined a running turn")
         } else {
-            "Queued for the conversation"
+            tr!("Queued for the conversation")
         };
         let mut row = v_flex()
             .gap(px(7.))
@@ -864,7 +870,7 @@ impl Threadbear {
         row = row.child(
             bot_button(
                 SharedString::from(format!("bot-request-recipient-{id}")),
-                "Open recipient",
+                tr!("Open recipient"),
                 busy || !self.threads.contains_key(&target),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -879,7 +885,7 @@ impl Threadbear {
             row = row.child(
                 bot_button(
                     SharedString::from(format!("bot-request-cancel-{id}")),
-                    "Cancel request",
+                    tr!("Cancel request"),
                     busy,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -897,7 +903,7 @@ impl Threadbear {
             row = row.child(
                 bot_button(
                     SharedString::from(format!("bot-request-check-{id}")),
-                    "Check delivery",
+                    tr!("Check delivery"),
                     busy,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -917,7 +923,7 @@ impl Threadbear {
             row = row.child(
                 bot_button(
                     SharedString::from(format!("bot-request-rerun-{id}")),
-                    "Start another run",
+                    tr!("Start another run"),
                     busy,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -949,7 +955,7 @@ impl Threadbear {
                     row = row.child(
                         div()
                             .text_color(style::secondary_text(cx))
-                            .child("The full result is unavailable."),
+                            .child(tr!("The full result is unavailable.")),
                     );
                 }
             } else {
@@ -957,7 +963,7 @@ impl Threadbear {
                 row = row.child(
                     bot_button(
                         SharedString::from(format!("bot-request-result-{id}")),
-                        "Read result",
+                        tr!("Read result"),
                         busy,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -985,7 +991,7 @@ impl Threadbear {
                 h_flex()
                     .gap(px(8.))
                     .child(
-                        bot_button("bot-editor-save", "Save", busy)
+                        bot_button("bot-editor-save", tr!("Save"), busy)
                             .primary()
                             .loading(busy)
                             .on_click(
@@ -1514,7 +1520,7 @@ impl Threadbear {
             let action = match change.op.as_str() {
                 "add" => tr!("Add"),
                 "remove" => tr!("Remove"),
-                _ => "Edit",
+                _ => tr!("Edit"),
             };
             let proposal = change
                 .accepted_text
@@ -1524,9 +1530,9 @@ impl Threadbear {
                 .cloned()
                 .unwrap_or_default();
             let status = match change.decision.as_str() {
-                "approved" => "Accepted",
-                "rejected" => "Rejected",
-                _ => "Pending",
+                "approved" => tr!("Accepted"),
+                "rejected" => tr!("Rejected"),
+                _ => tr!("Pending"),
             };
             let mut item = v_flex()
                 .gap(px(5.))
@@ -1627,7 +1633,7 @@ impl Threadbear {
         };
         let timing = match (&note.until, note.pinned) {
             (Some(until), _) => format!("Through {until}"),
-            (None, true) => "Pinned".into(),
+            (None, true) => tr!("Pinned").into(),
             (None, false) => String::new(),
         };
         let topic = note.topic.as_ref().map(|topic| format!("Topic: {topic}"));
@@ -1656,7 +1662,7 @@ impl Threadbear {
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-edit-note-{note_id}")),
-                            "Edit",
+                            tr!("Edit"),
                             disabled,
                         )
                         .on_click(cx.listener(
@@ -1706,11 +1712,11 @@ impl Threadbear {
         }
         for change in &self.bots.changes {
             let action = match change.op.as_str() {
-                _ if change.restored.is_some() => "Restored",
-                "add" => "Added",
-                "remove" => "Removed",
-                "tidy" => "Tidied",
-                _ => "Edited",
+                _ if change.restored.is_some() => tr!("Restored"),
+                "add" => tr!("Added"),
+                "remove" => tr!("Removed"),
+                "tidy" => tr!("Tidied"),
+                _ => tr!("Edited"),
             };
             let text = change
                 .after
@@ -1826,7 +1832,7 @@ impl Threadbear {
                     row.child(
                         bot_button(
                             "thread-bot-requests",
-                            "Requests from this conversation",
+                            tr!("Requests from this conversation"),
                             self.bots.busy,
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1911,8 +1917,9 @@ impl Threadbear {
             ),
             Edit::TaskStart => {
                 let Some((title, brief)) = text.split_once('\n') else {
-                    self.bots.error =
-                        Some("Write the task title on the first line, then add a brief.".into());
+                    self.bots.error = Some(
+                        tr!("Write the task title on the first line, then add a brief.").into(),
+                    );
                     cx.notify();
                     return;
                 };
@@ -2117,8 +2124,9 @@ impl Threadbear {
                 self.bots.editor = None;
                 self.load_bot_tasks(false, cx);
                 if value["saved"].as_bool() == Some(false) {
-                    self.bots.error =
-                        Some("The task stopped, but the Runner could not save the stop.".into());
+                    self.bots.error = Some(
+                        tr!("The task stopped, but the Runner could not save the stop.").into(),
+                    );
                 }
             }
             After::Requests => {

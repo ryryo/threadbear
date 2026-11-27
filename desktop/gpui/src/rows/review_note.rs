@@ -109,7 +109,7 @@ impl ThreadPane {
                     .text_color(quiet)
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
-                    .tip("Open the review's thread")
+                    .tip(threadbear_core::tr!("Open the review's thread"))
                     .child(id.clone())
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.link_clicked(&format!("thread:{thread}"), &row_id, window, cx);
@@ -299,7 +299,7 @@ impl ThreadPane {
                     .text_size(px(size::SMALL))
                     .line_height(px(19.))
                     .text_color(faint)
-                    .child("Open"),
+                    .child(threadbear_core::tr!("Open")),
             );
         }
 

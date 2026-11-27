@@ -66,7 +66,7 @@ pub(crate) fn picker(
                 .text_size(px(13.))
                 .line_height(px(style::natural_line(13.)))
                 .text_color(style::secondary_label(cx))
-                .child("No accounts yet"),
+                .child(threadbear_core::tr!("No accounts yet")),
         );
     }
     for (n, section) in sections.iter().enumerate() {

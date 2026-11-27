@@ -513,7 +513,7 @@ impl Composer {
                     .small()
                     .secondary()
                     .dropdown_caret(true)
-                    .tooltip("Which login to carry on with")
+                    .tooltip(threadbear_core::tr!("Which login to carry on with"))
                     .dropdown_menu(move |menu: PopupMenu, _, _| {
                         let mut menu = menu;
                         for (account, title) in &targets {

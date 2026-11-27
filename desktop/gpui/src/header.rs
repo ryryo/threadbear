@@ -266,7 +266,7 @@ impl Threadbear {
                             s.hover(move |s| s.bg(hover_bg).text_color(fg)).on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.edit_schedule(&id, window, cx)))
                         })
                         .child(icon("clock", 11., secondary))
-                        .child("Scheduled"),
+                        .child(threadbear_core::tr!("Scheduled")),
                 )
             })
             .into_any_element()
@@ -452,7 +452,7 @@ impl Threadbear {
                 }
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .tip("Return saves, Escape cancels")
+            .tip(threadbear_core::tr!("Return saves, Escape cancels"))
             .child(Input::new(field).appearance(false).small().pl(px(0.)))
             .into_any_element()
     }
@@ -490,7 +490,7 @@ impl Threadbear {
         }
         let field = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Thread title")
+                .placeholder(threadbear_core::tr!("Thread title"))
                 .default_value(title)
         });
         // A new name typed and not yet taken: an update's restart waits for it.
@@ -817,7 +817,7 @@ impl Threadbear {
                     .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
                     }))
-                    .child("Copy link"),
+                    .child(threadbear_core::tr!("Copy link")),
                 )
         });
         deferred(
@@ -849,7 +849,7 @@ impl Threadbear {
                                 div()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_size(px(style::size::LABEL))
-                                    .child("Share this thread"),
+                                    .child(threadbear_core::tr!("Share this thread")),
                             )
                             .child(
                                 h_flex()
@@ -1283,7 +1283,7 @@ impl Threadbear {
                             this.dismissed_cli_failures.insert(key.clone());
                             cx.notify();
                         }))
-                        .child("Dismiss"),
+                        .child(threadbear_core::tr!("Dismiss")),
                     )
                 })
                 .into_any_element();
@@ -1379,7 +1379,7 @@ impl Threadbear {
                     "Hide this message"
                 )
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.dismiss_error(cx)))
-                .child("Dismiss"),
+                .child(threadbear_core::tr!("Dismiss")),
             )
             .into_any_element()
     }
@@ -1413,7 +1413,7 @@ impl Threadbear {
                         this.investigate_error(window, cx)
                     }))
                 })
-                .child("Investigate"),
+                .child(threadbear_core::tr!("Investigate")),
             )
             .into_any_element()
     }
@@ -1918,7 +1918,7 @@ impl Threadbear {
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.sign_in(account.clone(), cx)
                     }))
-                    .child("Sign in…"),
+                    .child(threadbear_core::tr!("Sign in…")),
                 )
             })
             .child(
@@ -1932,7 +1932,7 @@ impl Threadbear {
                     "Send your last message again, once you've signed in"
                 )
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.send_again(&id, cx)))
-                .child("Send again"),
+                .child(threadbear_core::tr!("Send again")),
             )
             .into_any_element()
     }
@@ -2182,7 +2182,9 @@ impl Threadbear {
                     .flex_1()
                     .min_w_0()
                     .text_color(secondary)
-                    .child("Claude couldn't continue with this message."),
+                    .child(threadbear_core::tr!(
+                        "Claude couldn't continue with this message."
+                    )),
             )
             .child(
                 tipped!(
@@ -2515,7 +2517,11 @@ impl Threadbear {
                     this.open_archived_note(window, cx)
                 }))
                 .child(icon("archivebox", style::size::LABEL, secondary))
-                .child(div().text_color(secondary).child("Archived"))
+                .child(
+                    div()
+                        .text_color(secondary)
+                        .child(threadbear_core::tr!("Archived")),
+                )
                 .child(div().max_w(px(280.)).truncate().child(title)),
             )
             .child(div().w(gpui_kit::px(1.)).h(px(14.)).bg(separator))
@@ -2530,7 +2536,7 @@ impl Threadbear {
                 .on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| this.undo_archive(window, cx)),
                 )
-                .child("Undo"),
+                .child(threadbear_core::tr!("Undo")),
             )
             .child(
                 tipped!(

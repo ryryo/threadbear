@@ -1734,7 +1734,9 @@ struct PickerListing {
 
 impl ModelPickerView {
     fn new(composer: WeakEntity<Composer>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search models"));
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(threadbear_core::tr!("Search models"))
+        });
         let sub = cx.subscribe_in(
             &search,
             window,
@@ -2068,7 +2070,7 @@ impl ModelPickerView {
                                 .text_size(px(12.))
                                 .when(active, |s| s.font_weight(FontWeight::SEMIBOLD))
                                 .text_color(if active { fg } else { secondary })
-                                .child("No pool"),
+                                .child(threadbear_core::tr!("No pool")),
                         )
                         .child(
                             div()

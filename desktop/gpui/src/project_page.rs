@@ -422,7 +422,8 @@ impl Threadbear {
                         h_flex()
                             .gap(px(8.))
                             .when(saving, |s| {
-                                s.child(Spinner::new().with_size(px(12.))).child("Saving…")
+                                s.child(Spinner::new().with_size(px(12.)))
+                                    .child(threadbear_core::tr!("Saving…"))
                             })
                             .when(!saving, |s| {
                                 s.child(small_push_button(
@@ -536,8 +537,8 @@ impl Threadbear {
             .rounded(px(6.))
             .border_1()
             .border_color(cx.theme().border)
-            .child(div().text_size(px(13.)).font_semibold().child("Current saved version"))
-            .child(div().text_size(px(12.)).line_height(px(18.)).text_color(style::secondary_text(cx)).child("The saved text changed. Keep your draft above, and include any changes you want before saving."))
+            .child(div().text_size(px(13.)).font_semibold().child(threadbear_core::tr!("Current saved version")))
+            .child(div().text_size(px(12.)).line_height(px(18.)).text_color(style::secondary_text(cx)).child(threadbear_core::tr!("The saved text changed. Keep your draft above, and include any changes you want before saving.")))
             .child(saved)
             .child(acknowledge)
             .into_any_element()
@@ -919,7 +920,7 @@ impl Threadbear {
             );
         }
         if project.folders.is_empty() {
-            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(style::faint_text(cx)).child("None yet. A thread in the project gets the patches in each of its folders."));
+            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(style::faint_text(cx)).child(threadbear_core::tr!("None yet. A thread in the project gets the patches in each of its folders.")));
         }
         section.into_any_element()
     }
@@ -1056,7 +1057,7 @@ impl Threadbear {
             );
         }
         if threads.is_empty() {
-            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(faint).child("No threads in it yet. Start one with New Thread, add one from a thread's ... menu, or the librarian puts threads here as they work in its folders."));
+            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(faint).child(threadbear_core::tr!("No threads in it yet. Start one with New Thread, add one from a thread's ... menu, or the librarian puts threads here as they work in its folders.")));
         }
         section.into_any_element()
     }
@@ -1181,7 +1182,7 @@ impl Threadbear {
             section = section.child(block);
         }
         if found.is_empty() {
-            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(faint).child("None from its folders yet. A patch in .threadbear/patches in one of them shows here, and on every thread in the project."));
+            section = section.child(div().text_size(px(style::size::LABEL)).line_height(px(16.)).text_color(faint).child(threadbear_core::tr!("None from its folders yet. A patch in .threadbear/patches in one of them shows here, and on every thread in the project.")));
         }
         section.into_any_element()
     }
@@ -1222,7 +1223,7 @@ impl Threadbear {
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.set_mode(crate::shell::SidebarMode::Projects, cx)
                     }))
-                    .child("Projects"),
+                    .child(threadbear_core::tr!("Projects")),
                 )
                 .child(div().flex_none().text_color(faint).child("/"))
                 .child(project_icon(Some(&project), "", 14., cx))

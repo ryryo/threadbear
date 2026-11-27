@@ -957,7 +957,7 @@ impl Threadbear {
                 .justify_center()
                 .text_color(secondary)
                 .text_size(px(style::size::DETAIL))
-                .child("No code")
+                .child(threadbear_core::tr!("No code"))
                 .into_any_element(),
             (None, None) => div()
                 .size(px(136.))
@@ -977,7 +977,7 @@ impl Threadbear {
                 .items_center()
                 .text_color(secondary)
                 .child(crate::spinner::Spinner::new())
-                .child("Waiting for your phone")
+                .child(threadbear_core::tr!("Waiting for your phone"))
                 .into_any_element(),
         };
         let website_busy = self.setup.opening;
@@ -993,15 +993,19 @@ impl Threadbear {
                         h_flex()
                             .gap(px(4.))
                             .text_color(fg)
-                            .child("Scan it with")
-                            .child(div().font_semibold().child("Threadbear for iPhone")),
+                            .child(threadbear_core::tr!("Scan it with"))
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .child(threadbear_core::tr!("Threadbear for iPhone")),
+                            ),
                     )
                     .child(status)
                     .child(
                         h_flex()
                             .gap(px(4.))
                             .text_color(secondary)
-                            .child("No app yet?")
+                            .child(threadbear_core::tr!("No app yet?"))
                             .child(
                                 link(
                                     "hello-app-store",
@@ -1230,7 +1234,7 @@ fn hello_row(
                     .text_size(px(style::size::DETAIL))
                     .text_color(star)
                     .child("★")
-                    .child("Recommended"),
+                    .child(threadbear_core::tr!("Recommended")),
             );
         }
         Some(tag) => {
