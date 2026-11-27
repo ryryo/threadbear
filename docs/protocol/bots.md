@@ -415,6 +415,21 @@ from a retained result, the mirror keeps that result until the ordinary
 command-retention sweep expires it and replies with `waitingForLegacy`.
 The same request can resume checking without guessing a scope. The operation
 is internal to the Runner.
+Backend API 110 adds confirmations for registered device draft stores.
+Before writing an edit or removal draft for an existing note, a device
+registers the exact workspace, scope and note under its pairing and
+storage ID. The server records no draft text. After removing the locally
+persisted copy, the same paired store confirms the exact erasure.
+An offline, expired or revoked pairing with an outstanding copy keeps
+that note pending. Confirmation of registered stores makes no claim
+about drafts saved before registration was supported.
+On the website, a managed draft is stored in the origin's shared storage.
+The tab's session keeps its reference. Duplicating a tab cannot give it
+a second stored copy of the note body. The browser saves and erases
+under the same origin lock, and keeps an exact marker so a delayed save
+cannot put the note body back. The phone uses its existing app storage
+with an installation-specific ID. A device that cannot register a new
+targeted draft keeps that change in memory.
 The owning Runner records a body-free intent after the journal has validated
 the requested change and before it writes. Subsequent successful sync
 heartbeats resume the journal, linked review checkpoints and mirror steps

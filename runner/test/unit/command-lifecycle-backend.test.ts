@@ -775,3 +775,59 @@ test('a paired device can check exact erasure records for saved drafts even when
   await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: null });
   assert.deepEqual(await read(), [true, false, false, false, false]);
 });
+
+test('a note erasure waits for each paired draft store without confusing a different scope', async () => {
+  const s = await setup();
+  const workspaceId = 'managed-drafts';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const target = { workspaceId, scope: { kind: 'bot', id: 'desk' }, entryId: 'same-note-id' };
+  const other = { ...target, scope: { kind: 'group', id: 'desk' } };
+  const a = '9039c2bf-a2ba-437e-9f1e-074a66f92c52';
+  const b = '68b5794d-7a41-486c-b2c6-f38cfde8a441';
+  const second = 'second-paired-store';
+  const { sha256 } = load('lib') as { sha256: (raw: string) => Promise<string> };
+  const secondId = await s.ctx.db.insert('tokens', { hash: await sha256(second), name: 'second', kind: 'browser', expiresAt: Date.now() + 60_000, createdAt: 1 });
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: {
+    workspaceId, epoch: 1, ownerRunnerId: MINI, profiles: [], notes: [], groups: [], requests: [], tasks: [],
+  } });
+  const register = (storeId: string, note = target, token = TOKEN) => call(s.ctx, phone.registerBotNoteDraft, { token, storeId, target: note });
+  const pending = (storeId: string, token = TOKEN) => call(s.ctx, phone.botNoteDraftErasures, { token, storeId });
+  const confirm = (storeId: string, notes = [target], token = TOKEN) => call(s.ctx, phone.confirmBotNoteDraftErasures, { token, storeId, targets: notes });
+  const erase = (note = target) => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, epoch: 1, ...note });
+
+  assert.equal(await register(a), true);
+  assert.equal(await register(a), true);
+  assert.equal(await register(b), true);
+  assert.equal(await register(a, target, second), true);
+  assert.equal(await register(a, other), true);
+  assert.deepEqual(await confirm(a), []);
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.equal(await register(b), false, 'the old write cannot make another copy after the erasure');
+  assert.deepEqual(await pending(a), { targets: [target], cursor: null });
+  assert.deepEqual(await confirm(a, [other]), []);
+  assert.deepEqual(await confirm(a), [target]);
+  assert.deepEqual(await confirm(a), [target], 'a lost confirmation can be retried');
+  assert.deepEqual(await pending(b), { targets: [target], cursor: null });
+  assert.deepEqual(await confirm(b), [target]);
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.deepEqual(await pending(a, second), { targets: [target], cursor: null });
+  await s.ctx.db.patch('tokens', secondId, { revokedAt: Date.now() });
+  assert.equal(await outcome(confirm(a, [target], second)), 'auth');
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true }, 'revoking a token does not erase its copy');
+});
+
+test('the current owner can complete an erasure when the final registered store confirms', async () => {
+  const s = await setup();
+  const workspaceId = 'one-managed-draft';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const target = { workspaceId, scope: { kind: 'bot', id: 'desk' }, entryId: 'same-note-id' };
+  const storeId = '9039c2bf-a2ba-437e-9f1e-074a66f92c52';
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: {
+    workspaceId, epoch: 1, ownerRunnerId: MINI, profiles: [], notes: [], groups: [], requests: [], tasks: [],
+  } });
+  assert.equal(await call(s.ctx, phone.registerBotNoteDraft, { token: TOKEN, storeId, target }), true);
+  const erase = () => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, epoch: 1, ...target });
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.deepEqual(await call(s.ctx, phone.confirmBotNoteDraftErasures, { token: TOKEN, storeId, targets: [target] }), [target]);
+  assert.deepEqual(await erase(), { done: true });
+});

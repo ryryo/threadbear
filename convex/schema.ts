@@ -875,6 +875,13 @@ export const appSchema = defineSchema({
     legacyReceiptCursor: v.optional(v.string()), legacyReceiptsDone: v.optional(v.literal(true)),
   }).index('by_scope_entry', ['workspaceId', 'kind', 'scopeId', 'entryId']),
 
+  botNoteDraftCopies: defineTable({
+    tokenId: v.id('tokens'), storeId: v.string(), workspaceId: v.string(), kind: v.union(v.literal('bot'), v.literal('group')),
+    scopeId: v.string(), entryId: v.string(), confirmed: v.optional(v.literal(true)),
+  }).index('by_store_target', ['tokenId', 'storeId', 'workspaceId', 'kind', 'scopeId', 'entryId'])
+    .index('by_store_pending', ['tokenId', 'storeId', 'confirmed'])
+    .index('by_target_pending', ['workspaceId', 'kind', 'scopeId', 'entryId', 'confirmed']),
+
   commands: defineTable({
     runnerId: v.string(), // or "any"
     threadId: v.optional(v.string()),

@@ -5,7 +5,7 @@
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
 import { botNoteScope, botWorkspaceProjection } from './botWorkspaceValues';
-import { botNoteCommand, botNoteErasure, botSchedulesFrozen, botWorkspaceOwner, erasedBotNoteCommand, requireBotRunnerProcess, requireBotWorkspaceWrite, retiredBotSourcesErased, safeBotNoteResult, withoutErasedBotNotes } from './botWorkspaceAuthority';
+import { botNoteCommand, botNoteErasure, botSchedulesFrozen, botWorkspaceOwner, erasedBotNoteCommand, pendingBotNoteDrafts, requireBotRunnerProcess, requireBotWorkspaceWrite, retiredBotSourcesErased, safeBotNoteResult, withoutErasedBotNotes } from './botWorkspaceAuthority';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2332,7 +2332,8 @@ async function checkLegacyNoteReceipts(ctx: MutationCtx, erasure: NoteErasure): 
 
 export const eraseBotWorkspaceNote = mutation({
   args: { key: v.string(), runnerId: v.string(), startedAt: v.string(), workspaceId: v.string(), epoch: v.number(), scope: botNoteScope, entryId: v.string() },
-  returns: v.object({ done: v.boolean(), waitingForLegacy: v.optional(v.literal(true)), waitingForSources: v.optional(v.literal(true)) }),
+  returns: v.object({ done: v.boolean(), waitingForLegacy: v.optional(v.literal(true)), waitingForSources: v.optional(v.literal(true)),
+    waitingForDevices: v.optional(v.literal(true)) }),
   handler: async (ctx, { key, runnerId, startedAt, workspaceId, epoch, scope, entryId }) => {
     const caller = await runnerAuth(ctx, key, 'eraseBotWorkspaceNote');
     await requireBotRunnerProcess(ctx, caller, runnerId, startedAt);
@@ -2367,8 +2368,9 @@ export const eraseBotWorkspaceNote = mutation({
         await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { legacyReceiptsDone: true });
       }
     }
-    return await retiredBotSourcesErased(ctx, owner, erasure.retiredSourceReceipts ?? 0)
-      ? { done: true } : { done: false, waitingForSources: true as const };
+    if (!await retiredBotSourcesErased(ctx, owner, erasure.retiredSourceReceipts ?? 0)) return { done: false, waitingForSources: true as const };
+    if (await pendingBotNoteDrafts(ctx, workspaceId, scope, entryId)) return { done: false, waitingForDevices: true as const };
+    return { done: true };
   },
 });
 

@@ -4683,6 +4683,7 @@ test('Bot note erasure waits for the previous projection and retries the exact i
         if (attempts === 1) throw new Error('lost erasure reply');
         if (attempts === 2) return { done: false, waitingForLegacy: true };
         if (attempts === 3) return { done: false, waitingForSources: true };
+        if (attempts === 4) return { done: false, waitingForDevices: true };
         return { done: true };
       }
       return null;
@@ -4704,11 +4705,13 @@ test('Bot note erasure waits for the previous projection and retries the exact i
     await pending;
     assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForLegacy: true });
     assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForSources: true });
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForDevices: true });
     assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: true });
-    const [, first, retry, afterRetention, afterSources] = mirror();
+    const [, first, retry, afterRetention, afterSources, afterDevices] = mirror();
     assert.deepEqual(first?.args, retry?.args);
     assert.deepEqual(retry?.args, afterRetention?.args);
     assert.deepEqual(afterRetention?.args, afterSources?.args);
+    assert.deepEqual(afterSources?.args, afterDevices?.args);
     assert.equal(first?.args.workspaceId, input.workspaceId);
     assert.equal(first?.args.epoch, input.epoch);
   } finally {
@@ -4718,15 +4721,15 @@ test('Bot note erasure waits for the previous projection and retries the exact i
 });
 
 test('Bot erasure cannot be acknowledged by an older backend or an unrecognized reply', async () => {
-  for (const apiVersion of [107, BACKEND_API_VERSION]) {
+  for (const apiVersion of [107, 109, BACKEND_API_VERSION]) {
     const { sync, calls } = setup({ answer: fn => fn === 'sync:heartbeat' ? { apiVersion } : null });
     sync.start();
     try {
       await tick();
       await assert.rejects(sync.eraseBotWorkspaceNote({ workspaceId: 'workspace', epoch: 1,
         scope: { kind: 'group', id: 'room' }, entryId: 'abcd' }),
-      apiVersion === 107 ? /updated backend/ : /did not acknowledge/);
-      assert.equal(calls.some(call => call.fn === 'sync:eraseBotWorkspaceNote'), apiVersion !== 107);
+      apiVersion < BACKEND_API_VERSION ? /updated backend/ : /did not acknowledge/);
+      assert.equal(calls.some(call => call.fn === 'sync:eraseBotWorkspaceNote'), apiVersion >= BACKEND_API_VERSION);
     } finally {
       await sync.stop();
     }

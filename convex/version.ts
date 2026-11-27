@@ -505,4 +505,5 @@
 //    and schedule claim, and scoped worker grants.
 // 108: durable scoped note erasure in the mirror and retention of receipt provenance.
 // 109: retired Bot workspace sources must acknowledge local copies of note erasures.
-export const API_VERSION = 109;
+// 110: registered paired draft stores acknowledge deletion before a Bot note erasure finishes.
+export const API_VERSION = 110;

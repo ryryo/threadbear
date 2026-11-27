@@ -14,7 +14,7 @@ import { checkPhoneToken, hasLiveKey, pageLimit, readRunnerOrder, runnerStatsRow
 import { API_VERSION } from './version';
 import { pushLocale } from './pushText';
 import { botDeviceAction, botNoteTarget, botProfileEdit, botWorkspaceProjection } from './botWorkspaceValues';
-import { botNoteCommand, botNoteErased, erasedBotNoteCommand, safeBotNoteResult } from './botWorkspaceAuthority';
+import { botNoteCommand, botNoteErased, botWorkspaceOwner, erasedBotNoteCommand, safeBotNoteResult } from './botWorkspaceAuthority';
 import { pushOff } from './pushHealth';
 import { imagesFrom, phoneImage, replyImagesFrom, siteUrl } from './share';
 import { deleteIfUnused, endCommandFiles, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
@@ -741,11 +741,77 @@ export const botNoteErasures = query({
   returns: v.array(v.boolean()),
   handler: async (ctx, { token, targets }) => {
     await checkPhoneToken(ctx, token);
-    if (targets.length > 32 || targets.some(target =>
-      [target.workspaceId, target.scope.id, target.entryId].some(id => !id || id.length > 128))) {
-      throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot note erasure lookup.' });
-    }
+    checkDraftTargets(targets);
     return Promise.all(targets.map(({ workspaceId, scope, entryId }) => botNoteErased(ctx, workspaceId, scope, entryId)));
+  },
+});
+
+type BotNoteTarget = Infer<typeof botNoteTarget>;
+const storeArgs = { token: v.string(), storeId: v.string() };
+function checkDraftStoreId(storeId: string) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(storeId)) {
+    throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot note draft storage ID.' });
+  }
+}
+function checkDraftTargets(targets: BotNoteTarget[]) {
+  if (targets.length > 32 || targets.some(target =>
+    [target.workspaceId, target.scope.id, target.entryId].some(id => !id || id.length > 128))) {
+    throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot note erasure lookup.' });
+  }
+}
+function noteDraftCopy(ctx: QueryCtx | MutationCtx, tokenId: Id<'tokens'>, storeId: string, t: BotNoteTarget) {
+  return ctx.db.query('botNoteDraftCopies').withIndex('by_store_target', q => q.eq('tokenId', tokenId).eq('storeId', storeId)
+    .eq('workspaceId', t.workspaceId).eq('kind', t.scope.kind).eq('scopeId', t.scope.id).eq('entryId', t.entryId)).unique();
+}
+
+export const registerBotNoteDraft = mutation({
+  args: { ...storeArgs, target: botNoteTarget },
+  returns: v.boolean(),
+  handler: async (ctx, { token, storeId, target }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    checkDraftTargets([target]);
+    const { workspaceId, scope, entryId } = target;
+    if (await botNoteErased(ctx, workspaceId, scope, entryId)) return false;
+    if (!await botWorkspaceOwner(ctx, workspaceId)) throw new ConvexError({ kind: 'notFound', message: 'This Bot workspace is unavailable.' });
+    if (!await noteDraftCopy(ctx, tokenId, storeId, target)) {
+      await ctx.db.insert('botNoteDraftCopies', { tokenId, storeId, workspaceId, kind: scope.kind, scopeId: scope.id, entryId });
+    }
+    return true;
+  },
+});
+
+export const botNoteDraftErasures = query({
+  args: { ...storeArgs, cursor: v.optional(v.string()) },
+  returns: v.object({ targets: v.array(botNoteTarget), cursor: v.union(v.string(), v.null()) }),
+  handler: async (ctx, { token, storeId, cursor }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    const page = await ctx.db.query('botNoteDraftCopies').withIndex('by_store_pending',
+      q => q.eq('tokenId', tokenId).eq('storeId', storeId).eq('confirmed', undefined)).paginate({ numItems: 32, cursor: cursor ?? null });
+    const targets = await Promise.all(page.page.map(async ({ workspaceId, kind, scopeId, entryId }) => {
+      const scope = { kind, id: scopeId };
+      return await botNoteErased(ctx, workspaceId, scope, entryId) ? { workspaceId, scope, entryId } : null;
+    }));
+    return { targets: targets.filter(t => t !== null), cursor: page.isDone ? null : page.continueCursor };
+  },
+});
+
+export const confirmBotNoteDraftErasures = mutation({
+  args: { ...storeArgs, targets: v.array(botNoteTarget) },
+  returns: v.array(botNoteTarget),
+  handler: async (ctx, { token, storeId, targets }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    checkDraftTargets(targets);
+    const confirmed: BotNoteTarget[] = [];
+    for (const target of targets) {
+      const copy = await noteDraftCopy(ctx, tokenId, storeId, target);
+      if (!copy || !await botNoteErased(ctx, target.workspaceId, target.scope, target.entryId)) continue;
+      if (!copy.confirmed) await ctx.db.patch('botNoteDraftCopies', copy._id, { confirmed: true });
+      confirmed.push(target);
+    }
+    return confirmed;
   },
 });
 

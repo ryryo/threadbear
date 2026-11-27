@@ -51,6 +51,9 @@ struct DeviceBotsView: View {
             if (model.apiVersion ?? 0) >= botNoteErasureAPIVersion {
                 StoredBotNoteSweep()
             }
+            if (model.apiVersion ?? 0) >= botDraftErasureAPIVersion {
+                Color.clear.task { await confirmManagedNoteDrafts() }
+            }
         }
         .task {
             guard let backend = model.backend else { return }
@@ -62,6 +65,36 @@ struct DeviceBotsView: View {
             } catch {
                 problem = error.localizedDescription
             }
+        }
+    }
+
+    private func confirmManagedNoteDrafts() async {
+        guard let backend = model.backend else { return }
+        let storeID = PhoneBotNoteDraft.storeID()
+        while !Task.isCancelled {
+            do {
+                var visited = Set<String>()
+                var cursor: String?
+                repeat {
+                    var received: PhoneBotDraftErasures?
+                    for try await page in backend.botNoteDraftErasures(storeID: storeID, cursor: cursor) {
+                        received = page
+                        break
+                    }
+                    try Task.checkCancellation()
+                    guard let page = received else { break }
+                    let cleared = PhoneBotNoteDraft.confirmLocalRemoval(page.targets)
+                    if !cleared.isEmpty { try await backend.confirmBotNoteDraftErasures(storeID: storeID, targets: cleared) }
+                    cursor = page.cursor
+                    if let cursor, !visited.insert(cursor).inserted { break }
+                } while cursor != nil && !Task.isCancelled
+            } catch is CancellationError {
+                return
+            } catch {
+                // A failed reply leaves the managed copy unconfirmed.
+            }
+            do { try await Task.sleep(for: .seconds(10)) }
+            catch { return }
         }
     }
 }
@@ -203,6 +236,14 @@ private struct StoredBotNoteSweep: View {
             let batch = Array(drafts[start..<min(start + 32, drafts.count)])
             Color.clear.task(id: batch) {
                 guard let backend = model.backend else { return }
+                if (model.apiVersion ?? 0) >= botDraftErasureAPIVersion {
+                    let storeID = PhoneBotNoteDraft.storeID()
+                    for target in Set(batch.map(\.target)) {
+                        if (try? await backend.registerBotNoteDraft(storeID: storeID, target: target)) == false {
+                            _ = PhoneBotNoteDraft.confirmLocalRemoval([target])
+                        }
+                    }
+                }
                 do {
                     for try await erased in backend.botNoteErasures(batch.map(\.target)) {
                         PhoneBotNoteDraft.clearErased(batch, confirmed: erased)
@@ -336,21 +377,23 @@ private struct DeviceBotNotes: View {
             }
             .onChange(of: draft) { _, next in
                 if next.text.isEmpty && next.commandId == nil && next.removingEntryId == nil { UserDefaults.standard.removeObject(forKey: draftKey) }
-                else { UserDefaults.standard.set(try? JSONEncoder().encode(next), forKey: draftKey) }
+                else if let target = next.target(workspaceId: workspace.id, kind: scope.scope, scopeId: scope.scopeId) {
+                    Task { await storeDraft(next, target: target) }
+                } else { _ = PhoneBotNoteDraft.persist(next, key: draftKey) }
             }
             .onChange(of: scope.revision) { _, revision in
                 guard !waiting && conflictRevision == nil else { return }
                 if draft.text.isEmpty && draft.removingEntryId == nil { draft.revision = revision }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+                if let target = erasureTarget, PhoneBotNoteDraft.wasErased(target) { dismissErasedDraft(target) }
             }
             .task(id: erasureTarget) {
                 guard let target = erasureTarget, let backend = model.backend else { return }
                 do {
                     for try await erased in backend.botNoteErasures([target]) {
                         guard erased == [true], erasureTarget == target else { continue }
-                        UserDefaults.standard.removeObject(forKey: draftKey)
-                        discardDraft()
-                        conflictRows = nil
-                        conflictRevision = nil
+                        clearLocalDraft(target)
                         return
                     }
                 } catch {
@@ -370,6 +413,30 @@ private struct DeviceBotNotes: View {
                     if operationId == draft.operationId { problem = error.localizedDescription }
                 }
             }
+    }
+
+    private func storeDraft(_ next: PhoneBotNoteDraft, target: PhoneBotNoteTarget) async {
+        guard let version = model.apiVersion else { return }
+        if version >= botDraftErasureAPIVersion {
+            guard let backend = model.backend,
+                  let registered = try? await backend.registerBotNoteDraft(storeID: PhoneBotNoteDraft.storeID(), target: target),
+                  !Task.isCancelled, draft == next else { return }
+            if !registered { clearLocalDraft(target); return }
+        }
+        if draft == next { _ = PhoneBotNoteDraft.persist(next, key: draftKey) }
+    }
+
+    private func clearLocalDraft(_ target: PhoneBotNoteTarget) {
+        _ = PhoneBotNoteDraft.confirmLocalRemoval([target])
+        dismissErasedDraft(target)
+    }
+
+    private func dismissErasedDraft(_ target: PhoneBotNoteTarget) {
+        if erasureTarget == target {
+            discardDraft()
+            conflictRows = nil
+            conflictRevision = nil
+        }
     }
 
     private func discardDraft() {

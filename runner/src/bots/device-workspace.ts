@@ -21,7 +21,7 @@ export type BotNoteErasure = {
   scope: { kind: 'bot' | 'group'; id: string };
   entryId: string;
 };
-export type BotNoteErasureReply = { done: boolean; waitingForLegacy?: true; waitingForSources?: true };
+export type BotNoteErasureReply = { done: boolean; waitingForLegacy?: true; waitingForSources?: true; waitingForDevices?: true };
 
 type ExtraSnapshot = {
   notes: { scope: 'bot' | 'group'; scopeId: string; revision: string; rows: { id: string; text: string; pinned: boolean }[] }[];

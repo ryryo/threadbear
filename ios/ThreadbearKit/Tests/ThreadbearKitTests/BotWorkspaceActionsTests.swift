@@ -79,3 +79,22 @@ private actor BotActionTransport: ConvexTransport {
         #expect(defaults.data(forKey: key) != nil)
     }
 }
+
+@Test func confirmedBotDraftErasureBlocksAStaleWriteAndKeepsAnotherScope() throws {
+    let suite = "bot-managed-drafts-" + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let first = PhoneBotNoteDraft(text: "消す本文", entryId: "same-id", revision: "old")
+    let ownKey = "bot-note-draft:source:workspace:1:bot:desk"
+    let groupKey = "bot-note-draft:source:workspace:1:group:desk"
+    let scope = try #require(first.target(workspaceId: "workspace", kind: "bot", scopeId: "desk"))
+    #expect(PhoneBotNoteDraft.storeID(in: defaults) == PhoneBotNoteDraft.storeID(in: defaults))
+    #expect(PhoneBotNoteDraft.persist(first, key: ownKey, in: defaults))
+    #expect(PhoneBotNoteDraft.persist(first, key: groupKey, in: defaults))
+    #expect(PhoneBotNoteDraft.confirmLocalRemoval([scope], in: defaults) == [scope])
+    let reopened = try #require(UserDefaults(suiteName: suite))
+    #expect(!PhoneBotNoteDraft.persist(first, key: ownKey, in: reopened))
+    #expect(reopened.data(forKey: ownKey) == nil)
+    #expect(reopened.data(forKey: groupKey) != nil)
+    #expect(PhoneBotNoteDraft.confirmLocalRemoval([scope], in: reopened) == [scope])
+}

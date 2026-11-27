@@ -173,12 +173,13 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 109;
+export const BACKEND_API_VERSION = 110;
 export const BOT_SCHEDULE_API_VERSION = 105;
 export const BOT_WORKSPACE_API_VERSION = 106;
 export const BOT_WORKER_API_VERSION = 107;
 export const BOT_NOTE_ERASURE_API_VERSION = 108;
 const BOT_RETIRED_NOTE_ERASURE_API_VERSION = 109;
+const BOT_DRAFT_ERASURE_API_VERSION = 110;
 export const INDEX_POOL_API_VERSION = 101;
 export const COORDINATORS_API_VERSION = 102;
 export const NEXT_PICK_API_VERSION = 103;
@@ -5194,19 +5195,22 @@ export class ConvexSync {
   }
 
   async eraseBotWorkspaceNote(input: import('./bots/device-workspace.ts').BotNoteErasure): Promise<import('./bots/device-workspace.ts').BotNoteErasureReply> {
-    if (!this.botNoteErasuresAvailable() || (input.epoch > 1 && !this.botRetiredNoteErasuresAvailable())) {
+    if (!this.running || (this.backendApiVersion ?? 0) < BOT_DRAFT_ERASURE_API_VERSION) {
       throw new Error('Sync needs an updated backend to erase a Bot note.');
     }
     return this.orderBotWorkspace(async () => {
       if (!this.running) throw new Error('Sync stopped before it could erase the Bot note.');
       const response = await this.post('mutation', 'sync:eraseBotWorkspaceNote', { ...input, ...this.workerProcess() });
       if (response && typeof response === 'object' && 'done' in response && typeof response.done === 'boolean') {
-        if (!('waitingForLegacy' in response) && !('waitingForSources' in response)) return { done: response.done };
+        if (!('waitingForLegacy' in response) && !('waitingForSources' in response) && !('waitingForDevices' in response)) return { done: response.done };
         if (response.done === false && 'waitingForLegacy' in response && response.waitingForLegacy === true) {
           return { done: false, waitingForLegacy: true };
         }
         if (response.done === false && 'waitingForSources' in response && response.waitingForSources === true) {
           return { done: false, waitingForSources: true };
+        }
+        if (response.done === false && 'waitingForDevices' in response && response.waitingForDevices === true) {
+          return { done: false, waitingForDevices: true };
         }
       }
       throw new Error('Sync did not acknowledge the Bot note erasure.');

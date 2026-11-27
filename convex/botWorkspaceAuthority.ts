@@ -88,6 +88,11 @@ export async function botNoteErased(ctx: BotWorkspaceRead, workspaceId: string, 
   return (await botNoteErasure(ctx, workspaceId, scope, entryId)) !== null;
 }
 
+export async function pendingBotNoteDrafts(ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope, entryId: string): Promise<boolean> {
+  return (await ctx.db.query('botNoteDraftCopies').withIndex('by_target_pending', q => q.eq('workspaceId', workspaceId)
+    .eq('kind', scope.kind).eq('scopeId', scope.id).eq('entryId', entryId).eq('confirmed', undefined)).first()) !== null;
+}
+
 export async function withoutErasedBotNotes<Row extends { id: string }>(
   ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope, rows: Row[],
 ): Promise<Row[]> {

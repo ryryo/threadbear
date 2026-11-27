@@ -9,6 +9,13 @@ public extension Backend {
     }
     func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error> { AsyncThrowingStream { $0.finish() } }
     func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error> { AsyncThrowingStream { $0.finish() } }
+    func registerBotNoteDraft(storeID: String, target: PhoneBotNoteTarget) async throws -> Bool {
+        throw TransportError.server("Bot draft registration is unavailable on this backend.")
+    }
+    func botNoteDraftErasures(storeID: String, cursor: String?) -> AsyncThrowingStream<PhoneBotDraftErasures, Error> { AsyncThrowingStream { $0.finish() } }
+    func confirmBotNoteDraftErasures(storeID: String, targets: [PhoneBotNoteTarget]) async throws {
+        throw TransportError.server("Bot draft erasure confirmation is unavailable on this backend.")
+    }
     func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> { AsyncThrowingStream { $0.finish() } }
     func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error> { AsyncThrowingStream { $0.finish() } }
     func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String {
@@ -45,6 +52,9 @@ public protocol Backend: Sendable {
     func actOnBotWorkspace(workspace: PhoneBotWorkspace, action: PhoneBotAction, operationId: String) async throws -> String
     func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error>
     func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error>
+    func registerBotNoteDraft(storeID: String, target: PhoneBotNoteTarget) async throws -> Bool
+    func botNoteDraftErasures(storeID: String, cursor: String?) -> AsyncThrowingStream<PhoneBotDraftErasures, Error>
+    func confirmBotNoteDraftErasures(storeID: String, targets: [PhoneBotNoteTarget]) async throws
     func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error>
     func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error>
     func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String
@@ -239,6 +249,24 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error> {
         live("phone:botNoteErasures", ["targets": .array(targets.map(\.arguments))], as: [Bool].self)
+    }
+
+    public func registerBotNoteDraft(storeID: String, target: PhoneBotNoteTarget) async throws -> Bool {
+        try Self.decode(Bool.self, try await transport.mutation("phone:registerBotNoteDraft", args([
+            "storeId": .string(storeID), "target": target.arguments,
+        ])))
+    }
+
+    public func botNoteDraftErasures(storeID: String, cursor: String?) -> AsyncThrowingStream<PhoneBotDraftErasures, Error> {
+        var arguments: [String: JSONValue] = ["storeId": .string(storeID)]
+        if let cursor { arguments["cursor"] = .string(cursor) }
+        return live("phone:botNoteDraftErasures", arguments, as: PhoneBotDraftErasures.self)
+    }
+
+    public func confirmBotNoteDraftErasures(storeID: String, targets: [PhoneBotNoteTarget]) async throws {
+        _ = try await transport.mutation("phone:confirmBotNoteDraftErasures", args([
+            "storeId": .string(storeID), "targets": .array(targets.map(\.arguments)),
+        ]))
     }
 
     public func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> {
