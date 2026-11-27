@@ -97,11 +97,16 @@ test('encoder executables and variants still block input with default and rename
   // so fake encoder names never compete with their real GUI jobs.
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tb-recording-'));
   try {
+    // Linux sleep can be a multicall program that exits if its filename changes.
+    // Use one copy of Node that can stay alive under every test name.
+    let binary = path.join(folder, 'encoder');
+    fs.copyFileSync(process.execPath, binary);
     for (const name of ['ffmpeg', 'ffmpeg-static', 'ffmpeg7', 'FFmpeg', 'custom-ffmpeg', 'tb-screen-record-ffmpeg']) {
-      const binary = path.join(folder, name);
-      fs.copyFileSync('/bin/sleep', binary);
+      const next = path.join(folder, name);
+      fs.renameSync(binary, next);
+      binary = next;
       for (const argv0 of [undefined, 'tb-encoder-alias']) {
-        const child = spawn(binary, ['5'], { argv0, stdio: 'ignore' });
+        const child = spawn(binary, ['-e', 'setTimeout(() => {}, 5000)'], { argv0, stdio: 'ignore' });
         const exited = once(child, 'exit');
         try {
           await once(child, 'spawn');
