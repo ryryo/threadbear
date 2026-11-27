@@ -2368,6 +2368,35 @@ pub(crate) async fn automation(cmd: &Value, cx: &mut AsyncApp) -> Result<Value, 
                 json!({ "value": answer["result"]["value"], "page": cx.update(|cx| dump_page(&key, cx)) }),
             );
         }
+        "sample" => {
+            use image::GenericImageView as _;
+            let x = cmd["x"].as_f64().ok_or("sample needs x")?;
+            let y = cmd["y"].as_f64().ok_or("sample needs y")?;
+            let width = cmd["width"].as_f64().ok_or("sample needs viewport width")?;
+            let height = cmd["height"]
+                .as_f64()
+                .ok_or("sample needs viewport height")?;
+            if !(0. ..width).contains(&x) || !(0. ..height).contains(&y) {
+                return Err("sample must be inside the viewport".into());
+            }
+            let result = page
+                .devtools(
+                    "Page.captureScreenshot",
+                    json!({"format":"png","captureBeyondViewport":false}),
+                )
+                .await
+                .map_err(|_| "the page went away".to_owned())??;
+            let bytes = result["data"]
+                .as_str()
+                .and_then(threadbear_core::folders::base64_decode)
+                .ok_or("sample got no image")?;
+            let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+                .map_err(|error| error.to_string())?;
+            let scale_x = f64::from(image.width()) / width;
+            let scale_y = f64::from(image.height()) / height;
+            let pixel = image.get_pixel((x * scale_x) as u32, (y * scale_y) as u32);
+            return Ok(json!({"pixel": pixel.0, "scaleX": scale_x, "scaleY": scale_y}));
+        }
         "pointer" => {
             let x = cmd["x"].as_f64().ok_or("pointer needs x")?;
             let y = cmd["y"].as_f64().ok_or("pointer needs y")?;

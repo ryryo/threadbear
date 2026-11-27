@@ -229,13 +229,20 @@ async fn call(page: &PanelPage, method: &str, params: Value, cx: &AsyncApp) -> O
 }
 
 fn crop(bytes: &[u8], rect: Rect) -> Option<Capture> {
-    let picture = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+    use image::{ImageDecoder as _, ImageEncoder as _};
+    let mut decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    let profile = decoder.icc_profile().ok().flatten();
+    let picture = image::DynamicImage::from_decoder(decoder).ok()?;
     let (x, y, w, h) = rect.pixels(picture.width(), picture.height())?;
     let picture = picture.crop_imm(x, y, w, h);
-    let mut out = std::io::Cursor::new(Vec::new());
-    picture.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    let mut out = Vec::new();
+    let mut encoder = image::codecs::png::PngEncoder::new(&mut out);
+    if let Some(profile) = profile {
+        encoder.set_icc_profile(profile).ok()?;
+    }
+    picture.write_with_encoder(encoder).ok()?;
     Some(Capture {
-        image: Arc::new(Image::from_bytes(ImageFormat::Png, out.into_inner())),
+        image: Arc::new(Image::from_bytes(ImageFormat::Png, out)),
         #[cfg(feature = "automation")]
         proof: {
             use image::GenericImageView as _;

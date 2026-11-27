@@ -93,6 +93,7 @@ Feature: Web pages in a thread's panels
     And a reply linking "the page" to the page server streams in
     And I choose "Open in Panel" from the menu of the link "the page"
     Then the Browser panel shows the page "Panel home"
+    And I remember the colored button as Chromium paints it
     When I press the browser control "Mark an element for this thread"
     And I select the first link on the live browser page
     And I enter the page comment "このボタンを青に"

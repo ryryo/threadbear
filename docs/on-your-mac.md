@@ -1088,12 +1088,14 @@ only ever for a web address (`app/Sources/Threadbear/Transcript/ChromeProfiles.s
 `desktop/gpui/src/open_gate.rs`). Nothing else of Chrome's is read.
 
 The Browser panel's Web view uses the installed Chromium runtime, with a
-separate in-memory browsing context. Picking a page comment takes a still of
-the visible page. Adding it to a draft sends the chosen crop through the
-existing media import and stores the comment and image reference in
-`desktop-drafts.json`. The chat receives it when you send the draft. The
-attachment does not include form values, cookies, URL query or fragment,
-or the page's HTML.
+separate in-memory browsing context. The picker draws a selection on the
+live page from an isolated JavaScript world. Comment input stays in the app.
+Review takes a picture of the visible area and displays the selected crop.
+Adding it to a draft sends the kept crop through the existing media import and
+stores the comment and image reference in `desktop-drafts.json`. The chat
+receives it when you send the draft. The picker does not collect form values,
+cookies, URL query or fragment, or the page's HTML. An image can show anything
+visible inside its crop, which you can check and omit in Review.
 
 The Browser panel also uses that private socket to list the pages agents
 associate with threads, ask for a small still of each and bring a page's real

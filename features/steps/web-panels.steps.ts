@@ -94,6 +94,23 @@ async function browserEval<T>(world: ThreadbearWorld, key: string, js: string): 
   return (JSON.parse(okValue(await world.app.do({ cmd: 'webPanel', do: 'eval', key, js }))) as { value: T }).value;
 }
 
+type PaintedPixel = { pixel: number[]; scaleX: number; scaleY: number };
+const buttonPaint = new WeakMap<ThreadbearWorld, PaintedPixel>();
+
+Then('I remember the colored button as Chromium paints it', async function (this: ThreadbearWorld) {
+  const page = pages(await this.app.dump()).find((p) => p.key.startsWith('browser:'));
+  assert.ok(page);
+  const at = await browserEval<{ x: number; y: number; width: number; height: number }>(this, page.key, `(() => {
+    const button = document.getElementById('colored-pick');
+    button.scrollIntoView({block:'center'});
+    const r = button.getBoundingClientRect();
+    return {x:r.left+18,y:r.top+6,width:innerWidth,height:innerHeight};
+  })()`);
+  const out = await this.app.do({ cmd: 'webPanel', do: 'sample', key: page.key, ...at });
+  buttonPaint.set(this, JSON.parse(okValue(out)) as PaintedPixel);
+  await browserEval(this, page.key, 'scrollTo(0, 0)');
+});
+
 async function selectLive(world: ThreadbearWorld, selector: string, target: string, scroll = false) {
   const key = await browserKey(world);
   const at = await browserEval<{ x: number; y: number; scrollY: number }>(world, key, `(() => {
@@ -144,11 +161,13 @@ Then('no page selection is in progress', async function (this: ThreadbearWorld) 
 Then('the reviewed crop contains the selected button', async function (this: ThreadbearWorld) {
   const crop = pick(await this.app.dump())?.crop;
   assert.ok(crop, 'a real crop should be shown');
-  const scale = Math.round(crop.width / 144);
-  assert.ok(scale >= 1 && scale <= 4);
-  assert.ok(Math.abs(crop.width - 144 * scale) <= 2, `paint width: ${crop.width}`);
-  assert.ok(Math.abs(crop.height - 48 * scale) <= 2, `paint height: ${crop.height}`);
-  assert.deepEqual(crop.pixel, [24, 167, 85, 255], 'image pixel at the top left of the button');
+  const expected = buttonPaint.get(this);
+  assert.ok(expected, 'read the painted target before selecting');
+  assert.ok(Math.abs(crop.width - 144 * expected.scaleX) <= 2, `paint width: ${crop.width}`);
+  assert.ok(Math.abs(crop.height - 48 * expected.scaleY) <= 2, `paint height: ${crop.height}`);
+  assert.ok(expected.pixel[1]! > expected.pixel[0]! + 40 && expected.pixel[1]! > expected.pixel[2]! + 40,
+    `fixture sample must be green: ${expected.pixel}`);
+  assert.deepEqual(crop.pixel, expected.pixel, 'the crop uses the same pixel as the untouched Chromium page');
 });
 Then('my draft includes the page comment text {string}', async function (this: ThreadbearWorld, value: string) {
   await this.until('the typed page comment in the draft', (d) => d.composer.text.includes(value), LOADED_MS);

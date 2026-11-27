@@ -407,9 +407,11 @@ beside the conversation. Command-click or choose Open in Browser to open the
 external browser directly. Ordinary clicks and links shown by a pin follow
 Default in the link menu.
 
-Choose Pick element to mark one element, or Select area to draw a rectangle.
-Add a comment, review the selection, and choose Add to draft. The comment and
-any image stay with that thread's unsent draft until you send it.
+Choose Pick element to mark an element on the page, or Select area to draw a
+rectangle. Type a comment in the panel. You can pick again or switch modes
+without losing the comment. Choose Review to see the cutout, then add it to
+the draft or leave the image out. The comment and any image stay with that
+thread's unsent draft until you send it.
 
 With [BrowserBear](https://github.com/mikecann/browserbear), Agent tabs in
 Browser lists the pages the thread's agents have open. Each has a still and
