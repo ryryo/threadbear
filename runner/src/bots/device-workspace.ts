@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ErrorCode, RpcError } from '../protocol.ts';
-import { botOperationId, type BotRepository } from './repository.ts';
+import { botOperationId, deviceProfile, type BotRepository } from './repository.ts';
 
 const profileEdit = z.object({
   workspaceId: z.uuid(),
@@ -23,6 +23,15 @@ type ExtraSnapshot = {
 };
 type Extra = (visible: ReadonlySet<string>, scrub: (text: string) => string) => ExtraSnapshot;
 
+function scrubProfile<T extends { name?: string; role?: string; instructions?: string }>(row: T, scrub: (value: string) => string): T {
+  return {
+    ...row,
+    ...(row.name !== undefined && { name: scrub(row.name) }),
+    ...(row.role !== undefined && { role: scrub(row.role) }),
+    ...(row.instructions !== undefined && { instructions: scrub(row.instructions) }),
+  };
+}
+
 export class DeviceBotWorkspace {
   private readonly repo: BotRepository;
   private readonly owns: () => boolean;
@@ -43,9 +52,8 @@ export class DeviceBotWorkspace {
 
   snapshot(redact: (value: string) => string, excluded: ReadonlySet<string> = new Set()) {
     const identity = this.owned();
-    const profiles = this.repo.list().filter(bot => !bot.privacy && !bot.archivedAt && !excluded.has(bot.id)).map(bot => ({
-      id: bot.id, name: redact(bot.name), role: redact(bot.role), instructions: redact(bot.instructions), revision: bot.revision,
-    }));
+    const profiles = this.repo.list().filter(bot => !bot.privacy && !bot.archivedAt && !excluded.has(bot.id))
+      .map(bot => scrubProfile(deviceProfile.parse(bot), redact));
     if (profiles.length) this.protect();
     const visible = new Set(profiles.map(bot => bot.id));
     const extras = this.extra?.(visible, redact) ?? { notes: [], tasks: [], requests: [], groups: [] };
@@ -65,13 +73,7 @@ export class DeviceBotWorkspace {
     const bot = this.repo.get(botId);
     if (bot.archivedAt || bot.privacy) throw new RpcError(ErrorCode.notAllowed, 'That Bot is unavailable on this device.');
     const result = this.repo.updateWithReceipt(botId, expectedRevision, settings, operationId, this.protect);
-    const visible = <T extends { name?: string; role?: string; instructions?: string }>(row: T): T => ({
-      ...row,
-      ...(row.name !== undefined && { name: scrub(row.name) }),
-      ...(row.role !== undefined && { role: scrub(row.role) }),
-      ...(row.instructions !== undefined && { instructions: scrub(row.instructions) }),
-    });
-    return result.outcome === 'saved' ? { ...result, bot: visible(result.bot) }
-      : { ...result, current: visible(result.current), draft: visible(result.draft) };
+    return result.outcome === 'saved' ? { ...result, bot: scrubProfile(result.bot, scrub) }
+      : { ...result, current: scrubProfile(result.current, scrub), draft: scrubProfile(result.draft, scrub) };
   }
 }

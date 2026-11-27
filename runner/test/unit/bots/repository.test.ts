@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -65,4 +65,49 @@ test('corrupt state remains intact and cannot be treated as an empty roster', t 
   const { root, open } = fixture(t);
   writeFileSync(join(root, 'state.json'), '{');
   assert.throws(() => open(), /could not read/i);
+});
+
+test('renaming a Bot after reopening preserves fields from a newer writer in saved settings', t => {
+  const { root, open } = fixture(t);
+  const bot = open().create({ name: 'Editor' });
+  const file = join(root, 'state.json');
+  const state = JSON.parse(readFileSync(file, 'utf8'));
+  const modelBinding = { accountId: 'login', provider: 'codex', model: 'model', futureField: ['keep'] };
+  const privacy = { folder: '/private-editor', operationId: 'privacy-edit', futureField: { keep: true } };
+  Object.assign(state.bots[0], { modelBinding, privacy });
+  writeFileSync(file, JSON.stringify(state));
+
+  open().update(bot.id, bot.revision, { name: 'Reviewer' });
+  const saved = JSON.parse(readFileSync(file, 'utf8')).bots[0];
+  assert.deepEqual(saved.modelBinding, modelBinding);
+  assert.deepEqual(saved.privacy, privacy);
+  assert.equal(saved.name, 'Reviewer');
+
+  saved.modelBinding.provider = 'unknown-authority';
+  state.bots[0] = saved;
+  writeFileSync(file, JSON.stringify(state));
+  assert.throws(() => open(), /could not read/i);
+});
+
+test('paired-device edit acknowledgements expose only the paired profile fields', t => {
+  const { root, open } = fixture(t);
+  const bot = open().create({ name: 'Editor' });
+  const file = join(root, 'state.json');
+  const state = JSON.parse(readFileSync(file, 'utf8'));
+  Object.assign(state.bots[0], {
+    workFolder: '/local-fixture',
+    modelBinding: { accountId: 'local-login', provider: 'codex', model: 'model' },
+    futureLocalField: 'owner-only fixture',
+  });
+  writeFileSync(file, JSON.stringify(state));
+
+  const profile = { id: bot.id, name: 'Reviewer', role: '', instructions: '', revision: 2 };
+  const edit = (rev: number, op: string) => open().updateWithReceipt(bot.id, rev, { name: 'Reviewer' }, op);
+  assert.deepEqual(edit(1, 'edit-profile'), { outcome: 'saved', bot: profile });
+  const stored = JSON.parse(readFileSync(file, 'utf8'));
+  // An older writer may already have saved the full row as its receipt.
+  stored.profileReceipts[0].bot = stored.bots[0];
+  writeFileSync(file, JSON.stringify(stored));
+  assert.deepEqual(edit(1, 'edit-profile'), { outcome: 'saved', bot: profile });
+  assert.deepEqual(edit(1, 'conflict'), { outcome: 'conflict', current: profile, draft: { name: 'Reviewer' } });
 });

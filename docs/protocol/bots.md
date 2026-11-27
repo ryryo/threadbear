@@ -300,7 +300,10 @@ An edit names its workspace, owner epoch, Bot ID, base revision and operation
 ID. The backend queues it through the ordinary command lifecycle. Only the
 owning primary Runner can apply it. The profile and its acceptance receipt
 are saved together. A retry with the same operation ID can read that receipt.
-A conflict returns the saved profile and the submitted draft. Editing in a
+A conflict returns the saved profile and the submitted draft. A paired
+device receives the same five profile fields from a snapshot, a save receipt,
+or a conflict: ID, name, role, instructions and revision. Local settings
+such as model bindings and work folders stay on the owning Runner. Editing in a
 connected browser or app keeps the draft until the owner settles it.
 
 Backend API 106 and Bot storage format 8 add device editing. A Bot Thread

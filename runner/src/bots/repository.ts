@@ -17,14 +17,16 @@ const modelBinding = z.object({
 const bot = z.looseObject({
   id, name: z.string().min(1), role: z.string(), instructions: z.string(), revision,
   archivedAt: z.iso.datetime().optional(),
-  modelBinding: modelBinding.optional(),
+  modelBinding: modelBinding.loose().optional(),
   workFolder: z.string().min(1).optional(),
   permissionCeiling: z.enum(PERMISSION_MODES).optional(),
   reviewEnabled: z.boolean().optional(),
   tidyEnabled: z.boolean().optional(),
-  privacy: z.object({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
+  privacy: z.looseObject({ folder: z.string().min(1), operationId: botOperationId, moving: z.array(id).optional() }).optional(),
 });
-const deviceProfile = bot.pick({ id: true, name: true, role: true, instructions: true, revision: true });
+// A loose stored row preserves unknown data. A paired device gets the
+// declared projection, including from persisted receipts made by older builds.
+export const deviceProfile = bot.pick({ id: true, name: true, role: true, instructions: true, revision: true }).strip();
 const profileReceipt = z.object({ id: botOperationId, fingerprint: z.string(), bot: deviceProfile });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
