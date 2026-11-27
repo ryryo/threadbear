@@ -141,8 +141,8 @@ impl SidePane {
                     }
                     let target = selection.label();
                     if target.is_some() && !selection.frame && !selection.small {
-                        crate::web_panels::keyboard_to_app(window);
                         pick.comment.update(cx, |s, cx| s.focus(window, cx));
+                        crate::web_panels::keyboard_to_app(window);
                     }
                     pick.target = target;
                     this.browser_note_error = if selection.frame {
