@@ -33,7 +33,7 @@ export class BotGroups {
   private readonly owns: () => boolean;
   private readonly otherActive: () => number;
   private readonly narrow?: Options['narrow'];
-  private readonly tasks: NonNullable<Options['tasks']>;
+  private readonly groupTasks: NonNullable<Options['tasks']>;
   private readonly stopTasks?: Options['stopTasks'];
 
   constructor({ runner, store, owns, otherActive = () => 0, narrow, tasks = () => [], stopTasks }: Options) {
@@ -43,7 +43,7 @@ export class BotGroups {
     this.owns = owns;
     this.otherActive = otherActive;
     this.narrow = narrow;
-    this.tasks = tasks;
+    this.groupTasks = tasks;
     this.stopTasks = stopTasks;
   }
 
@@ -58,7 +58,7 @@ export class BotGroups {
     const tasksStopped = !threads.length || await this.stopTasks?.(id, threads) !== false;
     if (raises(old.group.ceiling, profile.ceiling)) {
       const members = Object.entries(old.threads).filter(([botId]) => profile.memberIds.includes(botId)).map(([, link]) => link.threadId);
-      const active = this.tasks(id).filter(task => profile.memberIds.includes(task.botId) && !('outcome' in task.state));
+      const active = this.groupTasks(id).filter(task => profile.memberIds.includes(task.botId) && !('outcome' in task.state));
       for (const threadId of [...members, ...active.map(task => task.threadId)]) {
         try { this.narrow?.(threadId, profile.ceiling); }
         catch { stopped.failed.push(threadId); }
@@ -99,7 +99,7 @@ export class BotGroups {
     const book = this.store.get(id);
     return {
       group: book.group, frozen: book.frozen, round: book.round, queued: book.posts.length, threads: book.threads,
-      tasks: book.round ? this.tasks(id, book.round.id).map(task => ({
+      tasks: book.round ? this.groupTasks(id, book.round.id).map(task => ({
         id: task.id, threadId: task.threadId, callId: task.group?.callId, title: task.title, status: task.state.status,
       })) : [],
       events: range(book.events, from ?? Math.max(1, (book.events.at(-1)?.seq ?? 1) - 99), to),
@@ -291,7 +291,7 @@ export class BotGroups {
         if (slot.threadId) this.stopThreads(id, [slot.threadId]);
         continue;
       }
-      const pendingTask = this.tasks(id, book.round.id).some(task => task.group?.callId === slot.callId &&
+      const pendingTask = this.groupTasks(id, book.round.id).some(task => task.group?.callId === slot.callId &&
         (!('outcome' in task.state) || (task.state.reply && !task.state.reply.sent)));
       if (pendingTask) continue;
       const proof = this.threads.read(slot);

@@ -860,6 +860,7 @@ impl Threadbear {
                             .id("group-message-field")
                             .test_support()
                             .aria_label("Group message")
+                            .a11y_role(gpui_kit::Role::GenericContainer)
                             .tip("Group message")
                             .child(Textarea::new(&fields.post)),
                     )

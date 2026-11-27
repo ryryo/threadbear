@@ -217,8 +217,7 @@ export class GroupStore {
     return this.change(id, book => {
       if (archiveRevision !== undefined) {
         if (book.group.revision !== archiveRevision || book.group.archivedAt) throw new Error('The Group changed.');
-        book.group.archivedAt = at;
-        book.group.revision++;
+        book.group = { ...book.group, archivedAt: at, revision: archiveRevision + 1 };
       }
       book.frozen = true;
       if (book.round && book.round.status !== 'done') {
