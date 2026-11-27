@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BOT_REQUEST_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
+import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -120,4 +120,23 @@ test('request data requires a compatible supervisor and preserves the prior Priv
   assert.equal(hasPrivateBotData(home), true);
   protectBotData(home, 1);
   assert.equal(readFileSync(marker, 'utf8').trim(), '3');
+});
+
+test('a Group book requires a format-6 supervisor and keeps the team format readable', t => {
+  const { home, dir, marker } = fixture(t);
+  for (const [id, formats] of [['teams', [1, 2, 3, 4, 5]], ['groups', [1, 2, 3, 4, 5, 6]]] as const) {
+    const release = join(dir, 'releases', id, 'src', 'bots');
+    mkdirSync(release, { recursive: true });
+    writeFileSync(join(release, 'format.json'), '1\n');
+    writeFileSync(join(release, 'format-compatible.json'), JSON.stringify(formats) + '\n');
+  }
+  writeFileSync(marker, '5\n');
+  assert.ok(launch.releaseCanUseBotData(dir, 'groups'));
+  assert.throws(() => protectBotData(home, BOT_GROUP_FORMAT), /updated Bot supervisor/);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '5');
+  writeFileSync(marker, '6\n');
+  assert.equal(launch.releaseCanUseBotData(dir, 'teams'), false);
+  assert.throws(() => launch.pointCurrent(dir, 'teams'), /Bot data format/);
+  assert.ok(launch.releaseCanUseBotData(dir, 'groups'));
+  assert.equal(checkBotDataFormat(home), true);
 });

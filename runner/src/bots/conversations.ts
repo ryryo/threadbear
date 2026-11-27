@@ -1,7 +1,7 @@
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import type { PersonalMemory, MemoryNote } from './ported/personal-memory.js';
-import type { BotRepository, Conversation } from './repository.ts';
+import type { Bot, BotRepository, Conversation } from './repository.ts';
 import { ScopedMemory } from './scoped-memory.ts';
 import { lowerMode } from '../access.ts';
 
@@ -10,10 +10,11 @@ export class BotConversations {
   private readonly repo: BotRepository;
   readonly scopedMemory: ScopedMemory;
 
-  constructor(runner: Runner, repo: BotRepository, root: string, redact?: (text: string) => string) {
+  constructor(runner: Runner, repo: BotRepository, root: string, redact?: (text: string) => string,
+    groupScope?: Pick<ConstructorParameters<typeof ScopedMemory>[0], 'group' | 'groups'>) {
     this.runner = runner;
     this.repo = repo;
-    this.scopedMemory = new ScopedMemory({ repo, root, projects: runner.projects, redact });
+    this.scopedMemory = new ScopedMemory({ repo, root, projects: runner.projects, redact, ...groupScope });
   }
 
   create(botId: string, operationId: string): Conversation {
@@ -27,19 +28,7 @@ export class BotConversations {
       }
     } else {
       if (typeof reserved.sessionId !== 'string') throw new Error('This Bot conversation’s Thread is gone');
-      const binding = bot.modelBinding;
-      if (binding) {
-        const account = this.runner.accounts.get(binding.accountId);
-        if (!account || account.provider !== binding.provider) throw new Error('The saved Bot login is no longer available');
-        const checked = this.runner.checkSettings(account, binding.model, binding.effort);
-        if (checked.model !== binding.model || checked.effort !== binding.effort) throw new Error('The saved Bot model or effort is no longer available');
-      }
-      this.runner.makeThread({
-        text: '', title: bot.name, cwd: bot.privacy?.folder ?? bot.workFolder, ...binding,
-        ...(bot.permissionCeiling !== undefined && {
-          permissionMode: lowerMode(this.runner.cfg.defaults.permissionMode ?? 'full', bot.permissionCeiling),
-        }),
-      }, {
+      this.runner.makeThread({ ...botThreadOptions(this.runner, bot), text: '', title: bot.name }, {
         id: reserved.threadId,
         sessionId: reserved.sessionId,
         botLink: { botId, conversationId: reserved.id },
@@ -126,6 +115,10 @@ export class BotConversations {
     } else {
       this.conversationRecord(bot.id, rec.id);
     }
+    return this.botContext(bot);
+  }
+
+  botContext(bot: Bot): string {
     const memory = this.scopedMemory.open({ kind: 'bot', id: bot.id }, { kind: 'bot', id: bot.id, private: Boolean(bot.privacy), grants: [] }, 'read');
     const notes = memory.list(this.runner.isoNow().slice(0, 10)).filter(note => !note.topic);
     return [
@@ -135,4 +128,20 @@ export class BotConversations {
       notes.length ? `Notes saved by the user for this Bot:\n${notes.map(note => `- ${note.text}`).join('\n')}` : '',
     ].filter(Boolean).join('\n\n');
   }
+}
+
+export function botThreadOptions(runner: Runner, bot: Bot, maximum?: import('../protocol.ts').PermissionMode) {
+  const binding = bot.modelBinding;
+  if (binding) {
+    const account = runner.accounts.get(binding.accountId);
+    if (!account || account.provider !== binding.provider) throw new Error('The saved Bot login is no longer available');
+    const checked = runner.checkSettings(account, binding.model, binding.effort);
+    if (checked.model !== binding.model || checked.effort !== binding.effort) throw new Error('The saved Bot model or effort is no longer available');
+  }
+  const cap = maximum === undefined ? bot.permissionCeiling : lowerMode(maximum, bot.permissionCeiling ?? 'full');
+  return {
+    cwd: bot.privacy?.folder ?? bot.workFolder,
+    ...binding,
+    ...(cap !== undefined && { permissionMode: lowerMode(runner.cfg.defaults.permissionMode ?? 'full', cap) }),
+  };
 }

@@ -310,6 +310,76 @@
       "portMode": "B",
       "portPath": "runner/test/ported-dsbot/request-state.test.ts",
       "changes": "L227–277: cancellation closes only the requested branch and stays closed across restart. Keep native cancelled records and reject a late result, so it cannot wake the cancelled branch. A separate user action to give up a wait and resume the live parent is not part of this test."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/groups.js",
+      "upstreamBlob": "cb3cf5b774ae8a68e682508ddeda721502268ee8",
+      "sha256": "06c261868b55ee7cdc53dc3b98759779c1d0e5cd60ad6f39beeca24458e7a91c",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/groups.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/src/bots/groups.ts",
+      "changes": "Port callIn/startable into group-round.ts. Adapt Group session ownership, result batches and stop/recovery to durable native Thread identities and the existing Runner approval and task lifecycle."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/tasks.js",
+      "upstreamBlob": "3dd70a4d6244fa3ddfd1822f8014a0cfaa542474",
+      "sha256": "8b76fb1571da403f693ab91b8181370ae584fb5f1658d50f32d591a766aea131",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/tasks.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/src/bots/task-threads.ts",
+      "changes": "Group work references the existing Bot task journal and its native approval and stop machinery."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/ledger.js",
+      "upstreamBlob": "0b0ecfa0cb472a2cd8e1ccc9eb4f334ae13fccdb",
+      "sha256": "5ba0b3ff7a24da956f90527226a09bfcbc0d4e971f712050c3a0753c17c9d0e9",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/ledger.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/src/bots/group-ledger.ts",
+      "changes": "Reuse bookFile unchanged beyond types. Adapt range and safely parse ordered rows. Publish the saved round with its ledger."
+    },
+    {
+      "upstreamPath": "ds-bot/test/groups.test.js",
+      "upstreamBlob": "642ca18ed3f2f3f25fea5fdbb58b7d4620d25017",
+      "sha256": "0e4bc8047611b946df5faf3cb850825c2474bbb073ef38e6c014174b478739c5",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/groups.test.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/group-round.test.ts",
+      "changes": "Port ordering, merge of an ordered waiting call into a parallel call, and the one-active-call rule with durable call IDs."
+    },
+    {
+      "upstreamPath": "ds-bot/test/group-work.test.js",
+      "upstreamBlob": "76b06c2f26e50aa5b27267d7c19d919b06b7f178",
+      "sha256": "8f9d0f5f3fd37302c6e07eddedd99a2796bc33249e73b9c55961cbcd2a6d0282",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/group-work.test.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/group-native.test.ts",
+      "changes": "Adapt the concurrent batch, partial result, approval, restart, next post, summary and stop fixtures to the native Runner."
+    },
+    {
+      "upstreamPath": "ds-bot/test/group-host-model.test.js",
+      "upstreamBlob": "b0e69bc8083e5d22daeac93ac6ab1b3e94dcd352",
+      "sha256": "74f8fcc59f46c3a381a8d9829a4948fdcff12c1568f628b5bf4eff1c7cbcb6db",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/group-host-model.test.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/group-native.test.ts",
+      "changes": "Group creation makes no CLI session. Only member calls start a native Thread."
+    },
+    {
+      "upstreamPath": "ds-bot/test/ledger.test.js",
+      "upstreamBlob": "ae5c04ae2fead5b834c5765b6314b3c9fe5daaf5",
+      "sha256": "0833c14d9bb3404a09e14804bd87641323a2c47feeaf6179c088d3a0128b41bc",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/ledger.test.js",
+      "phase": 6,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/group-ledger.test.ts",
+      "changes": "Port safe names, sequence range, and handing a partial last line to the caller."
     }
   ]
 }

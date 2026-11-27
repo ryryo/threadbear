@@ -12,17 +12,19 @@ export class ScopedMemory {
   private readonly options: {
     root: string; repo: BotRepository; projects?: Projects;
     group?: (id: string) => Group | undefined;
+    groups?: () => readonly (Group & { id: string })[];
     redact?: (text: string) => string;
   };
 
   constructor(options: ScopedMemory['options']) { this.options = options; }
 
   catalog() {
-    const { repo, projects } = this.options;
+    const { repo, projects, groups } = this.options;
     return [
       ...repo.list().map(bot => ({ kind: 'bot' as const, id: bot.id, title: bot.name, archived: Boolean(bot.archivedAt) })),
       { kind: 'team' as const, id: repo.workspaceId(), title: 'Workspace team', archived: false },
       ...repo.teams().map(team => ({ kind: 'team' as const, id: team.id, title: team.title, archived: false })),
+      ...(groups?.() ?? []).map(group => ({ kind: 'group' as const, id: group.id, title: group.name, archived: Boolean(group.archived) })),
       ...(projects?.list({ archived: true }) ?? []).map(project => ({ kind: 'project' as const, id: project.id, title: project.title, archived: Boolean(project.archived) })),
     ];
   }

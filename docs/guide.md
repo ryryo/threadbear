@@ -2098,6 +2098,13 @@ actions. In a Bot’s **Settings**, choose its permission limit. Lowering the
 limit stops a conversation that is still running with broader access. A
 higher limit lets you choose broader access in that conversation later.
 
+Open **Groups** to choose Bots on the same team and name the admin. A message goes
+to the admin by default. Type `@Name` to call a member by name, or choose
+**Notify everyone in order** in Group settings. The Group keeps partial replies
+as they arrive, and you can open a member’s Thread to answer its approval.
+**Stop work** freezes queued messages until you select **Resume**. Use **Review
+as note** on a reply to edit and approve it for the Group’s shared memory.
+
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.

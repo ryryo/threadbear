@@ -689,6 +689,7 @@ export type RunnerDeps = {
   botContext?: (rec: ThreadRecord) => string;
   botPermissionCeiling?: (rec: ThreadRecord) => PermissionMode | undefined;
   botTaskQueue?: (threadId: string, task: NonNullable<BotInputRef['task']>) => 'allow' | 'wait' | 'drop';
+  botGroupQueue?: (threadId: string, group: NonNullable<BotInputRef['group']>) => 'allow' | 'wait' | 'drop';
   botRequestQueue?: (threadId: string, request: NonNullable<BotInputRef['request']>) => 'allow' | 'wait' | 'drop';
   botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   pendingBotPrivacy?: (threadId: string) => string | undefined;
@@ -803,6 +804,7 @@ export class Runner {
   private readonly botPermissionCeiling?: RunnerDeps['botPermissionCeiling'];
   private botRequestQueue?: RunnerDeps['botRequestQueue'];
   private botTaskQueue?: RunnerDeps['botTaskQueue'];
+  private readonly botGroupQueue?: RunnerDeps['botGroupQueue'];
   private botFolderRefusal?: (cwd: string, privateBotId?: string) => string | undefined;
   private pendingBotPrivacy?: (threadId: string) => string | undefined;
   coordinators?: Coordinators;
@@ -938,6 +940,7 @@ export class Runner {
     this.botPermissionCeiling = deps.botPermissionCeiling;
     this.botRequestQueue = deps.botRequestQueue;
     this.botTaskQueue = deps.botTaskQueue;
+    this.botGroupQueue = deps.botGroupQueue;
     this.botFolderRefusal = deps.botFolderRefusal;
     this.pendingBotPrivacy = deps.pendingBotPrivacy;
     this.appRestartAsked = deps.appRestartAsked;
@@ -2127,7 +2130,7 @@ export class Runner {
     checkImages(images);
     // A report to the thread that started the sender, kept until its other
     // threads finish (runner/nested.ts).
-    if (!st.rec.botLink?.taskId && !opts.botRequest && !opts.botTask && this.holdReport(st, text, images, opts)) return { turnId: crypto.randomUUID(), held: true };
+    if (!st.rec.botLink?.taskId && !opts.botRequest && !opts.botTask && !opts.botGroup && this.holdReport(st, text, images, opts)) return { turnId: crypto.randomUUID(), held: true };
     // Another thread's message, allowed for this thread as it is now: if
     // it waits in the queue while Mike raises this thread, it's held as it
     // leaves (runner/ceiling.ts).
@@ -2156,11 +2159,15 @@ export class Runner {
     if (taskId && this.botTaskQueue?.(rec.id, { id: taskId, role: 'work' }) !== 'allow') {
       throw new RpcError(ErrorCode.notAllowed, 'This Bot task is no longer accepting messages.');
     }
-    const botDelivery = opts.botRequest || opts.botTask;
+    const botDelivery = opts.botRequest || opts.botTask || opts.botGroup;
+    if (rec.botLink?.groupId && opts.botGroup?.groupId !== rec.botLink.groupId) {
+      throw new RpcError(ErrorCode.notAllowed, 'Post new work from the Bot Group.');
+    }
     if (botDelivery && (!rec.botLink || !opts.messageId || !opts.botSource ||
-        (opts.botRequest && opts.botTask) ||
+        [opts.botRequest, opts.botTask, opts.botGroup].filter(Boolean).length !== 1 ||
         (opts.botRequest && this.botRequestQueue?.(rec.id, opts.botRequest) !== 'allow') ||
-        (opts.botTask && this.botTaskQueue?.(rec.id, opts.botTask) !== 'allow'))) {
+        (opts.botTask && this.botTaskQueue?.(rec.id, opts.botTask) !== 'allow') ||
+        (opts.botGroup && this.botGroupQueue?.(rec.id, opts.botGroup) !== 'allow'))) {
       throw new RpcError(ErrorCode.notAllowed, 'This Bot delivery is not allowed in this conversation.');
     }
     // Written with less access than it has now: Mike's to read, not its
@@ -2240,6 +2247,7 @@ export class Runner {
       source: opts.botSource ?? { kind: opts.origin ?? 'unknown' },
       ...(opts.botRequest ? { request: opts.botRequest } : {}),
       ...(taskInput ? { task: taskInput } : {}),
+      ...(opts.botGroup ? { group: opts.botGroup } : {}),
     };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.wakeReason && opts.origin === 'runner') msg.wakeReason = opts.wakeReason;
@@ -4921,10 +4929,12 @@ export class Runner {
     const offered = st.rec.queue[0];
     const botRequest = offered.botInput?.request;
     const botTask = offered.botInput?.task;
-    if (botRequest || botTask) {
+    const botGroup = offered.botInput?.group;
+    if (botRequest || botTask || botGroup) {
       const receipt = this.store.log(st.rec.id);
       const decision = (botRequest ? this.botRequestQueue?.(st.rec.id, botRequest) :
-        botTask && this.botTaskQueue?.(st.rec.id, botTask)) ?? 'wait';
+        botTask ? this.botTaskQueue?.(st.rec.id, botTask) :
+          botGroup && this.botGroupQueue?.(st.rec.id, botGroup)) ?? 'wait';
       if (decision === 'wait') return false;
       // Recovery from an earlier partial send may reconstruct this queue
       // item. The flushed event means the input may already have run.
@@ -5778,7 +5788,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; agentSignal?: AbortSignal };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; agentSignal?: AbortSignal };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; superseded?: false } | { superseded: true; started: true };
 

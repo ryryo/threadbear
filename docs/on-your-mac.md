@@ -904,6 +904,10 @@ the owning runner.
   The first background task raises the required format to 4.
   Team membership, Chief grants, changes and Bot permission limits live in
   the same Bot state file. The first such write requires format 5.
+  Groups write their settings, ledger and active round under
+  `<home>/bots/groups/`. Each member has its own Thread in each Group. The
+  ledger keeps reply previews and event references to the full text. The
+  first Group raises the required format to 6.
   The workspace team and project scopes have their own directories and
   journals there. Memory reviews keep their cursor, model, event range and
   decisions under `<home>/bots/reviews/`. An opted-in review or a requested

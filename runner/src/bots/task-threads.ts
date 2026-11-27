@@ -14,6 +14,9 @@ type Options = { runner: Runner; repo: BotRepository; journal: TaskJournal; owns
   childRequests?: (threadId: string) => boolean;
   cancelChildRequests?: (threadId: string) => void;
   parentCancelled?: (id: string) => boolean;
+  groupOrigin?: (rec: ThreadRecord) => SavedTask['group'];
+  groupActive?: (task: SavedTask) => boolean | undefined;
+  groupReply?: (task: SavedTask) => boolean;
 };
 
 export class BotTaskThreads {
@@ -21,6 +24,10 @@ export class BotTaskThreads {
   private readonly stopping = new Set<string>();
 
   constructor(options: Options) { this.options = options; }
+
+  activeCount(): number {
+    return this.options.journal.activeCount();
+  }
 
   private local(threadId: string): ThreadState {
     const state = this.options.runner.threads.get(threadId);
@@ -32,12 +39,13 @@ export class BotTaskThreads {
     const { rec } = this.local(threadId);
     const link = rec.botLink;
     const { repo, runner } = this.options;
-    if (!link || link.taskId || !repo.matchesConversation(link.botId, link.conversationId, threadId)) {
+    const group = link?.groupId && this.options.groupOrigin?.(rec);
+    if (!link || link.taskId || (!group && !repo.matchesConversation(link.botId, link.conversationId, threadId))) {
       throw new RpcError(ErrorCode.notAllowed, 'Start the task from the Bot’s normal conversation.');
     }
     const bot = repo.get(link.botId);
     if (bot.archivedAt || bot.privacy?.moving || rec.archivedAt) throw new RpcError(ErrorCode.notAllowed, 'The source Bot conversation cannot start a task right now.');
-    return { ...link, threadId, folder: rec.cwd, privateBotId: runner.privateBotOf(threadId),
+    return { ...link, ...(group && { group }), threadId, folder: rec.cwd, privateBotId: runner.privateBotOf(threadId),
       settings: { accountId: rec.accountId, model: rec.model, effort: rec.effort } };
   }
 
@@ -56,8 +64,8 @@ export class BotTaskThreads {
         const existing = runner.threads.get(task.threadId)?.rec;
         if (existing) { this.check(existing); return; }
         const approved = lowerMode(task.ceiling ?? 'ask', runner.accessOf(source.threadId));
-      const cap = this.options.repo.get(task.botId).permissionCeiling ?? 'full';
-      const permissionMode = ceilingMode(lowerMode(approved, cap));
+        const cap = this.options.repo.get(task.botId).permissionCeiling ?? 'full';
+        const permissionMode = ceilingMode(lowerMode(approved, cap));
         runner.makeThread({
           text: '', title: task.title, cwd: folder, worktree: false, ...task.settings, permissionMode,
           startedBy: { kind: 'thread', threadId: source.threadId, label: 'Bot task' },
@@ -115,6 +123,11 @@ export class BotTaskThreads {
     if (!this.options.owns()) return 'wait';
     try {
       const task = this.options.journal.get(ref.id);
+      if (task.group) {
+        const active = this.options.groupActive?.(task);
+        if (active === undefined) return 'wait';
+        if (!active) return 'drop';
+      }
       if (task.originRequestId && this.options.parentCancelled?.(task.originRequestId)) return 'drop';
       if (ref.role === 'work') {
         const bot = this.options.repo.get(task.botId);
@@ -173,6 +186,17 @@ export class BotTaskThreads {
     }
   }
 
+  async stopGroup(groupId: string, threadIds?: readonly string[]) {
+    const settled = await Promise.allSettled(this.options.journal.groupTasks(groupId).filter(task =>
+      !('outcome' in task.state) && (!threadIds || threadIds.includes(task.sourceThreadId))
+    ).map(async task => {
+      const result = await this.cancel(task.id, task.revision);
+      return { id: task.threadId, saved: result.saved };
+    }));
+    return settled.every(result => result.status === 'fulfilled' && result.value.saved);
+  }
+
+  groupTasks(groupId: string, roundId?: string) { return this.options.journal.groupTasks(groupId, roundId); }
   get(id: string) { return this.options.journal.get(id); }
   hasActive(botId: string): boolean { return this.options.journal.hasActive(botId); }
   children(requestId: string) { return this.options.journal.children(requestId); }
@@ -212,7 +236,8 @@ export class BotTaskThreads {
       if (!st) continue; // Still on another process until adopt(), or gone.
       try {
         this.check(st.rec);
-        if (task.originRequestId && this.options.parentCancelled?.(task.originRequestId)) {
+        const groupStopped = task.group && this.options.groupActive?.(task) === false;
+        if (groupStopped || (task.originRequestId && this.options.parentCancelled?.(task.originRequestId))) {
           if (!('outcome' in task.state) && !this.stopping.has(task.id)) {
             this.engine(async () => 'ask').cancel(task.id, task.revision, false).catch(() =>
               runner.notice('warning', 'The Runner could not stop a saved Bot task.'));
@@ -253,6 +278,10 @@ export class BotTaskThreads {
     if (!('outcome' in task.state) || !task.state.reply || task.state.reply.sent) return;
     const { runner, journal } = this.options;
     if (task.originRequestId && this.options.parentCancelled?.(task.originRequestId)) return;
+    if (task.group) {
+      if (this.options.groupReply?.(task)) journal.returned(task.id, task.revision, runner.isoNow(), task.state.reply.id);
+      return;
+    }
     const destination = this.normal(task.sourceThreadId);
     if (destination.conversationId !== task.sourceConversationId || destination.privateBotId !== task.privateBotId) return;
     const st = this.local(task.sourceThreadId);

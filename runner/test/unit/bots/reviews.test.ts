@@ -68,6 +68,27 @@ test('opted-in review reads a linked Thread, pins its login, and restores propos
   assert.deepEqual(reopened.reports(editor.id, a.threadId)[0].retry, { previous: report.id, operationId: replay });
 });
 
+test('an opted-in Bot only reviews its regular conversations when a Group thread is idle', async () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const { runner } = makeHarness(home);
+  const repo = new BotRepository(root, 'runner');
+  const bot = repo.create({ name: 'Reviewer' });
+  const bound = repo.setModelBinding(bot.id, bot.revision, {
+    provider: 'claude', accountId: 'claude-3', model: 'claude-sonnet-4-6',
+  });
+  repo.setAutomation(bot.id, bound.revision, 'reviewEnabled', true, randomUUID());
+  const { st } = runner.makeThread({ text: '', title: 'Group work', worktree: false }, {
+    id: randomUUID(), sessionId: randomUUID(),
+    botLink: { botId: bot.id, groupId: 'desk', conversationId: 'group-conversation' },
+  });
+  const service = new BotReviews({
+    root, repo, runner, enabled: () => true, redact: String,
+    askers: { claude: async () => { throw new Error('Group work must use the Group memory decision'); } },
+  });
+  await assert.doesNotReject(service.review(st.rec.id));
+});
+
 test('automatic tidy uses the same selected login and only starts after a scope changes', async () => {
   const home = tmpDir();
   const root = join(home, 'bots');

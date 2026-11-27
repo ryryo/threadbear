@@ -66,6 +66,7 @@ import type { BotTeams } from './bots/teams.ts';
 import { NAME_MAX } from './bots/ported/requests.js';
 
 type BotTools = Pick<BotRequests, 'sendBot'>;
+type BotGroupTools = Pick<import('./bots/groups.ts').BotGroups, 'delegate'>;
 type BotTaskTools = Pick<BotTaskThreads, 'start'>;
 type BotTeamTools = Pick<BotTeams, 'read' | 'createBot' | 'editBot' | 'stopBot'>;
 
@@ -300,10 +301,12 @@ export function buildThreadbearTools(
     botRequests?: BotTools;
     botTasks?: BotTaskTools;
     botTeams?: BotTeamTools;
+    botGroups?: BotGroupTools;
   } = {},
 ) {
   const botRequests = opts.botRequests;
   const botTasks = opts.botTasks;
+  const botGroups = opts.botGroups;
   const botTeams = opts.botTeams;
   const codex = opts.provider === 'codex';
   // A schedule's check (schedule-check.ts).
@@ -2514,6 +2517,16 @@ export function buildThreadbearTools(
         return `Sent to ${id.slice(0, 8)} "${(await control.get(id)).title}".`;
       }),
     ),
+    ...(botGroups ? [tool(
+      'call_group_members',
+      'Ask members of this Group to work on the current call. Pass their IDs together so the recorded results can be summarized once.',
+      { members: z.array(z.uuid()).min(1).max(12), note: z.string().trim().min(1).max(30_000),
+        operationId: z.string().min(1).max(128) },
+      handle(({ members, note, operationId }) => {
+        const batch = botGroups.delegate(selfId, operationId, members, note);
+        return `Called ${batch.count} Group members in batch ${batch.key}.`;
+      }),
+    )] : []),
     ...(botTasks ? [tool(
       'task_start',
       'Start a background task for this Bot and keep the current conversation. The result comes back when the task is done.',
@@ -2908,14 +2921,14 @@ export function serverInstructions(selfId: string, o: { one: boolean; bulletRepl
   );
 }
 
-export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools, botTasks?: BotTaskTools, botTeams?: BotTeamTools): McpSdkServerConfigWithInstance {
+export function threadbearMcpServer(control: ThreadControl, selfId: string, schedules?: ScheduleControl, projects?: ProjectControl, appRestarts?: AppRestartControl, bulletReplies: () => boolean = () => true, pocket?: () => PocketControl | undefined, oneReply: () => boolean = () => false, gateway?: () => string | undefined, gatewayHealth?: () => Promise<ConnectorService[] | undefined>, remote?: () => RemoteControl | undefined, livePages?: () => boolean, coordinators?: () => Coordinators | undefined, botRequests?: BotTools, botTasks?: BotTaskTools, botTeams?: BotTeamTools, botGroups?: BotGroupTools): McpSdkServerConfigWithInstance {
   const one = oneReply();
   const isHelper = Boolean(coordinators?.()?.helperOwner(selfId));
   const server = createSdkMcpServer({
     name: SERVER_NAME,
     version: RUNNER_VERSION,
     instructions: isHelper ? COORDINATOR_WORKER_PROMPT : serverInstructions(selfId, { one, bulletReplies: bulletReplies(), pocket: Boolean(pocket?.()), projects: Boolean(projects), livePages: livePages?.() ?? false }),
-    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests, botTasks, botTeams }),
+    tools: buildThreadbearTools(control, selfId, Date.now, schedules, projects, appRestarts, { bulletReplies, pocket, oneReply: () => one, gateway, gatewayHealth, remote, coordinators, botRequests, botTasks, botTeams, botGroups }),
   });
   server.tools = [...ALWAYS_ASK_TOOLS].map((name) => ({ name: name.split('__').at(-1)!, permission_policy: 'always_ask' as const }));
   return server;

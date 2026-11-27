@@ -7,7 +7,7 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -21,6 +21,9 @@ import { TaskJournal } from './task-journal.ts';
 import { BotTaskThreads } from './task-threads.ts';
 import { botTaskMethods } from './task-rpc.ts';
 import type { BotInputRef } from '../protocol.ts';
+import { GroupStore } from './group-store.ts';
+import { BotGroups } from './groups.ts';
+import { groupMethods } from './group-rpc.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
 
@@ -48,6 +51,8 @@ export class BotRuntime {
   private requestService?: BotRequests;
   private taskService?: BotTaskThreads;
   private teamService?: BotTeams;
+  private groupService?: BotGroups;
+  private groupWake = false;
   private permissionChanges?: PermissionChanges;
   private readonly taskWake = new Set<string>();
   private requestListener?: () => void;
@@ -60,10 +65,10 @@ export class BotRuntime {
     teamMethods(() => ({
       repo: this.getWorkspace().repo, teams: this.teams(), now: () => this.options.runner().isoNow(),
       protect: () => this.protectTeamData(), setCeiling: (bot, rev, cap) => this.setBotCeiling(bot, rev, cap),
-    })), {
+    })), groupMethods(() => this.groups(), (groupId, seq, operationId, text) => this.approveGroupNote(groupId, seq, operationId, text)), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), reason };
+      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), groups: this.groupsAvailable(), reason };
     },
   });
 
@@ -96,7 +101,16 @@ export class BotRuntime {
 
   permissionCeiling(rec: ThreadRecord): PermissionMode | undefined {
     if (!rec.botLink || rec.copied) return undefined;
-    return this.repo().get(rec.botLink.botId).permissionCeiling;
+    const limit = this.repo().get(rec.botLink.botId).permissionCeiling;
+    if (rec.botLink.groupId) return lowerMode(limit ?? 'full', this.groups().threads.check(rec).group.ceiling);
+    if (rec.botLink.taskId && this.tasksAvailable()) {
+      const task = this.tasks().check(rec);
+      if (task.group) {
+        if (!this.groupsAvailable() || !this.groups().taskActive(task)) return 'plan';
+        return lowerMode(limit ?? 'full', this.groups().store.get(task.group.groupId).group.ceiling);
+      }
+    }
+    return limit;
   }
 
   private async setBotCeiling(botId: string, revision: number, ceiling: PermissionMode) {
@@ -160,6 +174,7 @@ export class BotRuntime {
       throw new RpcError(ErrorCode.busy, 'Team changes need the updated Runner supervisor to finish handing over.');
     }
     protectBotData(this.options.home, BOT_TEAM_FORMAT);
+    this.reconcileGroups();
   }
 
   teams(): BotTeams {
@@ -176,6 +191,55 @@ export class BotRuntime {
     });
   }
 
+  groupsAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_GROUP_FORMAT);
+  }
+
+  groups(): BotGroups {
+    if (!this.groupsAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot Groups need an updated Runner supervisor.');
+    if (this.groupService) return this.groupService;
+    const { home, runner, owns } = this.options;
+    const store = new GroupStore(join(home, 'bots'), this.repo(), () => {
+      if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+      protectBotData(home, BOT_GROUP_FORMAT);
+    });
+    return this.groupService = new BotGroups({
+      runner: runner(), store, owns,
+      otherActive: () => this.tasksAvailable() ? this.tasks().activeCount() : 0,
+      narrow: (id, cap) => this.narrowBotThread(id, cap),
+      tasks: (id, round) => this.tasksAvailable() ? this.tasks().groupTasks(id, round) : [],
+      stopTasks: (id, threads) => this.tasks().stopGroup(id, threads),
+    });
+  }
+
+  private approveGroupNote(groupId: string, seq: number, operationId: string, text: string) {
+    if (!this.options.owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+    const { reportId, result } = this.groups().resultRecord(groupId, seq);
+    const memory = this.getWorkspace().conversations.scopedMemory.open({ kind: 'group', id: groupId }, { kind: 'owner' }, 'write');
+    const receipt = memory.approveReview({ op: 'add', text }, {
+      reportId, index: 0, operationId, conversationId: groupId,
+      threadId: result.source.threadId, first: result.source.seq, through: result.source.seq,
+      acceptedText: text,
+    }, this.options.runner().isoNow(), value => this.reviewDeps?.redact(value) ?? value);
+    return { receipt };
+  }
+
+  groupQueue(threadId: string, ref: NonNullable<BotInputRef['group']>): 'allow' | 'wait' | 'drop' {
+    return this.groupsAvailable() ? this.groups().queue(threadId, ref) : 'wait';
+  }
+
+  reconcileGroups(): void {
+    if (this.groupWake || !this.groupsAvailable()) return;
+    this.groupWake = true;
+    setImmediate(() => {
+      if (!this.groupWake) return;
+      this.groupWake = false;
+      if (!this.groupsAvailable() || !this.options.canChangePrivacy?.()) return;
+      try { this.groups().recover(); }
+      catch { this.options.runner().notice('warning', 'The Bot Group records could not be reopened.'); }
+    });
+  }
+
   tasksAvailable(): boolean {
     return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_TASK_FORMAT);
   }
@@ -189,10 +253,17 @@ export class BotRuntime {
       childRequests: id => this.requestsAvailable() && this.requests().pendingFrom(id),
       cancelChildRequests: id => { if (this.requestsAvailable()) this.requests().cancelFrom(id); },
       parentCancelled: id => this.requestsAvailable() && this.requests().cancelled(id),
+      groupOrigin: rec => this.groupsAvailable() ? this.groups().taskOrigin(rec) : undefined,
+      groupActive: task => this.groupsAvailable() ? this.groups().taskActive(task) : undefined,
+      groupReply: task => {
+        if (!this.groupsAvailable() || !this.groups().taskReply(task)) return false;
+        this.reconcileGroups();
+        return true;
+      },
       journal: new TaskJournal(join(home, 'bots'), atomicWriteFileSync, () => {
         if (!owns() || !this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
         protectBotData(home, BOT_TASK_FORMAT);
-      }),
+      }, () => this.groupsAvailable() ? this.groups().activeCount() : 0),
     });
   }
 
@@ -207,7 +278,10 @@ export class BotRuntime {
     this.taskWake.add(key);
     setImmediate(() => {
       if (!this.taskWake.delete(key) || !this.tasksAvailable()) return;
-      try { this.tasks().recover(threadId); }
+      try {
+        this.tasks().recover(threadId);
+        this.reconcileGroups();
+      }
       catch { this.options.runner().notice('warning', 'The Bot task journal could not be reopened.'); }
     });
   }
@@ -220,18 +294,22 @@ export class BotRuntime {
     if (this.requestListener) return;
     const runner = this.options.runner();
     this.requestListener = runner.onNotification(note => {
-      if (note.method === 'thread.updated' && note.params.thread.botLink?.taskId) {
-        this.reconcileTasks(note.params.thread.id);
+      if (note.method === 'thread.updated') {
+        if (note.params.thread.botLink?.taskId) this.reconcileTasks(note.params.thread.id);
+        if (note.params.thread.botLink?.groupId) this.reconcileGroups();
         return;
       }
       if (note.method !== 'thread.event') return;
       const { threadId, event } = note.params;
-      if (!runner.threads.get(threadId)?.rec.botLink) return;
+      const link = runner.threads.get(threadId)?.rec.botLink;
+      if (!link) return;
+      if (link.groupId && (event.type === 'turn.completed' || event.type === 'approval.resolved')) this.reconcileGroups();
       if (event.type === 'turn.completed' || (event.type === 'user.message' && (event.botInput?.request || event.botInput?.task))) this.reconcileRequests(threadId);
       if (event.type === 'turn.completed' || (event.type === 'user.message' && event.botInput?.task)) this.reconcileTasks(threadId);
     });
     this.reconcileRequests();
     this.reconcileTasks();
+    this.reconcileGroups();
   }
 
   reconcileRequests(threadId?: string): void {
@@ -251,6 +329,7 @@ export class BotRuntime {
     this.requestListener = undefined;
     this.requestWake.clear();
     this.taskWake.clear();
+    this.groupWake = false;
   }
 
   startReviews(deps: ReviewDeps): void {
@@ -264,14 +343,16 @@ export class BotRuntime {
     this.stopListening = runner.onNotification(note => {
       if (note.method === 'thread.updated') {
         const { id, status, botLink } = note.params.thread;
-        if (botLink && !botLink.taskId && !this.unavailable()) queue.status(id, status === 'idle');
+        if (botLink && !botLink.taskId && !botLink.groupId && !this.unavailable()) queue.status(id, status === 'idle');
       } else if (note.method === 'thread.deleted') {
         queue.status(note.params.threadId, false);
       }
     });
     if (!this.unavailable()) {
       for (const { rec } of runner.threads.values()) {
-        if (rec.botLink && !rec.botLink.taskId && !rec.copied && rec.status === 'idle') queue.status(rec.id, true);
+        if (rec.botLink && !rec.botLink.taskId && !rec.botLink.groupId && !rec.copied && rec.status === 'idle') {
+          queue.status(rec.id, true);
+        }
       }
     }
   }
@@ -311,7 +392,19 @@ export class BotRuntime {
       const { home, runner } = this.options;
       const root = join(home, 'bots');
       const repo = this.repo();
-      this.workspace = { repo, conversations: new BotConversations(runner(), repo, root, text => this.reviewDeps?.redact(text) ?? text) };
+      this.workspace = {
+        repo,
+        conversations: new BotConversations(runner(), repo, root, text => this.reviewDeps?.redact(text) ?? text, {
+          group: id => {
+            if (!this.groupsAvailable()) return undefined;
+            const { group } = this.groups().store.get(id);
+            return { name: group.title, memberIds: group.memberIds, archived: Boolean(group.archivedAt) };
+          },
+          groups: () => this.groupsAvailable() ? this.groups().store.list().map(group => ({
+            id: group.id, name: group.title, memberIds: group.memberIds, archived: Boolean(group.archivedAt),
+          })) : [],
+        }),
+      };
     }
     return this.workspace;
   }
@@ -340,6 +433,10 @@ export class BotRuntime {
     }
     const changed = repo.setPrivate(botId, expectedRevision, canonical, operationId, [...moving], () => {
       if (this.options.archiveExporting?.()) throw new Error('Turn off Agent Archive before making a Bot private. It reads the CLI’s own transcripts.');
+      if (this.groupsAvailable() && this.groups().store.list().some(group => !group.archivedAt && group.memberIds.includes(botId))) {
+        throw new Error('Remove the Bot from its Groups before making it private.');
+      }
+
       if (!this.options.canChangePrivacy?.()) throw new RpcError(ErrorCode.busy, 'Wait for the old Runner to finish handing over before making a Bot private.');
       if (!statSync(canonical).isDirectory()) throw new Error('Choose an existing work folder for this Bot');
       const otherFolders = repo.list().flatMap(bot => bot.id !== botId && bot.privacy ? bot.privacy.folder : []);
@@ -410,6 +507,27 @@ export class BotRuntime {
 
   context(rec: ThreadRecord): string {
     if (rec.copied) throw new RpcError(ErrorCode.notAllowed, 'A copy of a Bot conversation stays read-only.');
+    if (rec.botLink?.groupId) {
+      const groups = this.groups();
+      const { group } = groups.threads.check(rec);
+      const { conversations, repo } = this.getWorkspace();
+      const bot = repo.get(rec.botLink.botId);
+      const memory = conversations.scopedMemory.open({ kind: 'group', id: group.id }, {
+        kind: 'bot', id: bot.id, private: false, groupId: group.id, teamId: group.teamId, grants: [],
+      }, 'read');
+      const notes = memory.list(this.options.runner().isoNow().slice(0, 10)).filter(note => !note.topic);
+      const names = group.memberIds.flatMap(id => {
+        const member = groups.store.member(group, id);
+        return member ? [`${member.name}: ${id}`] : [];
+      });
+      return [conversations.botContext(bot), `Group: ${group.title}`,
+        `Group members:
+${names.join('\n')}`,
+        'Use call_group_members once, naming all the member IDs needed for this piece of work. If this turn is the summary, use the recorded results and reply.',
+        notes.length ? `Notes approved for this Group:
+${notes.map(note => `- ${note.text}`).join('\n')}` : '',
+      ].filter(Boolean).join('\n\n');
+    }
     const task = rec.botLink?.taskId ? this.tasks().active(rec) : undefined;
     return this.getWorkspace().conversations.context(rec, task);
   }

@@ -1169,6 +1169,7 @@ impl Threadbear {
                         // longer holds it under Running (`Outbox::sending`).
                         crate::thread::summary_arrived(&t.id, cx);
                         let before = self.threads.insert(t.id.clone(), Arc::new(t.clone()));
+                        self.note_group_thread_update(&t, cx);
                         self.note_failed_account(before.as_deref(), &t);
                         self.note_failed_move(before.as_deref(), &t, cx);
                         self.thread_changed_outside(before.as_deref(), &t, cx);

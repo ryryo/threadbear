@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { lstatSync, readFileSync } from 'node:fs';
 import type { EffortLevel, PermissionMode } from '../protocol.ts';
+import type { GroupInput } from './group-threads.ts';
 import type { KeptResult } from './handoff-result.ts';
 
 const TITLE_MAX = 80
@@ -18,6 +19,7 @@ export type StartTask = {
   sourceThreadId: string;
   sourceConversationId: string;
   originRequestId?: string;
+  group?: GroupInput;
   folder?: string;
   requestedFolder?: string;
   privateBotId?: string;
@@ -45,6 +47,8 @@ export type SavedTask = Omit<StartTask, 'brief'> & {
 };
 type Writer = (file: string, body: string, mode: number) => void;
 
+export const BOT_WORKSPACE_CONCURRENCY = 4;
+
 const running = (task: SavedTask) => !('outcome' in task.state);
 const taskFingerprint = (title: string, brief: string, folder?: string, retryOf?: string) =>
   createHash('sha256').update(JSON.stringify({ title: oneLine(title, TITLE_MAX).toWellFormed(), brief, folder, retryOf })).digest('hex');
@@ -55,11 +59,13 @@ export class TaskJournal {
   private readonly saveFile: Writer;
   private rows: Map<string, SavedTask>;
   private readonly protect: () => void;
+  private readonly otherActive: () => number;
 
-  constructor(root: string, saveFile: Writer, protect: () => void) {
+  constructor(root: string, saveFile: Writer, protect: () => void, otherActive = () => 0) {
     this.file = join(root, 'tasks.json');
     this.saveFile = saveFile;
     this.protect = protect;
+    this.otherActive = otherActive;
     this.rows = this.read();
   }
 
@@ -102,6 +108,10 @@ export class TaskJournal {
     return structuredClone(row);
   }
 
+  activeCount(): number {
+    return [...this.rows.values()].filter(running).length;
+  }
+
   reserve(input: StartTask, at: string): SavedTask {
     const { brief, title, operationId, ...scope } = input;
     const clean = oneLine(title, TITLE_MAX).toWellFormed();
@@ -111,7 +121,7 @@ export class TaskJournal {
     const known = this.operation(input.sourceThreadId, operationId, title, brief, input.requestedFolder, input.retryOf);
     if (known) return known;
     const active = all.filter(running);
-    if (active.length >= 4 || active.filter(row => row.botId === input.botId).length >= 2) {
+    if (active.length + this.otherActive() >= BOT_WORKSPACE_CONCURRENCY || active.filter(row => row.botId === input.botId).length >= 2) {
       throw new Error('The workspace or Bot has reached its background task limit');
     }
     return this.save({
@@ -152,6 +162,11 @@ export class TaskJournal {
 
   children(requestId: string): SavedTask[] {
     return structuredClone([...this.rows.values()].filter(row => row.originRequestId === requestId));
+  }
+
+  groupTasks(groupId: string, roundId?: string): SavedTask[] {
+    return structuredClone([...this.rows.values()].filter(row =>
+      row.group?.groupId === groupId && (roundId === undefined || row.group.roundId === roundId)));
   }
 
   hasActive(botId: string): boolean {

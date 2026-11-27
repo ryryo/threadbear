@@ -232,3 +232,37 @@ highest native permission mode it can use. A narrower limit stops an active
 CLI with broader permissions and applies to queued input and future
 conversations. A higher limit takes effect when the owner changes the Thread setting. Failed updates keep
 the last saved limit and restore the affected Thread settings when safe.
+
+## Groups and rounds
+
+A Group belongs to one Bot team. Its saved roster includes an admin, mode,
+permission ceiling and configuration revision. A Bot has its own Thread
+in each Group. Creating the Group starts no model. A Group message is
+recorded with its resolved member IDs before the first model call.
+
+A round owns its queued calls, replies and summaries. Explicit mentions
+can start in parallel. The everyone mode preserves the ordered calls.
+A member cannot speak twice at once in one Group. Posts received while a
+round is active are kept in order for the next round.
+
+The Group book records a durable sequence and event identity. A result
+points to the Thread and event that hold the complete reply. On a
+restart the Runner checks admitted inputs and terminal events before
+scheduling new work. The owner can stop a Group, which freezes the
+active round before cancelling any of its calls.
+
+
+Group replies and background task replies keep their producing Thread event
+reference. `bots.groups.result` opens its retained text and returns
+`{text, whole}`. An owner can review a reply as a Group note.
+`bots.groups.memory.approve {groupId, seq, operationId, text}` applies the
+approved text through the memory journal with the source event and a retry
+receipt. Posting and replying alone do not add notes.
+
+Group creation and posting use caller-provided operation IDs to recover the
+same receipt when a connection drops.
+
+A member can use `call_group_members` within its own current native Group
+call. The group, member, parent call and permissions are resolved from that
+Thread. A background Task started in a Group is linked to that call,
+retains its own Thread and approvals, and records its result in the Group.

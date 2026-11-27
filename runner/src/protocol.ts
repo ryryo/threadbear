@@ -245,11 +245,12 @@ export type BotInputRef = {
   source: BotInputSource;
   request?: { id: string; role: 'request' | 'result' };
   task?: { id: string; role: 'work' | 'result' };
+  group?: { groupId: string; roundId: string; callId: string };
 };
 
 export type ThreadSummary = {
   id: string;
-  botLink?: { botId: string; conversationId: string; taskId?: string };
+  botLink?: { botId: string; conversationId: string; taskId?: string; groupId?: string };
   privateBotId?: string;
   title: string;
   cwd: string;

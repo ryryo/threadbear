@@ -3,7 +3,7 @@
 import { reconcileActiveTask, stopTask, type TaskEvidence } from './task-lifecycle.ts';
 import type { SavedTask, StartTask, TaskJournal } from './task-journal.ts';
 
-type Source = { botId: string; threadId: string; conversationId: string; folder: string; privateBotId?: string; taskId?: string; settings?: StartTask['settings'] };
+type Source = { botId: string; threadId: string; conversationId: string; folder: string; privateBotId?: string; taskId?: string; group?: StartTask['group']; settings?: StartTask['settings'] };
 type Request = Pick<StartTask, 'title' | 'brief' | 'operationId' | 'retryOf'> & { folder?: string };
 type RecipientState = { kind: 'new' | 'unknown' } | { kind: 'accepted'; turnId: string };
 type Ports = {
@@ -33,13 +33,13 @@ export class BackgroundBotTasks {
     const { folder, ceiling } = await authorize(origin, known?.folder ? { ...input, folder: known.folder } : input);
     const current = source(sourceId);
     if (current.botId !== origin.botId || current.conversationId !== origin.conversationId ||
-        current.privateBotId !== origin.privateBotId || current.folder !== origin.folder) {
+        current.privateBotId !== origin.privateBotId || current.folder !== origin.folder || current.group?.callId !== origin.group?.callId) {
       throw new Error('The original conversation changed while its task was being approved.');
     }
     const task = journal.reserve({
       operationId: input.operationId, botId: origin.botId, sourceThreadId: origin.threadId,
       sourceConversationId: origin.conversationId, originRequestId: parent(origin),
-      title: input.title, brief: input.brief, folder, requestedFolder: input.folder, ceiling,
+      title: input.title, brief: input.brief, folder, requestedFolder: input.folder, ceiling, group: current.group,
       retryOf: input.retryOf, privateBotId: origin.privateBotId, settings: current.settings,
     }, clock());
     if (task.state.status !== 'reserved') return task;

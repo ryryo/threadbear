@@ -28,6 +28,7 @@ impl Threadbear {
         if self.bots.busy || self.bots.editor.is_some() {
             return;
         }
+        self.bots.groups.visible = false;
         self.bots.show_teams = true;
         self.load_bot_teams(cx);
     }

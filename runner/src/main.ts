@@ -453,15 +453,19 @@ async function main(): Promise<void> {
     const s = experimentOn(cfg.home, ARCHIVE_EXPERIMENT) && !bots.hasPrivateBots() ? archiveMcpServer() : undefined;
     return s ? { [ARCHIVE_MCP_NAME]: s } : {};
   };
-  const requestTools = (threadId: string) => bots.requestsAvailable() && runner.threads.get(threadId)?.rec.botLink
-    ? bots.requests() : undefined;
+  const requestTools = (threadId: string) => {
+    const link = runner.threads.get(threadId)?.rec.botLink;
+    return bots.requestsAvailable() && link && !link.groupId ? bots.requests() : undefined;
+  };
+  const groupTools = (threadId: string) => bots.groupsAvailable() && runner.threads.get(threadId)?.rec.botLink?.groupId
+    ? bots.groups() : undefined;
   const taskTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
     return bots.tasksAvailable() && link && !link.taskId ? bots.tasks() : undefined;
   };
   const teamTools = (threadId: string) => {
     const link = runner.threads.get(threadId)?.rec.botLink;
-    return bots.teamsAvailable() && link && !link.taskId && !privateAgent(threadId) ? bots.teams() : undefined;
+    return bots.teamsAvailable() && link && !link.taskId && !link.groupId && !privateAgent(threadId) ? bots.teams() : undefined;
   };
   const claude = new ClaudeAdapter({
     claudePath: cfg.claudePath,
@@ -473,7 +477,7 @@ async function main(): Promise<void> {
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
-        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId), teamTools(threadId)),
+        () => privateAgent(threadId) ? undefined : runner.coordinators, requestTools(threadId), taskTools(threadId), teamTools(threadId), groupTools(threadId)),
       ...Object.fromEntries(Object.entries(archiveServers()).map(([name, server]) => [name, { type: 'stdio' as const, ...server }])),
     }),
     oneReply: () => cfg.oneReply,
@@ -494,6 +498,7 @@ async function main(): Promise<void> {
       botRequests: requestTools(threadId),
       botTasks: taskTools(threadId),
       botTeams: teamTools(threadId),
+      botGroups: groupTools(threadId),
     });
   };
   // One app-server per live Codex thread, each starting what E says is
@@ -589,6 +594,7 @@ async function main(): Promise<void> {
     botPermissionCeiling: rec => bots.permissionCeiling(rec),
     botRequestQueue: (threadId, ref) => bots.requestQueue(threadId, ref),
     botTaskQueue: (threadId, ref) => bots.taskQueue(threadId, ref),
+    botGroupQueue: (threadId, ref) => bots.groupQueue(threadId, ref),
     ...(box ? {} : { botFolderRefusal: (cwd, id) => bots.folderRefusal(cwd, id), pendingBotPrivacy: id => bots.pendingPrivateThread(id) }),
     projects,
     atMac: () => atMac,
@@ -650,6 +656,7 @@ async function main(): Promise<void> {
         runner.startOwedReviews(threadId);
         bots.reconcileRequests(threadId);
         bots.reconcileTasks(threadId);
+        bots.reconcileGroups();
         // It may have finished on the old runner while a thread waiting on
         // it had already come across. After its own carry-ons, which are
         // new work, so a finish they replace doesn't count.

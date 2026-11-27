@@ -73,3 +73,18 @@ Feature: Bot workspace
     Then the Settings title is "一般" in "ja"
     When I add "Editor" to the team and appoint it as Chief in Japanese
     Then "Editor" is the Chief of the Bot team
+
+  @bots.groups @bots @swift-pending
+  Scenario: The owner creates a Group and finds its saved reply after reconnect
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Writer" from the Bots page
+    And I create a Group called "Editorial" with "Writer"
+    And I post "見出し案をください" to the Group
+    Then the Group has the full saved reply
+    When I approve the Group's reply as a note
+    And the isolated Bot Runner restarts
+    Then the app is connected again
+    And the Group has the full saved reply
+    And the Group memory has one approved note from the reply
+    When I stop the Group's work
+    Then the Group can be resumed

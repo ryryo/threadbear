@@ -69,6 +69,8 @@ pub struct BotLink {
     pub conversation_id: String,
     #[serde(default, deserialize_with = "crate::wire::field")]
     pub task_id: Option<String>,
+    #[serde(default, deserialize_with = "crate::wire::field")]
+    pub group_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

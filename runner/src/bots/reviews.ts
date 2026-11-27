@@ -179,7 +179,8 @@ export class BotReviews {
     const { repo, runner, enabled, redact, askers, privateFolder } = this.options;
     if (!enabled()) return;
     const rec = runner.threads.get(threadId)?.rec;
-    if (!rec?.botLink || rec.status !== 'idle' || rec.copied || privateFolder?.(rec.cwd)) return;
+    if (!rec?.botLink || rec.botLink.groupId || rec.botLink.taskId ||
+        rec.status !== 'idle' || rec.copied || privateFolder?.(rec.cwd)) return;
     const bot = repo.get(rec.botLink.botId);
     const binding = bot.modelBinding;
     if ((automatic && !bot.reviewEnabled) || bot.archivedAt || !binding || this.unavailable(bot)) return;

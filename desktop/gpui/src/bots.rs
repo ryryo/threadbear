@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use threadbear_core::inbox::ThreadSummary;
 use threadbear_core::tr;
 
+mod groups;
 mod tasks;
 mod teams;
 use tasks::TaskCard;
@@ -255,6 +256,7 @@ pub(crate) struct BotsState {
     tasks_available: bool,
     teams_available: bool,
     show_teams: bool,
+    groups: groups::GroupsState,
     teams: Vec<TeamCard>,
     selected_team: Option<String>,
     reason: Option<String>,
@@ -302,6 +304,7 @@ impl Threadbear {
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
                 this.bots.teams_available = value["teams"].as_bool().unwrap_or(false);
+                this.bots.groups.available = value["groups"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
                     this.load_bot_list(cx);
@@ -353,6 +356,7 @@ impl Threadbear {
             return;
         }
         self.bots.show_teams = false;
+        self.bots.groups.visible = false;
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
         self.bots.source = source;
@@ -663,6 +667,7 @@ impl Threadbear {
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.bots.show_teams = false;
+                        this.bots.groups.visible = false;
                         this.edit_bot(Edit::New, String::new(), window, cx);
                     })),
             );
@@ -672,6 +677,13 @@ impl Threadbear {
                 bot_button("bot-teams", tr!("Teams"), disabled)
                     .when(self.bots.show_teams, |button| button.primary())
                     .on_click(cx.listener(|this, _, _, cx| this.open_bot_teams(cx))),
+            );
+        }
+        if self.bots.groups.available {
+            list = list.child(
+                bot_button("bot-groups", "Groups", disabled)
+                    .when(self.bots.groups.visible, |button| button.primary())
+                    .on_click(cx.listener(|this, _, window, cx| this.open_bot_groups(window, cx))),
             );
         }
         for bot in &self.bots.list {
@@ -720,6 +732,9 @@ impl Threadbear {
                     tr!("Checking whether Bots are available on this Runner…").into()
                 }))
                 .into_any_element();
+        }
+        if self.bots.groups.visible && self.bots.groups.available {
+            return page.child(self.render_bot_groups(cx)).into_any_element();
         }
         if self.bots.show_teams && self.bots.teams_available {
             return page.child(self.render_bot_teams(cx)).into_any_element();
@@ -1815,6 +1830,16 @@ impl Threadbear {
             return None;
         }
         let link = thread.bot_link.as_ref()?;
+        if let Some(group_id) = link.group_id.clone() {
+            return Some(
+                bot_button("thread-bot-group", "Open Bot Group", self.bots.busy)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_group_from_thread(group_id.clone(), window, cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
+
         let (bot_id, thread_id) = (link.bot_id.clone(), thread.id.clone());
         let (request_bot, request_source) = (bot_id.clone(), thread_id.clone());
         let task = link.task_id.is_some();

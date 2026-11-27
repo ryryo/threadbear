@@ -248,3 +248,94 @@ Then('{string} is the Chief of the Bot team', async function (this: BotWorld, bo
     assert.fail(`No team had ${bot} as its Chief.`);
   });
 });
+
+type GroupWorld = BotWorld & { groupId?: string };
+
+When('I create a Group called {string} with {string}', async function (this: GroupWorld, title: string, bot: string) {
+  await click(this, 'Groups');
+  await click(this, 'New group');
+  await this.app.do({ cmd: 'type', here: true, text: title });
+  await click(this, `Add ${bot}`);
+  await click(this, 'Save group');
+});
+
+When('I post {string} to the Group', async function (this: GroupWorld, body: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await click(this, 'Group message');
+  await this.app.do({ cmd: 'type', here: true, text: body });
+  await click(this, 'Post to group');
+  this.groupId = await this.app.withManagedRunner(async client => {
+    const { groups } = await client.call<{ groups: { id: string }[] }>('bots.groups.list', {});
+    assert.equal(groups.length, 1);
+    return groups[0].id;
+  });
+});
+
+Then('the Group has the full saved reply', async function (this: GroupWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  assert.ok(this.groupId);
+  await this.app.withManagedRunner(async client => {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const { events } = await client.call<{ events: { kind: string; seq: number }[] }>('bots.groups.read', { groupId: this.groupId });
+      const result = events.find(event => event.kind === 'result');
+      if (result) {
+        const reply = await client.call<{ text: string; whole: boolean }>('bots.groups.result', { groupId: this.groupId, seq: result.seq });
+        assert.deepEqual(reply, { text: BOT_FIXTURE_REPLY, whole: true });
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail('The Group did not save the member’s reply.');
+  });
+});
+
+When("I approve the Group's reply as a note", async function (this: GroupWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  assert.ok(this.groupId);
+  await click(this, 'Review as note');
+  const scope = { kind: 'group', id: this.groupId };
+  await this.app.withManagedRunner(async client => {
+    const { notes } = await client.call<{ notes: unknown[] }>('bots.memory.scope.read', { scope });
+    assert.deepEqual(notes, [], 'opening the draft does not save it');
+  });
+  await click(this, 'Approve note');
+  await this.app.withManagedRunner(async client => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const { notes } = await client.call<{ notes: { text: string }[] }>('bots.memory.scope.read', { scope });
+      if (notes.length === 1 && BOT_FIXTURE_REPLY.startsWith(notes[0].text)) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail('The approved Group note was not saved.');
+  });
+});
+
+Then('the Group memory has one approved note from the reply', async function (this: GroupWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  assert.ok(this.groupId);
+  await this.app.withManagedRunner(async client => {
+    const scope = { kind: 'group', id: this.groupId };
+    const { notes } = await client.call<{ notes: { text: string }[] }>('bots.memory.scope.read', { scope });
+    assert.equal(notes.length, 1);
+    assert.ok(notes[0].text.length > 0 && BOT_FIXTURE_REPLY.startsWith(notes[0].text));
+  });
+});
+
+When("I stop the Group's work", async function (this: GroupWorld) {
+  await click(this, 'Stop work');
+});
+
+Then('the Group can be resumed', async function (this: GroupWorld) {
+  await click(this, 'Resume');
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const { frozen } = await client.call<{ frozen: boolean }>('bots.groups.read', { groupId: this.groupId });
+      if (!frozen) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail('The Group remained stopped.');
+  });
+});
