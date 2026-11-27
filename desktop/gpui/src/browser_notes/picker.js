@@ -56,6 +56,7 @@
   let frame = 0;
   let waiting = null;
   let pending = undefined;
+  let lastAnchor = null;
 
   function publish(value) {
     if (waiting) {
@@ -146,6 +147,25 @@
     return rect && isUsableRect(rect) ? { view, rect, target: targetName() } : null;
   }
 
+  // A clipped target in visual-viewport fractions lets the app place its
+  // own editor without adopting the page's zoom, scroll or pixel scale.
+  function editorAnchor(current) {
+    if (!current) return null;
+    const { view, rect } = current;
+    return {
+      x: (rect.x - view.x) / view.width,
+      y: (rect.y - view.y) / view.height,
+      w: rect.width / view.width,
+      h: rect.height / view.height,
+    };
+  }
+
+  function publishTarget(current, flags = {}) {
+    const anchor = editorAnchor(current);
+    lastAnchor = JSON.stringify(anchor);
+    publish({ target: targetName(), anchor, ...flags });
+  }
+
   function drawnFrame() {
     if (finished) return;
     if (!suspended && !dragStart && (selected || region)) {
@@ -153,7 +173,10 @@
       positionBox(box, current?.rect);
       if (!current) {
         selected = region = regionViewport = null;
-        publish({ target: null, lost: true });
+        publishTarget(null, { lost: true });
+      } else if (JSON.stringify(editorAnchor(current)) !== lastAnchor) {
+        // The next actual selection or error in the same frame wins.
+        publishTarget(current, { moved: true });
       }
     }
     frame = requestAnimationFrame(drawnFrame);
@@ -194,7 +217,7 @@
     if (elementMode) {
       const candidate = pickFromPoint(event.clientX, event.clientY);
       if (!candidate || candidate.localName === "iframe") {
-        publish({ target: targetName(), frame: candidate?.localName === "iframe" });
+        publishTarget(stamp(), { frame: candidate?.localName === "iframe" });
         return;
       }
       selected = candidate;
@@ -203,14 +226,14 @@
       const candidate = clip(normalizeRect(start.x, start.y, event.clientX, event.clientY), view);
       if (!isUsableRect(candidate)) {
         positionBox(box, targetRect(view));
-        publish({ target: targetName(), small: true });
+        publishTarget(stamp(), { small: true });
         return;
       }
       region = candidate;
       regionViewport = view;
     }
     positionBox(box, targetRect(viewport()));
-    publish({ target: targetName() });
+    publishTarget(stamp());
   }
 
   function onPointerCancel() {
@@ -300,7 +323,7 @@
     elementMode = useElement;
     selected = region = regionViewport = dragStart = null;
     positionBox(box, null);
-    publish({ target: null });
+    publishTarget(null);
   }
 
   globalThis.threadbearPicker = { id, next, stop, stamp, prepare, resume, switchMode };

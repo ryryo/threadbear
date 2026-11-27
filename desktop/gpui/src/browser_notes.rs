@@ -3,18 +3,20 @@
 
 mod geometry;
 mod live;
+mod placement;
 
 use crate::highlights::{palette, SidePane};
 use crate::push_button::PushButton;
 use crate::style::px;
 use geometry::clean_url;
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{h_flex, v_flex, Sizable as _};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use live::{Capture, LivePicker};
+use live::{Anchor, Capture, LivePicker};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cell::Cell;
 use std::rc::Rc;
 use threadbear_core::reducer::ImageRef;
 use threadbear_core::tr;
@@ -50,7 +52,10 @@ pub(crate) struct Pick {
     ready: bool,
     element: bool,
     target: Option<String>,
-    comment: Entity<InputState>,
+    anchor: Option<Anchor>,
+    editor: Rc<Cell<Option<Bounds<Pixels>>>>,
+    comment: Entity<TextareaState>,
+    _comment_events: Subscription,
     phase: Phase,
 }
 
@@ -96,9 +101,25 @@ impl SidePane {
             return;
         };
         self.browser_note_error = None;
-        let comment = cx.new(|cx| InputState::new(window, cx));
-        comment.update(cx, |s, cx| {
-            s.set_placeholder(tr!("Describe what to change"), window, cx)
+        let comment = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(tr!("Describe what to change"))
+                .auto_grow(1, 4)
+                .submit_on_enter(true)
+        });
+        let comment_events = cx.subscribe_in(&comment, window, |this, _, event, window, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+                return;
+            }
+            let InputEvent::PressEnter { shift: false, .. } = event else {
+                return;
+            };
+            match this.browser_pick.as_ref().map(|pick| &pick.phase) {
+                Some(Phase::Selecting) => this.review_browser_note(cx),
+                Some(Phase::Review { .. }) => this.attach_browser_note(window, cx),
+                _ => {}
+            }
         });
         let live = Rc::new(LivePicker::new(page.clone()));
         self.browser_pick = Some(Pick {
@@ -110,7 +131,10 @@ impl SidePane {
             ready: false,
             element,
             target: None,
+            anchor: None,
+            editor: Rc::new(Cell::new(None)),
             comment,
+            _comment_events: comment_events,
             phase: Phase::Selecting,
         });
         cx.spawn_in(window, async move |this, cx| {
@@ -140,6 +164,11 @@ impl SidePane {
                         return true;
                     }
                     let target = selection.label();
+                    pick.anchor = selection.anchor;
+                    if selection.moved {
+                        cx.notify();
+                        return true;
+                    }
                     if target.is_some() && !selection.frame && !selection.small {
                         pick.comment.update(cx, |s, cx| s.focus(window, cx));
                         crate::web_panels::keyboard_to_app(window);
@@ -206,7 +235,23 @@ impl SidePane {
             return Value::Null;
         };
         let Phase::Review { capture, .. } = &pick.phase else {
+            let (x, y, w, h) = pick.live.page.bounds();
+            let editor = pick
+                .editor
+                .get()
+                .filter(|_| pick.anchor.is_some())
+                .map(|b| {
+                    [
+                        f32::from(b.origin.x) - x,
+                        f32::from(b.origin.y) - y,
+                        f32::from(b.size.width),
+                        f32::from(b.size.height),
+                    ]
+                });
+            let target_rect = pick.anchor.map(|a| [a.x * w, a.y * h, a.w * w, a.h * h]);
             return json!({
+                "editor": editor,
+                "targetRect": target_rect,
                 "ready": pick.ready,
                 "target": pick.target,
                 "comment": pick.comment.read(cx).value().to_string(),
@@ -328,10 +373,112 @@ impl SidePane {
         cx.notify();
     }
 
-    pub(crate) fn render_browser_note_controls(
+    pub(crate) fn render_browser_note_toolbar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pick = self.browser_pick.as_ref()?;
+        if !matches!(pick.phase, Phase::Selecting | Phase::Capturing) {
+            return None;
+        }
+        let mode = cx.listener(|this, _: &ClickEvent, _, cx| {
+            if let Some(pick) = &mut this.browser_pick {
+                pick.element = !pick.element;
+                pick.target = None;
+                pick.anchor = None;
+                pick.live.switch_mode(pick.element);
+                this.browser_note_error = None;
+                cx.notify();
+            }
+        });
+        let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
+            this.cancel_browser_note();
+            cx.notify();
+        });
+        Some(
+            h_flex()
+                .gap(px(5.))
+                .px(px(6.))
+                .pb(px(6.))
+                .flex_none()
+                .child(
+                    PushButton::new(
+                        "browser-note-switch",
+                        if pick.element {
+                            tr!("Select area")
+                        } else {
+                            tr!("Pick element")
+                        },
+                        tr!("Switch selection mode without clearing the comment"),
+                    )
+                    .small()
+                    .disabled(!pick.ready || !matches!(pick.phase, Phase::Selecting))
+                    .render(cx, mode),
+                )
+                .child(
+                    PushButton::new(
+                        "browser-note-stop",
+                        tr!("Cancel"),
+                        tr!("Cancel page comment"),
+                    )
+                    .small()
+                    .render(cx, cancel),
+                )
+                .into_any_element(),
+        )
+    }
+
+    pub(crate) fn render_browser_note_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pick = self.browser_pick.as_ref()?;
+        let anchor = pick.anchor?;
+        if !matches!(pick.phase, Phase::Selecting | Phase::Capturing) {
+            return None;
+        }
+        let page = pick.live.page.clone();
+        let editor = pick.editor.clone();
+        let background = cx.theme().popover;
+        let border = palette(cx).card_border;
+        let card = self.render_browser_note_controls(cx)?;
+        Some(
+            canvas(
+                move |bounds, window, cx| {
+                    let width = placement::compact_width(bounds.size);
+                    let mut element = div()
+                        .w(width)
+                        .bg(background)
+                        .border_1()
+                        .border_color(border)
+                        .occlude()
+                        .child(card)
+                        .into_any_element();
+                    let measured = element.layout_as_root(
+                        size(AvailableSpace::Definite(width), AvailableSpace::MinContent),
+                        window,
+                        cx,
+                    );
+                    let origin = placement::compact_origin(bounds, anchor, measured);
+                    let rect = Bounds::new(origin, measured);
+                    element.prepaint_at(origin, window, cx);
+                    editor.set(Some(rect));
+                    crate::web_panels::place_browser_comment(&page, rect);
+                    element
+                },
+                |_, mut element, window, cx| element.paint(window, cx),
+            )
+            .absolute()
+            .inset_0()
+            .into_any_element(),
+        )
+    }
+
+    pub(crate) fn render_browser_note_review_controls(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let pick = self.browser_pick.as_ref()?;
+        matches!(pick.phase, Phase::Review { .. } | Phase::Saving)
+            .then(|| self.render_browser_note_controls(cx))
+            .flatten()
+    }
+
+    fn render_browser_note_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pick = self.browser_pick.as_ref()?;
         let p = palette(cx);
         let summary = self.browser_note_error.unwrap_or(match &pick.phase {
@@ -352,16 +499,19 @@ impl SidePane {
             this.cancel_browser_note();
             cx.notify();
         });
-        let mut controls = h_flex().flex_wrap().gap(px(5.)).child(
-            PushButton::new(
-                "browser-note-cancel",
-                tr!("Cancel"),
-                tr!("Cancel page comment"),
+        let compact = matches!(pick.phase, Phase::Selecting | Phase::Capturing);
+        let mut controls = h_flex().flex_wrap().gap(px(5.)).when(!compact, |row| {
+            row.child(
+                PushButton::new(
+                    "browser-note-cancel",
+                    tr!("Cancel"),
+                    tr!("Cancel page comment"),
+                )
+                .small()
+                .disabled(matches!(pick.phase, Phase::Saving))
+                .render(cx, cancel),
             )
-            .small()
-            .disabled(matches!(pick.phase, Phase::Saving))
-            .render(cx, cancel),
-        );
+        });
         match &pick.phase {
             Phase::Selecting | Phase::Capturing => {
                 let review =
@@ -376,29 +526,6 @@ impl SidePane {
                     .busy(matches!(pick.phase, Phase::Capturing))
                     .disabled(pick.target.is_none())
                     .render(cx, review),
-                );
-                let mode = cx.listener(|this, _: &ClickEvent, _, cx| {
-                    if let Some(pick) = &mut this.browser_pick {
-                        pick.element = !pick.element;
-                        pick.target = None;
-                        pick.live.switch_mode(pick.element);
-                        this.browser_note_error = None;
-                        cx.notify();
-                    }
-                });
-                controls = controls.child(
-                    PushButton::new(
-                        "browser-note-switch",
-                        if pick.element {
-                            tr!("Select area")
-                        } else {
-                            tr!("Pick element")
-                        },
-                        tr!("Switch selection mode without clearing the comment"),
-                    )
-                    .small()
-                    .disabled(!pick.ready || !matches!(pick.phase, Phase::Selecting))
-                    .render(cx, mode),
                 );
             }
             Phase::Review { keep, capture } => {
@@ -459,6 +586,23 @@ impl SidePane {
             }
             Phase::Saving => {}
         }
+        let field = Textarea::new(&pick.comment)
+            .small()
+            .disabled(matches!(pick.phase, Phase::Saving));
+        let editor = if compact {
+            h_flex()
+                .items_start()
+                .gap(px(6.))
+                .child(div().flex_1().min_w_0().child(field))
+                .child(controls.flex_none())
+                .into_any_element()
+        } else {
+            v_flex()
+                .gap(px(4.))
+                .child(field)
+                .child(controls)
+                .into_any_element()
+        };
         Some(
             v_flex()
                 .p(px(6.))
@@ -476,18 +620,15 @@ impl SidePane {
                         cx.notify();
                     }
                 }))
-                .child(
-                    div()
-                        .text_color(p.secondary)
-                        .truncate()
-                        .child(summary.to_owned()),
-                )
-                .child(
-                    Input::new(&pick.comment)
-                        .small()
-                        .disabled(matches!(pick.phase, Phase::Saving)),
-                )
-                .child(controls)
+                .when(!compact || self.browser_note_error.is_some(), |card| {
+                    card.child(
+                        div()
+                            .text_color(p.secondary)
+                            .truncate()
+                            .child(summary.to_owned()),
+                    )
+                })
+                .child(editor)
                 .into_any_element(),
         )
     }

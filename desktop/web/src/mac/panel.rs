@@ -28,8 +28,9 @@
     reason = "cef's wrap_client! makes PreviewClient::new take every handler, nine of them"
 )]
 use super::host::{
-    tb_view_has_keyboard, tb_view_input_count, tb_view_note_input, tb_view_picture_size,
-    tb_view_remove, tb_view_set_frame, tb_view_set_hidden, tb_view_set_parent, tb_view_watch_input,
+    tb_view_comment_rect, tb_view_has_keyboard, tb_view_input_count, tb_view_note_input,
+    tb_view_picture_size, tb_view_remove, tb_view_set_frame, tb_view_set_hidden,
+    tb_view_set_parent, tb_view_watch_input, tb_view_wrap_browser,
 };
 use crate::panel_rules::{browse, popup, site, Browse, Event, Kind, LeaveGate, Popup};
 use cef::*;
@@ -156,6 +157,7 @@ fn browser_context() -> Option<RequestContext> {
 pub struct PanelPage {
     browser: Browser,
     view: *mut c_void,
+    display_view: *mut c_void,
     parent: Cell<*mut c_void>,
     /// Where it was last put: x, y, width, height and the parent's height,
     /// which the flip to AppKit's coordinates depends on.
@@ -316,9 +318,22 @@ impl PanelPage {
         // SAFETY: same live NSView as above, on the main thread; messaging
         // nil is a no-op if window_handle gave null.
         unsafe { tb_view_set_hidden(view, true) };
+        let display_view = if matches!(kind, Kind::Browser) {
+            // SAFETY: the live view is still in parent on the main thread.
+            unsafe { tb_view_wrap_browser(view) }
+        } else {
+            view
+        };
+        if display_view != view {
+            // SAFETY: parent holds the wrapper alive on the main thread.
+            unsafe { tb_view_set_hidden(display_view, true) };
+            // SAFETY: Chromium's view remains live inside the hidden wrapper.
+            unsafe { tb_view_set_hidden(view, false) };
+        }
         let page = PanelPage {
             browser,
             view,
+            display_view,
             parent: Cell::new(parent),
             frame: Cell::new((0., 0., 0., 0., 0.)),
             hidden: Cell::new(true),
@@ -485,7 +500,7 @@ impl PanelPage {
         // SAFETY: the caller guarantees `parent` (non-null here) is a live
         // NSView and that we're on the main thread; self.view is this page's
         // view, alive until drop removes it.
-        unsafe { tb_view_set_parent(self.view, parent) };
+        unsafe { tb_view_set_parent(self.display_view, parent) };
         self.frame.set((0., 0., 0., 0., 0.));
     }
 
@@ -507,15 +522,30 @@ impl PanelPage {
         // isn't Send, so this is on the main thread.
         unsafe {
             tb_view_set_frame(
-                self.view,
+                self.display_view,
                 f64::from(x),
                 f64::from(y),
                 f64::from(width),
                 f64::from(height),
-            )
+            );
+            if self.display_view != self.view {
+                tb_view_set_frame(self.view, 0., 0., f64::from(width), f64::from(height));
+            }
         };
         if let Some(host) = self.browser.host() {
             host.was_resized();
+        }
+    }
+
+    /// A GPUI comment card's opaque rectangle in Browser viewport points.
+    pub fn set_comment_cover(&self, rect: Option<(f32, f32, f32, f32)>) {
+        if self.display_view != self.view {
+            let (x, y, w, h) = rect.unwrap_or_default();
+            // SAFETY: this Browser's wrapper is alive in its parent. This
+            // placement, like set_bounds, runs on AppKit's main thread.
+            unsafe {
+                tb_view_comment_rect(self.display_view, x.into(), y.into(), w.into(), h.into())
+            };
         }
     }
 
@@ -538,7 +568,7 @@ impl PanelPage {
         // SAFETY: self.view is the browser's own NSView (or null, which the shim
         // ignores), kept alive by its parent until drop removes it; PanelPage
         // isn't Send, so this is on the main thread.
-        unsafe { tb_view_set_hidden(self.view, hidden) };
+        unsafe { tb_view_set_hidden(self.display_view, hidden) };
         if hidden {
             self.pause_media();
         }
@@ -657,7 +687,12 @@ impl Drop for PanelPage {
         // SAFETY: self.view is this page's NSView, still alive in its parent
         // until this call takes it out; drop runs on the main thread, as
         // PanelPage isn't Send.
-        unsafe { tb_view_remove(self.view) };
+        unsafe {
+            tb_view_remove(self.view);
+            if self.display_view != self.view {
+                tb_view_remove(self.display_view);
+            }
+        };
     }
 }
 

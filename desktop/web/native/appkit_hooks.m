@@ -190,6 +190,62 @@ bool tb_view_picture_size(void *nativeView, double *width, double *height) {
   return true;
 }
 
+// The Browser's app-owned comment card sits in a hole in this wrapper.
+// The Chromium viewport stays full size, and the GPUI view beneath receives
+// clicks in the same hole. Patch and other panel views do not use a wrapper.
+@interface TBCommentWebView : NSView
+@property(nonatomic) NSRect commentRect;
+@end
+
+@implementation TBCommentWebView
+- (NSView *)hitTest:(NSPoint)point {
+  NSPoint local = [self convertPoint:point fromView:self.superview];
+  return NSPointInRect(local, self.commentRect) ? nil : [super hitTest:point];
+}
+@end
+
+void *tb_view_wrap_browser(void *nativeView) {
+  NSView *view = (__bridge NSView *)nativeView;
+  NSView *parent = view.superview;
+  if (!parent) {
+    return nativeView;
+  }
+  TBCommentWebView *wrapper = [[TBCommentWebView alloc] initWithFrame:view.frame];
+  wrapper.wantsLayer = YES;
+  [parent addSubview:wrapper positioned:NSWindowAbove relativeTo:view];
+  [view removeFromSuperview];
+  [wrapper addSubview:view];
+  return (__bridge void *)wrapper;
+}
+
+void tb_view_comment_rect(void *nativeView, double x, double y, double width, double height) {
+  TBCommentWebView *view = (__bridge TBCommentWebView *)nativeView;
+  NSRect hole = NSIntersectionRect(view.bounds,
+      NSMakeRect(x, NSHeight(view.bounds) - y - height, width, height));
+  CALayer *layer = view.layer;
+  if (NSEqualRects(hole, view.commentRect) &&
+      (NSIsEmptyRect(hole) || CGRectEqualToRect(layer.bounds, layer.mask.frame))) {
+    return;
+  }
+  view.commentRect = hole;
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  if (NSIsEmptyRect(hole)) {
+    layer.mask = nil;
+  } else {
+    CAShapeLayer *mask = [CAShapeLayer layer];
+    mask.frame = layer.bounds;
+    mask.fillRule = kCAFillRuleEvenOdd;
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathAddRect(path, NULL, mask.bounds);
+    CGPathAddRect(path, NULL, hole);
+    mask.path = path;
+    CGPathRelease(path);
+    layer.mask = mask;
+  }
+  [CATransaction commit];
+}
+
 // A page's native view placed in a GPUI layout slot. GPUI's coordinates are
 // the window's, from the top left, in points; the parent view may not be
 // flipped, so the y is turned over.

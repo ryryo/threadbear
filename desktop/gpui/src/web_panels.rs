@@ -233,6 +233,15 @@ thread_local! {
 
 // ---------------------------------------------------------------- the frame
 
+thread_local! {
+    /// The Browser's own comment, drawn over its page in this frame.
+    static NOTE_COVER: Cell<Option<(u64, *const PanelPage, Bounds<Pixels>)>> = const { Cell::new(None) };
+}
+
+pub(crate) fn place_browser_comment(page: &Rc<PanelPage>, bounds: Bounds<Pixels>) {
+    NOTE_COVER.with(|cover| cover.set(Some((frame_now(), Rc::as_ptr(page), bounds))));
+}
+
 /// Made as the main window's frame starts (Threadbear's render) and drawn
 /// after everything else in it: counts the frame, then once the panels are
 /// laid out shows the pages placed in it, where they were placed. `menu_at`
@@ -386,8 +395,20 @@ fn sweep(
                 f32::from(b.size.height),
                 height,
             );
+            let note = NOTE_COVER
+                .with(Cell::get)
+                .filter(|(at, page, _)| *at == frame && *page == Rc::as_ptr(&kept.page));
+            kept.page.set_comment_cover(note.map(|(_, _, note)| {
+                (
+                    f32::from(note.origin.x - b.origin.x),
+                    f32::from(note.origin.y - b.origin.y),
+                    f32::from(note.size.width),
+                    f32::from(note.size.height),
+                )
+            }));
             kept.page.set_hidden(false);
         } else {
+            kept.page.set_comment_cover(None);
             kept.page.set_hidden(true);
         }
     }

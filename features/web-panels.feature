@@ -120,8 +120,12 @@ Feature: Web pages in a thread's panels
     And I select the colored button after scrolling
     Then the comment editor sits beside the selected element
     And the browser page keeps its viewport
-    When I enter the page comment "このボタンを青に"
-    And I resize the window with a browser element selected
+    When I click the comment field through AppKit
+    And I enter the page comment "このボタンを青に"
+    And I scroll the page without choosing another element
+    Then the comment editor sits beside the selected element
+    And the page comment still says "このボタンを青に"
+    When I resize the window with a browser element selected
     Then the comment editor sits beside the selected element
     And the page comment still says "このボタンを青に"
 

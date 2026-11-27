@@ -24,6 +24,8 @@ unsafe extern "C" {
     // Placing a page's own view in a GPUI layout slot (page.rs).
     pub(crate) fn tb_view_set_frame(view: *mut c_void, x: f64, y: f64, width: f64, height: f64);
     pub(crate) fn tb_view_set_hidden(view: *mut c_void, hidden: bool);
+    pub(crate) fn tb_view_wrap_browser(view: *mut c_void) -> *mut c_void;
+    pub(crate) fn tb_view_comment_rect(view: *mut c_void, x: f64, y: f64, width: f64, height: f64);
     // A panel's page moving between windows, and whether it has the keyboard (panel.rs).
     pub(crate) fn tb_view_set_parent(view: *mut c_void, parent: *mut c_void);
     pub(crate) fn tb_view_remove(view: *mut c_void);

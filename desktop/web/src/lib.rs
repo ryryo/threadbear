@@ -233,6 +233,7 @@ mod elsewhere {
         ///
         /// As mac/panel.rs's: nothing here reads `parent`.
         pub unsafe fn move_to(&self, _parent: *mut std::ffi::c_void) {}
+        pub fn set_comment_cover(&self, _rect: Option<(f32, f32, f32, f32)>) {}
         pub fn set_bounds(&self, _x: f32, _y: f32, _width: f32, _height: f32, _parent_height: f32) {
         }
         pub fn bounds(&self) -> (f32, f32, f32, f32) {

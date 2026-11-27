@@ -1055,7 +1055,9 @@ impl SidePane {
             .is_some_and(|app| app.read(cx).main_window == window.window_handle());
         self.sync_browser_note(&thread.id, cx);
         let marked = self.render_browser_note_review(cx);
-        let note_controls = self.render_browser_note_controls(cx);
+        let note_controls = self.render_browser_note_review_controls(cx);
+        let note_toolbar = self.render_browser_note_toolbar(cx);
+        let note_overlay = self.render_browser_note_overlay(cx);
         let note_error = self.browser_note_error.filter(|_| note_controls.is_none());
         let note_buttons =
             if page.as_ref().is_some_and(|p| !p.loading()) && self.browser_pick.is_none() {
@@ -1109,11 +1111,19 @@ impl SidePane {
             .child(bar)
             .child(buttons)
             .children(note_buttons)
+            .children(note_toolbar)
             .children(note_controls)
-            .when_some(note_error, |d, error| {
+            .when_some(note_error.filter(|_| note_overlay.is_none()), |d, error| {
                 d.child(div().px(px(6.)).text_color(p.failed).child(error))
             })
-            .child(div().flex_1().min_h_0().child(body))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(body)
+                    .children(note_overlay),
+            )
             .into_any_element()
     }
 

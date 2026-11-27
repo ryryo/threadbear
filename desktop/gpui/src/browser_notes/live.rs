@@ -21,12 +21,24 @@ pub(super) struct Capture {
 #[derive(Deserialize)]
 pub(super) struct Selection {
     target: Option<String>,
+    pub(super) anchor: Option<Anchor>,
+    #[serde(default)]
+    pub(super) moved: bool,
     #[serde(default)]
     pub(super) frame: bool,
     #[serde(default)]
     pub(super) small: bool,
     #[serde(default)]
     pub(super) lost: bool,
+}
+
+/// The outline rectangle, in fractions of the visible page.
+#[derive(Clone, Copy, Deserialize)]
+pub(super) struct Anchor {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) w: f32,
+    pub(super) h: f32,
 }
 
 impl Selection {

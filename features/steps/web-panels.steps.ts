@@ -72,7 +72,10 @@ When('I press the browser control {string}', async function (this: ThreadbearWor
   await this.app.do({ cmd: 'click', title });
 });
 
+type XYWH = [number, number, number, number];
 type BrowserPick = {
+  editor?: XYWH | null;
+  targetRect?: XYWH | null;
   ready?: boolean;
   target?: string | null;
   comment?: string;
@@ -124,6 +127,60 @@ async function selectLive(world: ThreadbearWorld, selector: string, target: stri
   await world.until('live selected target and focus in Threadbear', (d) =>
     pick(d)?.target === target && (d as { keyboard?: string }).keyboard === 'app', LOADED_MS);
 }
+
+const browserViewport = new WeakMap<ThreadbearWorld, XYWH>();
+const shownBrowser = (d: Dump) => pages(d).find((p) => p.key.startsWith('browser:') && !p.hidden);
+
+Then('I remember the browser page viewport', async function (this: ThreadbearWorld) {
+  const frame = shownBrowser(await this.app.dump())?.frame;
+  assert.ok(frame, 'expected a placed browser');
+  browserViewport.set(this, frame);
+});
+
+Then('the browser page keeps its viewport', async function (this: ThreadbearWorld) {
+  const before = browserViewport.get(this);
+  assert.ok(before, 'expected a recorded viewport');
+  assert.deepEqual(shownBrowser(await this.app.dump())?.frame, before);
+});
+
+Then('the comment editor sits beside the selected element', async function (this: ThreadbearWorld) {
+  await this.until('a compact editor next to the page selection', (d) => {
+    const { editor, targetRect } = pick(d) ?? {};
+    const frame = shownBrowser(d)?.frame;
+    if (!editor || !targetRect || !frame) return false;
+    const [ex, ey, ew, eh] = editor;
+    const [tx, ty, tw, th] = targetRect;
+    const [,,vw,vh] = frame;
+    const onScreen = ex >= 0 && ey >= 0 && ex + ew <= vw + 1 && ey + eh <= vh + 1;
+    const gap = Math.max(ex - tx - tw, tx - ex - ew, ey - ty - th, ty - ey - eh);
+    return onScreen && gap >= 6 && gap <= 10;
+  }, LOADED_MS);
+});
+
+When('I click the comment field through AppKit', async function (this: ThreadbearWorld) {
+  const d = await this.app.dump();
+  const editor = pick(d)?.editor;
+  const frame = shownBrowser(d)?.frame;
+  assert.ok(editor && frame, 'expected an editor over the browser');
+  const [ex, ey,, eh] = editor;
+  const hit = await this.app.do({ cmd: 'native-click', x: frame[0] + ex + 22, y: frame[1] + ey + Math.min(eh / 2, 18) });
+  assert.match(hit.split('\n')[0]!, /hit .*GPUI|hit .*Gpu/i, hit);
+});
+
+When('I scroll the page without choosing another element', async function (this: ThreadbearWorld) {
+  const key = await browserKey(this);
+  const previous = pick(await this.app.dump())?.targetRect;
+  assert.ok(previous, 'expected a visible selection');
+  await browserEval(this, key, 'scrollBy(0, -40)');
+  await this.until('the selected element moved with the page', (d) => {
+    const rect = pick(d)?.targetRect;
+    return Boolean(rect && Math.abs(rect[1] - previous[1]) > 10);
+  }, LOADED_MS);
+});
+
+Then('the page comment still says {string}', async function (this: ThreadbearWorld, text: string) {
+  assert.equal(pick(await this.app.dump())?.comment, text);
+});
 
 When('I select the first link on the live browser page', async function (this: ThreadbearWorld) {
   await selectLive(this, '#other', 'Element: <a>');
