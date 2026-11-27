@@ -523,3 +523,7 @@ note text. Staged and cancelled moves do not add a retired source. The
 most recent claim from an older backend is recorded before starting a
 new move. Claims already replaced by the older backend are outside this
 record; absence of earlier sources is not proof that old copies are gone.
+
+The backend drops the sealed transport parts in bounded batches after a
+claim or cancellation. An active offer keeps its parts for restart and
+retry. A new offer cannot reuse the ID of a recorded completed move.

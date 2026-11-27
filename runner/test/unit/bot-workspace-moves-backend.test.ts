@@ -170,6 +170,42 @@ test('a cancelled staged move releases only the source with its existing epoch',
   assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
 });
 
+test('the backend reclaims settled sealed parts and protects the active offer from stale cleanup', async () => {
+  const t = await fixture();
+  const locator = { workspaceId: WORKSPACE, moveId: 'move-1' };
+  const cleanup = (moveId = locator.moveId) => call(t.ctx, moves.discardSealedBotWorkspace, { ...locator, moveId });
+  const parts = () => t.rows('botWorkspaceParts');
+  const hasCleanupScheduled = (moveId: string) => t.scheduled.some(job => {
+    const { fn, args } = job as { fn: string; args: { moveId?: string } };
+    return fn.endsWith('discardSealedBotWorkspace') && args.moveId === moveId;
+  });
+  await t.begin();
+  await t.upload();
+  await cleanup();
+  assert.equal(parts().length, 1, 'active parts survive a late cleanup');
+  await t.claim();
+  assert.ok(hasCleanupScheduled(locator.moveId));
+  const oldArgs = { ...locator, epoch: 2, targetRunnerId: OTHER, checksum: DIGEST,
+    bytes: Buffer.byteLength('sealed fixture'), parts: 1, sealedChecksum: digest(Buffer.from('sealed fixture')),
+    threadIds: [] };
+  assert.equal(await outcome(t.invoke(TARGET, 'botWorkspaceMoves:begin', oldArgs)), 'conflict');
+  const moveId = 'move-2';
+  await t.invoke(TARGET, 'botWorkspaceMoves:begin', { ...oldArgs, moveId });
+  await t.invoke(TARGET, 'botWorkspaceMoves:putPart', { ...locator, moveId, index: 0, data: Buffer.from('sealed fixture').toString('base64') });
+  for (let index = 1; index < 17; index++) {
+    await t.ctx.db.insert('botWorkspaceParts', { ...locator, index, data: 'AA==' });
+  }
+  await cleanup();
+  assert.deepEqual(parts().map(row => row.moveId).sort(), ['move-1', 'move-2']);
+  await cleanup();
+  await cleanup();
+  assert.deepEqual(parts().map(row => row.moveId), ['move-2']);
+  await t.invoke(TARGET, 'botWorkspaceMoves:cancel', { ...locator, moveId });
+  assert.ok(hasCleanupScheduled(moveId));
+  await cleanup(moveId);
+  assert.deepEqual(parts(), []);
+});
+
 test('public Bot reservations retain their identity and next run when the workspace claims a new owner', async () => {
   const f = await fixture();
   const id = randomUUID();

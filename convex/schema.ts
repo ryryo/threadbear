@@ -853,7 +853,7 @@ export const appSchema = defineSchema({
 
   botWorkspaceRetiredSources: defineTable({
     workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), epoch: v.number(),
-  }).index('by_workspace_epoch', ['workspaceId', 'epoch']),
+  }).index('by_workspace_epoch', ['workspaceId', 'epoch']).index('by_move', ['workspaceId', 'moveId']),
 
   botWorkspaces: defineTable({
     runnerId: v.string(),

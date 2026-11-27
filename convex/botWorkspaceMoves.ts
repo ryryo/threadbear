@@ -1,7 +1,8 @@
 // Workspace ownership changes once, in the claim mutation, as for a Thread
 // move. A Runner may restart and repeat a transition with the same move ID.
 import { ConvexError, v } from 'convex/values';
-import { mutation, query } from './_generated/server';
+import { internal } from './_generated/api';
+import { internalMutation, mutation, query } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { botScheduleRevision } from './botScheduleValues';
@@ -67,6 +68,33 @@ function cancelledMove(ctx: BotWorkspaceRead, workspaceId: string, moveId: strin
   return ctx.db.query('botWorkspaceMoveCancellations').withIndex('by_move',
     q => q.eq('workspaceId', workspaceId).eq('moveId', moveId)).unique();
 }
+
+function claimedMove(ctx: BotWorkspaceRead, workspaceId: string, moveId: string) {
+  return ctx.db.query('botWorkspaceRetiredSources').withIndex('by_move',
+    q => q.eq('workspaceId', workspaceId).eq('moveId', moveId)).first();
+}
+
+function queueDiscard(ctx: MutationCtx, workspaceId: string, moveId: string) {
+  return ctx.scheduler.runAfter(0, internal.botWorkspaceMoves.discardSealedBotWorkspace, { workspaceId, moveId });
+}
+
+export const discardSealedBotWorkspace = internalMutation({
+  args: { workspaceId: v.string(), moveId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { workspaceId, moveId }) => {
+    const move = (await botWorkspaceOwner(ctx, workspaceId))?.transfer;
+    if (move?.moveId === moveId && move.state === 'staged') return null;
+    if (move?.moveId !== moveId && !await claimedMove(ctx, workspaceId, moveId) &&
+        !await cancelledMove(ctx, workspaceId, moveId)) return null;
+    // Each row holds a base64 part. Sixteen rows fit comfortably in a
+    // transaction even when each part is full.
+    const parts = await ctx.db.query('botWorkspaceParts').withIndex('by_part',
+      q => q.eq('workspaceId', workspaceId).eq('moveId', moveId)).take(16);
+    for (const part of parts) await ctx.db.delete('botWorkspaceParts', part._id);
+    if (parts.length === 16) await queueDiscard(ctx, workspaceId, moveId);
+    return null;
+  },
+});
 
 function cancelledReceipt(move: Omit<Doc<'botWorkspaceMoveCancellations'>, '_id' | '_creationTime'>) {
   return { state: 'cancelled' as const, moveId: move.moveId, workspaceId: move.workspaceId,
@@ -147,6 +175,9 @@ export const begin = mutation({
       return receipt(row, moveId, prior.state);
     }
     if (row.ownerRunnerId !== runnerId || row.epoch !== epoch || prior?.state === 'staged') throw forbidden('move a Bot workspace already owned or staged elsewhere');
+    if (prior?.moveId === moveId || await claimedMove(ctx, workspaceId, moveId)) {
+      throw new ConvexError({ kind: 'conflict', message: 'Use a new ID for a new Bot workspace move.' });
+    }
     verifyNoteErasureRevision(row, noteErasureRevision);
     const target = await botRunner(ctx, targetRunnerId);
     if (!target || target.box || target.draining || await ownedWorkspace(ctx, targetRunnerId) ||
@@ -159,7 +190,10 @@ export const begin = mutation({
       q => q.eq('workspaceId', workspaceId).eq('state', 'queued').gt('expiresAt', Date.now())).first();
     if (running || waiting) throw new ConvexError({ kind: 'busy', message: 'The Bot workspace still has worker requests.' });
     await scheduleRows(ctx, runnerId, revisions);
-    if (prior?.state === 'claimed') await rememberRetiredSource(ctx, workspaceId, prior);
+    if (prior) {
+      if (prior.state === 'claimed') await rememberRetiredSource(ctx, workspaceId, prior);
+      await queueDiscard(ctx, workspaceId, prior.moveId);
+    }
     await ctx.db.patch('botWorkspaceOwners', row._id, {
       transfer: { moveId, sourceRunnerId: runnerId, targetRunnerId, epoch, checksum, sealedChecksum, bytes, parts, stored: 0, threadIds: ids, schedules: revisions, state: 'staged' },
     });
@@ -274,6 +308,7 @@ export const claim = mutation({
     }
     if (move.state === 'claimed') {
       await rememberRetiredSource(ctx, workspaceId, move);
+      await queueDiscard(ctx, workspaceId, moveId);
       return receipt(row, moveId, 'claimed');
     }
     verifyNoteErasureRevision(row, noteErasureRevision);
@@ -294,6 +329,7 @@ export const claim = mutation({
     const next = { ownerRunnerId: runnerId, epoch: row.epoch + 1 };
     await rememberRetiredSource(ctx, workspaceId, move);
     await ctx.db.patch('botWorkspaceOwners', row._id, { ...next, transfer: { ...move, state: 'claimed' } });
+    await queueDiscard(ctx, workspaceId, moveId);
     return receipt({ ...row, ...next }, moveId, 'claimed');
   },
 });
@@ -320,6 +356,7 @@ export const cancel = mutation({
     const cancelled = { moveId, workspaceId, sourceRunnerId: runnerId, targetRunnerId: target, epoch: row.epoch };
     await ctx.db.insert('botWorkspaceMoveCancellations', cancelled);
     if (move?.state === 'staged') await ctx.db.patch('botWorkspaceOwners', row._id, { transfer: { ...move, state: 'cancelled' } });
+    if (move) await queueDiscard(ctx, workspaceId, moveId);
     return cancelledReceipt(cancelled);
   },
 });
