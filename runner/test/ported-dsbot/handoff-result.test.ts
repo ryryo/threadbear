@@ -15,6 +15,14 @@ test('a result over the original preview limit survives serialization with the f
   }), { text, whole: true });
 });
 
+test('a preview stops before a character that straddles the original limit', () => {
+  const head = '見'.repeat(1_999);
+  const text = head + '😀全文';
+  const saved = keepResult(source, text);
+  assert.equal(saved.text, head);
+  assert.deepEqual(resultText(saved, () => text), { text, whole: true });
+});
+
 test('a missing, truncated or edited result is explicitly incomplete', () => {
   const saved = keepResult(source, text);
   for (const rebuilt of [undefined, text.slice(1), 'a' + text.slice(1)]) {

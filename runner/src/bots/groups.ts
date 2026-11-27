@@ -11,6 +11,7 @@ import { groupMentions } from './group-mentions.ts';
 import { callIn, startable, type GroupCall } from './group-round.ts';
 import { GroupThreads, type GroupInput } from './group-threads.ts';
 import type { KeptResult } from './handoff-result.ts';
+import { searchGroupBook } from './ported/group-search.js';
 import { BOT_WORKSPACE_CONCURRENCY, type SavedTask } from './task-journal.ts';
 import type { GroupBook, GroupDraft, GroupSchedule, GroupStore } from './group-store.ts';
 
@@ -107,13 +108,26 @@ export class BotGroups {
     };
   }
 
-  find(id: string, query: string) {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!words.length) return [];
-    return this.store.get(id).events.filter(event => {
-      const text = typeof event.text === 'string' ? event.text.toLowerCase() : undefined;
-      return text !== undefined && words.every(word => text.includes(word));
-    }).slice(-20).reverse();
+  find(id: string, query: string, before?: number) {
+    const { events } = this.store.get(id);
+    const threads = this.threads;
+    const bySeq = new Map(events.map(event => [event.seq, event]));
+    const records = events.map(event => {
+      const preview = typeof event.text === 'string' ? event.text : undefined;
+      const result = event.result as KeptResult | undefined;
+      let full: string | undefined;
+      return {
+        seq: event.seq,
+        time: event.at,
+        // Only load opened reply events once per search, including neighbours.
+        // The ledger itself still keeps the read view's preview and reference.
+        get text() {
+          return result?.length === undefined ? preview : full ??= threads.result(result).text;
+        },
+      };
+    });
+    const { results, hasMore } = searchGroupBook(records, query, { before });
+    return { events: results.flatMap(hit => bySeq.get(hit.seq) ?? []), hasMore };
   }
 
   resultRecord(id: string, seq: number) {

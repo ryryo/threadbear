@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { isPermissionMode, type PermissionMode } from '../protocol.ts';
 import type { KeptResult } from './handoff-result.ts';
+import { TEXT_KEPT } from './ported/result-text.js';
 import { ROOT_CHILDREN, parentScope, type RequestNode } from './request-graph.ts';
 
 export type RequestResult = { turnId: string; result: KeptResult; replyId: string; failed?: boolean };
@@ -49,9 +50,9 @@ function validResult(row: RequestRow, reply: RequestResult): boolean {
   const { result, replyId, turnId, failed } = reply;
   return replyId === `bot-reply:${row.id}` && key(turnId) && (failed === undefined || typeof failed === 'boolean') &&
     result?.source?.threadId === row.targetThreadId && Number.isSafeInteger(result.source.seq) && result.source.seq > 0 &&
-    typeof result.text === 'string' && result.text.length <= 2_000 &&
+    typeof result.text === 'string' && result.text.length <= TEXT_KEPT &&
     (result.length === undefined ? result.hash === undefined :
-      Number.isSafeInteger(result.length) && result.length > 2_000 && typeof result.hash === 'string' && /^[0-9a-f]{64}$/.test(result.hash));
+      Number.isSafeInteger(result.length) && result.length > TEXT_KEPT && typeof result.hash === 'string' && /^[0-9a-f]{64}$/.test(result.hash));
 }
 
 function validState(row: RequestRow): boolean {

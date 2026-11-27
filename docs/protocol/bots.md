@@ -254,7 +254,12 @@ active round before cancelling any of its calls.
 
 Group replies and background task replies keep their producing Thread event
 reference. `bots.groups.result` opens its retained text and returns
-`{text, whole}`. An owner can review a reply as a Group note.
+`{text, whole}`. The owner's `bots.groups.find {groupId, query, before?}`
+searches the saved Group history and the full replies those events reference.
+It returns up to twenty matching `events`, newest first, with `hasMore`.
+Use the last match's sequence as `before` to continue to older results.
+Preview and reply references keep the same shape as `bots.groups.read`.
+An owner can review a reply as a Group note.
 `bots.groups.memory.approve {groupId, seq, operationId, text}` applies the
 approved text through the memory journal with the source event and a retry
 receipt. Posting and replying alone do not add notes.

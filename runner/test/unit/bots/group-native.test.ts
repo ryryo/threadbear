@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BotGroups } from '../../../src/bots/groups.ts';
+import { groupMethods } from '../../../src/bots/group-rpc.ts';
 import { GroupStore } from '../../../src/bots/group-store.ts';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { TaskJournal } from '../../../src/bots/task-journal.ts';
@@ -54,6 +55,26 @@ function finish(session: FakeSession, reply: string) {
   session.result();
 }
 
+test('Group search pages the same saved events and ignores records without text', () => {
+  const f = fixture();
+  const groups = f.service();
+  groups.store.change(f.group.id, book => {
+    for (let i = 0; i < 21; i += 1) groups.store.append(book, 'post', f.h.runner.isoNow(), { text: `検索語 item ${i}` });
+    groups.store.append(book, 'notice', f.h.runner.isoNow(), { reason: '検索語 item' });
+  });
+  const methods = groupMethods(() => groups, () => {});
+  const search = (before?: number) => methods['bots.groups.find']({ groupId: f.group.id, query: '検索語 ITEM', before }) as {
+    events: { seq: number; text: string }[]; hasMore: boolean;
+  };
+  const page = search();
+  assert.equal(page.events.length, 20);
+  assert.equal(page.events[0]?.text, '検索語 item 20');
+  assert.equal(page.hasMore, true);
+  const older = search(page.events.at(-1)?.seq);
+  assert.deepEqual(older.events.map(row => row.text), ['検索語 item 0']);
+  assert.equal(older.hasMore, false);
+});
+
 test('Chief delegates in parallel, preserves approval and output through recovery, and summarizes once', async () => {
   const f = fixture();
   const { h, group, chief, writer, tester } = f;
@@ -79,7 +100,7 @@ test('Chief delegates in parallel, preserves approval and output through recover
   const approval = h.runner.requestAgentApproval(testerSession.opts.threadId, {
     name: 'mcp__threadbear__group_fixture', title: 'Approve the check', input: {},
   });
-  const longResult = '承認待ちの間も読める日本語の結果。'.repeat(380);
+  const longResult = '承認待ちの間も読める日本語の結果。'.repeat(380) + ' Pinned checksum 検索語';
   finish(writerSession, longResult);
   finish(editor, 'Waiting for their results.');
   await tick();
@@ -93,6 +114,10 @@ test('Chief delegates in parallel, preserves approval and output through recover
   groups = f.restore();
   groups.recover();
   assert.equal(editor.sent.length, 1);
+  const methods = groupMethods(() => groups, () => {});
+  assert.deepEqual(methods['bots.groups.find']({ groupId: group.id, query: '検索語 CHECKSUM' }), {
+    events: [row], hasMore: false,
+  });
   assert.equal(groups.read(group.id).events.filter(event => event.memberId === writer.id).length, 1);
   const card = h.events(testerSession.opts.threadId).find(event => event.type === 'approval.requested');
   assert.ok(card);
