@@ -14,6 +14,7 @@ export class ScopedMemory {
     group?: (id: string) => Group | undefined;
     groups?: () => readonly (Group & { id: string })[];
     redact?: (text: string) => string;
+    protectErasure?: () => void;
   };
 
   constructor(options: ScopedMemory['options']) { this.options = options; }
@@ -30,6 +31,22 @@ export class ScopedMemory {
   }
 
   open(ref: ScopeRef, actor: MemoryActor, access: 'read' | 'write', explicit = false): PersonalMemory {
+    return this.openScope(ref, actor, access, explicit);
+  }
+
+  erase(ref: ScopeRef, actor: MemoryActor, { entryId, operationId, expectedRevision, time }: {
+    entryId: string; operationId: string; expectedRevision: string; time: string;
+  }, beforeWrite?: () => void) {
+    if (actor.kind !== 'owner') throw new RpcError(ErrorCode.notAllowed, 'Only the owner can erase a memory note.');
+    const protect = this.options.protectErasure;
+    if (!protect) throw new RpcError(ErrorCode.notAllowed, 'Permanent memory erasure is unavailable.');
+    return this.openScope(ref, actor, 'erase').erase(entryId, operationId, expectedRevision, time, () => {
+      protect();
+      beforeWrite?.();
+    });
+  }
+
+  private openScope(ref: ScopeRef, actor: MemoryActor, access: 'read' | 'write' | 'erase', explicit = false): PersonalMemory {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(ref.id)) throw new RpcError(ErrorCode.badParams, 'Invalid memory scope');
     const { root, repo, projects, group, redact } = this.options;
     const { kind, id } = ref;
@@ -61,7 +78,7 @@ export class ScopedMemory {
         break;
       }
     }
-    if ((archived && access === 'write') || !canUseMemory(actor, scope, access, explicit)) {
+    if ((archived && access === 'write') || !canUseMemory(actor, scope, access === 'erase' ? 'write' : access, explicit)) {
       throw new RpcError(ErrorCode.notAllowed, 'This actor cannot use that memory scope.');
     }
     // The original Bot folder stays exactly where P1 wrote it. All other

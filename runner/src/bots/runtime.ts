@@ -7,12 +7,15 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_ABANDON_FORMAT, BOT_DEVICE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, BOT_TRANSFER_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_ABANDON_FORMAT, BOT_DEVICE_FORMAT, BOT_ERASE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, BOT_TRANSFER_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
-import { BotRepository } from './repository.ts';
+import { BotRepository, type BotWorkspaceIdentity } from './repository.ts';
 import { BotReviews, type BotReviewOptions } from './reviews.ts';
-import { botMethods, botRequestMethods } from './rpc.ts';
+import { ReviewCheckpoints } from './review-checkpoints.ts';
+import { botMethods, botRequestMethods, method } from './rpc.ts';
+import { closeProfilePanelInput, openProfilePanelInput, ProfilePanelServer, type ProfileMemoryRequest } from './profile-panel.ts';
+import { install as installAvatarLibrary } from './ported/avatar-library.js';
 import { BotRequests } from './request-service.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { BotTeams } from './teams.ts';
@@ -24,7 +27,8 @@ import type { BotInputRef } from '../protocol.ts';
 import { GroupStore } from './group-store.ts';
 import { BotGroups } from './groups.ts';
 import { groupMethods } from './group-rpc.ts';
-import { DeviceBotWorkspace } from './device-workspace.ts';
+import { DeviceBotWorkspace, type BotNoteErasure, type BotNoteErasureReply } from './device-workspace.ts';
+import { BotNoteErasureQueue, noteErasureInput, noteErasureStatusInput, type ConfirmedNoteErasure, type NoteErasureIntent } from './memory-erasure-queue.ts';
 import { deviceAction } from './device-actions.ts';
 import type { BotScheduleScope } from './schedule-rpc.ts';
 import { BotScheduleTargets } from './schedule-target.ts';
@@ -32,8 +36,14 @@ import type { RememberInput } from './memory-tool.ts';
 import { activeBotInput } from './turn-proof.ts';
 
 import { BotWorkspaceTransfer } from './workspace-transfer.ts';
+import { captureManagedMemoryBackup, listManagedMemoryBackups, openManagedMemoryBackup, saveManagedMemoryBackup, savedManagedMemoryBackup, scopedBackupNotes, scrubManagedMemoryBackups, selectBackupMemoryNote, type BackupMemoryCreateInput, type BackupMemoryPreviewInput, type BackupMemoryRestoreInput } from './managed-memory-restore.ts';
+import type { PersonalMemory } from './ported/personal-memory.js';
+import type { PackEntry } from '../move-pack.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
+
+type BackupPreflight<T> = (files: readonly PackEntry[], identity: BotWorkspaceIdentity, apply: () => T) => Promise<T>;
+type BackupPreview = { checksum: string; revision: string; notes: { id: string; text: string }[] };
 
 type Options = {
   home: string;
@@ -46,8 +56,11 @@ type Options = {
   protectPrivacy?: () => void;
   withdrawShared?: (threadIds: readonly string[]) => Promise<void>;
   withdrawDeviceProfile?: (botId: string) => Promise<() => void>;
+  eraseNoteFromMirror?: (input: BotNoteErasure) => Promise<BotNoteErasureReply>;
+  readyForNoteErasure?: () => boolean;
   archiveExporting?: () => boolean;
   peerOwns?: (threadId: string) => boolean;
+  threadUnavailableForAttachment?: (threadId: string) => boolean;
 };
 type ReviewDeps = Pick<BotReviewOptions, 'redact' | 'askers' | 'privateFolder'> & { clock: Clock; onError: (id: string) => void };
 
@@ -65,6 +78,8 @@ export class BotRuntime {
   private groupService?: BotGroups;
   private scheduleTargets?: BotScheduleTargets;
   private deviceWorkspace?: DeviceBotWorkspace;
+  private noteErasureQueue?: BotNoteErasureQueue;
+  private profilePanel?: ProfilePanelServer;
   private groupWake = false;
   private permissionChanges?: PermissionChanges;
   private readonly taskWake = new Set<string>();
@@ -80,6 +95,8 @@ export class BotRuntime {
       protect: () => this.protectTeamData(), setCeiling: (bot, rev, cap) => this.setBotCeiling(bot, rev, cap),
     })), groupMethods(() => this.groups(), (groupId, seq, operationId, text) => this.approveGroupNote(groupId, seq, operationId, text)), {
     'bots.status': (_params: Record<string, unknown>) => this.status(),
+    'bots.memory.erasureStatus': method(noteErasureStatusInput, ({ scope }) => this.noteErasureStatus(scope)),
+    'bots.memory.erase': method(noteErasureInput, input => this.eraseConfirmedNote(input)),
   });
 
   constructor(options: Options) {
@@ -90,7 +107,38 @@ export class BotRuntime {
     const reason = this.unavailable();
     return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined,
       requests: this.requestsAvailable(), requestAbandonment: this.requestAbandonmentAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(),
-      groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), reason };
+      groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), profilePanel: reason === undefined, reason };
+  }
+
+  profilePanelControl() {
+    return {
+      open: (params: Record<string, unknown>, connected: () => boolean, openMemory: (request: ProfileMemoryRequest) => void) => {
+        const input = openProfilePanelInput.safeParse(params);
+        if (!input.success) throw new RpcError(ErrorCode.badParams, 'Choose the Bot whose profile to open.');
+        const identity = this.getWorkspace().repo.workspaceIdentity();
+        this.profilePanel ??= new ProfilePanelServer({
+          read: id => {
+            const bot = this.getWorkspace().repo.get(id);
+            return bot.archivedAt ? undefined : bot;
+          },
+          countMemory: id => this.getWorkspace().conversations.scopedMemory.open({ kind: 'bot', id }, { kind: 'owner' }, 'read')
+            .list(this.options.runner().isoNow().slice(0, 10)).length,
+          update: (id, revision, changes) => this.getWorkspace().repo.update(id, revision, changes),
+          updateAppearance: (id, revision, changes) => this.getWorkspace().repo.updateAppearance(id, revision, changes),
+          avatarLibrary: installAvatarLibrary({ home: this.options.home }),
+        });
+        return this.profilePanel.open(input.data.botId, () => {
+          if (!connected()) return false;
+          try {
+            const current = this.getWorkspace().repo.workspaceIdentity();
+            return current.workspaceId === identity.workspaceId && current.ownerRunnerId === identity.ownerRunnerId && current.epoch === identity.epoch;
+          } catch {
+            return false;
+          }
+        }, openMemory);
+      },
+      close: method(closeProfilePanelInput, ({ id }) => { this.profilePanel?.close(id); return {}; }),
+    };
   }
 
   requestsAvailable(): boolean {
@@ -207,7 +255,7 @@ export class BotRuntime {
   }
 
   workspaceIdleForMove(): boolean {
-    if (this.privacyChange.size || (this.tasksAvailable() && this.tasks().activeCount())) return false;
+    if (this.noteErasures().pending() || this.privacyChange.size || (this.tasksAvailable() && this.tasks().activeCount())) return false;
     if (this.groupsAvailable()) {
       const { store } = this.groups();
       if (store.list().some(group => ['running', 'finalizing'].includes(store.get(group.id).round?.status ?? ''))) return false;
@@ -355,6 +403,129 @@ export class BotRuntime {
     );
   }
 
+  private canEraseNotes(): boolean {
+    return !!this.options.eraseNoteFromMirror && this.unavailable() === undefined &&
+      this.options.canChangePrivacy?.() === true && supervisorGuardsBotData(this.options.home, BOT_ERASE_FORMAT);
+  }
+
+  private noteErasures(): BotNoteErasureQueue {
+    return this.noteErasureQueue ??= new BotNoteErasureQueue({
+      home: this.options.home,
+      identity: () => this.getWorkspace().repo.workspaceIdentity(),
+      canWrite: () => this.canEraseNotes(),
+      eraseLocal: (intent, beforeWrite) => this.getWorkspace().conversations.scopedMemory.erase(
+        intent.scope, { kind: 'owner' }, intent, beforeWrite,
+      ),
+      eraseLocalReviews: ({ scope }) => {
+        if (scope.kind !== 'bot') return;
+        const { repo, conversations } = this.getWorkspace();
+        const memory = conversations.scopedMemory.open(scope, { kind: 'owner' }, 'read');
+        new ReviewCheckpoints(join(this.options.home, 'bots', 'reviews'))
+          .eraseMemoryCopies(scope.id, repo.conversations(scope.id), memory.history());
+      },
+      eraseLocalBackups: ({ scope, entryId, operationId }) => {
+        const { repo, conversations } = this.getWorkspace();
+        const memory = conversations.scopedMemory.open(scope, { kind: 'owner' }, 'read');
+        const receipt = memory.history().find(row => row.op === 'erase' && row.entryId === entryId && row.transaction?.operationId === operationId);
+        if (!receipt) throw new Error('The Bot note erasure receipt is missing.');
+        scrubManagedMemoryBackups(this.options.home, repo.workspaceIdentity(), { scope, entryId }, receipt);
+      },
+      eraseMirror: async input => {
+        const erase = this.options.eraseNoteFromMirror;
+        if (!erase) throw new Error('Bot note erasure needs sync.');
+        return erase(input);
+      },
+    });
+  }
+
+  beginNoteErasure(intent: NoteErasureIntent): { revision: string } {
+    return this.noteErasures().begin(intent);
+  }
+
+  private noteErasureStatus(scope: NoteErasureIntent['scope']) {
+    const { repo, conversations } = this.getWorkspace();
+    conversations.scopedMemory.open(scope, { kind: 'owner' }, 'read');
+    const { workspaceId, epoch } = repo.workspaceIdentity();
+    return { workspaceId, epoch, available: this.canEraseNotes() && this.options.readyForNoteErasure?.() === true,
+      pending: this.noteErasures().progress({ workspaceId, epoch }, scope) };
+  }
+
+  private eraseConfirmedNote(input: ConfirmedNoteErasure): { revision: string } {
+    if (!this.options.readyForNoteErasure?.()) throw new RpcError(ErrorCode.notAllowed, 'Bot note erasure needs an updated backend.');
+    const identity = this.getWorkspace().repo.workspaceIdentity();
+    if (identity.workspaceId !== input.workspaceId || identity.epoch !== input.epoch) {
+      throw new RpcError(ErrorCode.notAllowed, 'Bot workspace ownership changed. Reload the notes before erasing.');
+    }
+    return this.beginNoteErasure({ ...input, time: this.options.runner().isoNow() });
+  }
+
+  async resumeNoteErasures(): Promise<void> {
+    await this.noteErasures().resume();
+  }
+
+  managedMemoryRestoreAvailable(): boolean {
+    return this.canEraseNotes() && !this.noteErasures().pending();
+  }
+
+  private restoreWorkspace() {
+    if (!this.managedMemoryRestoreAvailable()) {
+      throw new RpcError(ErrorCode.busy, 'An owning Runner with no pending erasures is required to restore a Bot note.');
+    }
+    return this.getWorkspace();
+  }
+
+  listMemoryBackups() {
+    this.restoreWorkspace();
+    return { backups: listManagedMemoryBackups(this.options.home) };
+  }
+
+  async createMemoryBackup(input: BackupMemoryCreateInput, verified: BackupPreflight<ReturnType<BotRuntime['listMemoryBackups']>>) {
+    const { repo, conversations } = this.restoreWorkspace();
+    const identity = repo.workspaceIdentity();
+    const memory = conversations.scopedMemory.open(input.scope, { kind: 'owner' }, 'write');
+    if (savedManagedMemoryBackup(this.options.home, identity, input)) return this.listMemoryBackups();
+    const capture = captureManagedMemoryBackup(identity, input, memory);
+    return verified(capture.files, identity, () => {
+      const current = this.restoreWorkspace();
+      const owner = current.repo.workspaceIdentity();
+      if (current.repo !== repo || owner.workspaceId !== identity.workspaceId || owner.epoch !== identity.epoch || owner.ownerRunnerId !== identity.ownerRunnerId) {
+        throw new RpcError(ErrorCode.busy, 'The Bot workspace owner changed while checking the backup.');
+      }
+      const live = current.conversations.scopedMemory.open(input.scope, { kind: 'owner' }, 'write');
+      if (live.revision() !== input.expectedRevision) throw new RpcError(ErrorCode.busy, 'These notes changed. Reload the current notes before backing them up.');
+      protectBotData(this.options.home, BOT_ERASE_FORMAT);
+      saveManagedMemoryBackup(this.options.home, capture);
+      return this.listMemoryBackups();
+    });
+  }
+
+  private checkedMemoryBackup<T>(input: BackupMemoryPreviewInput & { checksum?: string }, verified: BackupPreflight<T>,
+    use: (memory: PersonalMemory, files: readonly PackEntry[], checksum: string) => T): Promise<T> {
+    const { repo } = this.restoreWorkspace();
+    const identity = repo.workspaceIdentity();
+    const { files, checksum } = openManagedMemoryBackup(this.options.home, input);
+    return verified(files, identity, () => {
+      const current = this.restoreWorkspace();
+      if (current.repo !== repo || current.repo.workspaceIdentity().epoch !== identity.epoch) {
+        throw new RpcError(ErrorCode.busy, 'The Bot workspace owner changed while checking the backup.');
+      }
+      const memory = current.conversations.scopedMemory.open(input.scope, { kind: 'owner' }, 'write');
+      return use(memory, files, checksum);
+    });
+  }
+
+  previewMemoryBackup(input: BackupMemoryPreviewInput, verified: BackupPreflight<BackupPreview>) {
+    return this.checkedMemoryBackup(input, verified, (memory, files, checksum) => ({
+      checksum, revision: memory.revision(), notes: memory.previewBackupNotes(scopedBackupNotes(files, input.scope, checksum)),
+    }));
+  }
+
+  recoverMemoryFromBackup(input: BackupMemoryRestoreInput, verified: BackupPreflight<{ revision: string }>) {
+    return this.checkedMemoryBackup(input, verified, (memory, files) =>
+      memory.restoreBackupNote(selectBackupMemoryNote(files, input), input.operationId, input.expectedRevision,
+        this.options.runner().isoNow(), () => protectBotData(this.options.home, BOT_ERASE_FORMAT)));
+  }
+
   private deviceDetails(visible: ReadonlySet<string>, scrub: (value: string) => string) {
     const { conversations, repo } = this.getWorkspace();
     const today = this.options.runner().isoNow().slice(0, 10);
@@ -432,6 +603,9 @@ export class BotRuntime {
       const result = memory.change(changes, operationId, action.expectedRevision, this.options.runner().isoNow());
       return { outcome: 'saved', revision: result.revision };
     } catch (error) {
+      // A late paired-device edit must not put the erased note back in a
+      // command result as a conflict draft.
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'memory/erased') throw error;
       const revision = memory.revision();
       if (revision === action.expectedRevision) throw error;
       const rows = memory.list(this.options.runner().isoNow().slice(0, 10)).map(note => ({ id: note.id, text: scrub(note.text), pinned: note.pinned }));
@@ -686,6 +860,16 @@ export class BotRuntime {
       this.workspace = {
         repo,
         conversations: new BotConversations(runner(), repo, root, text => this.reviewDeps?.redact(text) ?? text, {
+          canModify: () => this.unavailable() === undefined,
+          protectRoster: () => {
+            if (this.unavailable() !== undefined) throw new RpcError(ErrorCode.notAllowed, 'This Runner cannot change the Bot roster now.');
+            protectBotData(home, BOT_ERASE_FORMAT);
+          },
+          mayAttach: id => this.options.canChangePrivacy?.() === true && !this.options.peerOwns?.(id) && !this.options.threadUnavailableForAttachment?.(id),
+          protectErasure: () => {
+            if (!this.canEraseNotes()) throw new RpcError(ErrorCode.notAllowed, 'This Runner cannot erase Bot notes now.');
+            protectBotData(home, BOT_ERASE_FORMAT);
+          },
           group: id => {
             if (!this.groupsAvailable()) return undefined;
             const { group } = this.groups().store.get(id);

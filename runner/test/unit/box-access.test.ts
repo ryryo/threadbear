@@ -17,6 +17,9 @@ const workerGrants = load('botWorkerGrants');
 // table's longer keys with those actual handlers so the same box test runs.
 const botHandlers: ReturnType<typeof load> = {
   previewBotWorkspaceMove: workspaceMoves.destinationProjects,
+  verifyBotWorkspaceNoteErasures: workspaceMoves.verifyBotWorkspaceNoteErasures,
+  retiredNoteErasure: workspaceMoves.retiredNoteErasure,
+  ackRetiredNoteErasure: workspaceMoves.ackRetiredNoteErasure,
   beginBotWorkspaceMove: workspaceMoves.begin,
   putBotWorkspacePart: workspaceMoves.putPart,
   readBotWorkspacePart: workspaceMoves.part,

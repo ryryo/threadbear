@@ -17,7 +17,7 @@ function runPorted(files: string[], count: number): void {
 }
 
 test('the ported DS-Bot memory format and recovery tests pass in the Runner', () => {
-  runPorted(['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'review-lines.test.js', 'tidy-draft.test.js'], 19);
+  runPorted(['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'memory-erasure.test.js', 'review-lines.test.js', 'tidy-draft.test.js'], 29);
 });
 
 test('the ported DS-Bot request and delivery tests pass in the Runner', () => {
@@ -29,6 +29,10 @@ test('the ported DS-Bot request and delivery tests pass in the Runner', () => {
 
 test('the ported DS-Bot Group history search tests pass in the Runner', () => {
   runPorted(['group-search.test.js'], 6);
+});
+
+test('the seven original DS-Bot photo storage tests pass in the Runner', () => {
+  runPorted(['avatar-library.test.js'], 7);
 });
 
 test('the pinned DS-Bot baseline and direct ports match their recorded source', () => {
@@ -43,5 +47,82 @@ test('the pinned DS-Bot baseline and direct ports match their recorded source', 
     if (entry.portMode !== 'A' || entry.portPath === undefined) continue;
     const port = readFileSync(new URL(entry.portPath, root));
     assert.ok(port.subarray(port.indexOf('\n\n') + 2).equals(baseline), entry.portPath);
+  }
+});
+
+test('the profile cards, CSS and Japanese labels come from the pinned client source', () => {
+  const root = new URL('../../../../', import.meta.url);
+  const upstream = new URL('third_party/dsbot/baseline/ds-bot/src/client/', root);
+  const port = new URL('runner/src/bots/profile-panel/', root);
+  const settings = readFileSync(new URL('bot-settings.js', upstream), 'utf8');
+  const shared = readFileSync(new URL('styles.js', upstream), 'utf8');
+  const cards = readFileSync(new URL('profile-cards.mjs', port), 'utf8');
+  const component = (source: string, name: 'Row' | 'Card') => source.match(new RegExp(`^export function ${name}\\(.*?^}\\n`, 'ms'))?.[0];
+  for (const name of ['Row', 'Card'] as const) {
+    const original = component(settings, name);
+    assert.ok(original);
+    assert.equal(component(cards, name), original);
+  }
+  for (const line of cards.split('\n').filter(line => line.startsWith('    h(Card,') || line.includes('h(Row,') && line.includes("t('"))) {
+    assert.ok(settings.includes(line), line);
+  }
+  const rules = readFileSync(new URL('profile-cards.css', port), 'utf8').split('\n').filter(line => line && !line.startsWith('/*'));
+  assert.ok(rules.length > 20);
+  for (const rule of rules) assert.ok(settings.includes(rule) || shared.includes(rule), rule);
+  const originals = readFileSync(new URL('locales/ja.js', upstream), 'utf8');
+  const labels = JSON.parse(readFileSync(new URL('profile-ja.json', port), 'utf8')) as Record<string, string>;
+  for (const [key, label] of Object.entries(labels)) assert.ok(originals.includes(`${JSON.stringify(key)}: ${JSON.stringify(label)}`), key);
+  const extract = (source: string, name: string) => source.match(new RegExp(`^${name}.*?^}\\n`, 'ms'))?.[0];
+  const memory = readFileSync(new URL('memory-panel.js', upstream), 'utf8');
+  const hook = readFileSync(new URL('memory-count.mjs', port), 'utf8');
+  for (const name of ['function noteCount', 'export function useMemoryCount']) {
+    assert.ok(extract(memory, name));
+    assert.equal(extract(hook, name), extract(memory, name));
+  }
+  const originalMemoryCard = extract(settings, 'function MemoryCard');
+  assert.ok(originalMemoryCard);
+  assert.equal(extract(cards, 'function MemoryCard'), originalMemoryCard.replace('{ bot, actions }', '{ bot, actions, t }'));
+  const icons = readFileSync(new URL('icons.js', upstream), 'utf8');
+  const chevron = /^export const ChevronRightIcon = .*$/m;
+  assert.ok(icons.match(chevron));
+  assert.equal(cards.match(chevron)?.[0], icons.match(chevron)?.[0]);
+});
+
+test('the native editor uses the pinned DS-Bot avatar controls, assets and raster checks', () => {
+  const root = new URL('../../../../', import.meta.url);
+  const upstream = new URL('third_party/dsbot/baseline/ds-bot/src/', root);
+  const port = new URL('runner/src/bots/profile-panel/', root);
+  const read = (parent: URL, name: string) => readFileSync(new URL(name, parent), 'utf8');
+  for (const name of ['characters', 'inks', 'motion']) {
+    const actual = read(port, `${name}.mjs`).replace(/^.*\n/, '').replace("from './inks.mjs'", "from './inks.js'");
+    assert.equal(actual, read(upstream, `client/${name}.js`));
+  }
+  const exact = (source: string, name: string) => source.match(new RegExp(`^${name}.*?^}\\n`, 'ms'))?.[0];
+  const settings = read(upstream, 'client/bot-settings.js');
+  const editor = read(port, 'avatar-editor.mjs');
+  const css = read(port, 'avatar-style.mjs');
+  const originalCss = read(upstream, 'client/styles.js');
+  for (const name of ['function ShapeRing', 'export function CharacterGrid']) {
+    const expected = exact(settings, name);
+    assert.ok(expected);
+    assert.equal(exact(editor, name), expected);
+  }
+  for (const rule of css.split('\n').filter(line => /^\.|^@/.test(line))) assert.ok(originalCss.includes(rule) || settings.includes(rule), rule);
+  const originalMark = exact(read(upstream, 'client/mark.js'), 'export function BotMark');
+  assert.ok(originalMark);
+  assert.equal(exact(read(port, 'avatar-mark.mjs'), 'export function BotMark'), originalMark);
+  const originalCrop = exact(read(upstream, 'client/avatar-library.js'), 'export async function avatarImage');
+  assert.ok(originalCrop);
+  const library = read(port, 'avatar-library.mjs');
+  const originalLibrary = read(upstream, 'client/avatar-library.js');
+  assert.equal(exact(library, 'export async function avatarImage'), originalCrop);
+  assert.equal(library.replace(/^.*\n/, ''), originalLibrary.replace("from './icons.js'", "from './avatar-icons.mjs'").replace("from './i18n.js'", "from './avatar-i18n.mjs'"));
+  assert.equal(exact(editor, 'function AvatarEditor'), exact(settings, 'function AvatarEditor'));
+  const validator = read(new URL('runner/src/bots/ported/', root), 'avatar-image.js');
+  const upstreamValidator = read(upstream, 'host/avatar.js');
+  for (const name of ['function mimeOf', 'function readDataUrl', 'export function avatarBytes']) {
+    const expected = exact(upstreamValidator, name);
+    assert.ok(expected);
+    assert.equal(exact(validator, name), expected);
   }
 });

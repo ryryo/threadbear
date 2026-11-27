@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { join } from 'node:path';
+import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotConversations } from '../../../src/bots/conversations.ts';
@@ -178,7 +179,22 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   t.after(async () => { owner.close(); full.close(); await server.close(); });
   const { bot } = await owner.call<{ bot: { id: string; revision: number } }>('bots.create', { name: 'Editor' });
   await assert.rejects(full.call('bots.list', {}), /owner/);
+  await assert.rejects(full.call('bots.list', { includeRosterMarks: true }), /owner/);
+  const markless = await owner.call<{ bots: { id: string; rosterMark?: unknown }[] }>('bots.list', {});
+  assert.equal(markless.bots[0].rosterMark, undefined);
+  const marks = await owner.call<{ bots: { id: string; rosterMark: { light: string; dark?: string } }[] }>('bots.list', { includeRosterMarks: true });
+  assert.match(marks.bots[0].rosterMark.light, /<mask id="bot-mark"/);
+  const detail = await owner.call<{ bot: { rosterMark: unknown } }>('bots.get', { botId: bot.id, includeRosterMarks: true });
+  assert.deepEqual(detail.bot.rosterMark, marks.bots[0].rosterMark);
   await assert.rejects(full.call('bots.create', { name: 'Intruder' }), /owner/);
+  const copy = { botId: bot.id, expectedRevision: bot.revision, operationId: 'rpc-copy' };
+  await assert.rejects(full.call('bots.duplicate', copy), /owner/);
+  assert.equal((await owner.call<{ bot: { name: string } }>('bots.duplicate', copy)).bot.name, 'Editor copy');
+  await assert.rejects(full.call('bots.conversations.attach', { ...copy, threadId: caller, operationId: 'rpc-attach' }), /owner/);
+  const existing = h.runner.makeThread({ text: '' }).st.rec;
+  const attached = await owner.call<{ conversation: { threadId: string } }>('bots.conversations.attach',
+    { ...copy, threadId: existing.id, operationId: 'rpc-attach' });
+  assert.equal(attached.conversation.threadId, existing.id);
   const { conversation } = await owner.call<{ conversation: { threadId: string } }>('bots.conversations.create', { botId: bot.id, operationId: 'a' });
   const input = { botId: bot.id, threadId: conversation.threadId };
   const { note } = await owner.call<{ note: { id: string } }>('bots.memory.add', { ...input, text: 'Keep headings short' });
@@ -197,8 +213,189 @@ test('the owner can create and read Bot conversations over RPC and a Full thread
   assert.equal(rows[0].op, 'replace');
   await owner.call('bots.memory.restore', { ...input, changeId: rows[0].id });
   await owner.call('bots.memory.remove', { ...input, entryId: note.id });
+  const scope = { kind: 'bot', id: bot.id };
+  const scopedHistory = await owner.call<{ rows: { op: string; erasureTarget?: string }[] }>('bots.memory.scope.history', { scope });
+  assert.equal(scopedHistory.rows[0].op, 'remove');
+  assert.equal(scopedHistory.rows[0].erasureTarget, note.id);
   await owner.call('bots.archive', { botId: bot.id, expectedRevision: bot.revision });
   await assert.rejects(owner.call('bots.memory.add', { ...input, text: 'One more' }), /archived/);
   await assert.rejects(owner.call('bots.conversations.create', { botId: bot.id, operationId: 'b' }), /archived/);
   assert.equal((await owner.call<{ rows: unknown[] }>('bots.memory.history', input)).rows.length, 4);
+});
+
+test('the original copy policy names concurrent copies, keeps a model’s Default, and does not copy Bot history or authority', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const original = repo.create({ name: 'Writer', role: 'Editor', instructions: '日本語で校正' });
+  const team = repo.createTeam('Desk', [original.id], h.runner.isoNow());
+  const folder = join(h.home, 'editor-work');
+  mkdirSync(folder);
+  const bot = repo.createManagedBot(team.id, team.revision, original.id, h.runner.isoNow(), {
+    name: 'Managed Writer', role: original.role, instructions: original.instructions,
+    modelBinding: { accountId: 'claude-3', provider: 'claude', model: 'claude-sonnet-4-6' },
+    workFolder: folder, permissionCeiling: 'plan',
+  }).bot;
+  const service = new BotConversations(h.runner, repo, root);
+  const chat = service.create(bot.id, 'source-chat');
+  service.remember(bot.id, chat.threadId, 'コピーしない覚書');
+  h.runner.defaultEffortFor = () => 'high';
+  const copy = (operationId: string) => service.duplicate(bot.id, bot.revision, operationId);
+  const [first, second, third, retry] = await Promise.all([copy('d1'), copy('d2'), copy('d3'), copy('d1')]);
+  assert.deepEqual([first.name, second.name, third.name].sort(), ['Managed Writer copy', 'Managed Writer copy 2', 'Managed Writer copy 3']);
+  assert.equal(first.id, retry.id);
+  assert.equal(first.role, bot.role);
+  assert.equal(first.instructions, bot.instructions);
+  assert.equal(first.workFolder, folder);
+  assert.equal(first.copyOf, bot.id);
+  assert.equal(first.permissionCeiling, undefined);
+  assert.equal(first.reviewEnabled, undefined);
+  assert.notEqual(repo.teamIdForBot(first.id), team.id);
+  assert.deepEqual(repo.conversations(first.id), []);
+  assert.equal(service.scopedMemory.open({ kind: 'bot', id: first.id }, { kind: 'owner' }, 'read').list('2026-11-27').length, 0);
+  const fresh = service.create(first.id, 'copied-chat');
+  assert.equal(h.store.load(fresh.threadId)?.model, 'claude-sonnet-4-6');
+  assert.equal(h.store.load(fresh.threadId)?.effort, undefined);
+  assert.deepEqual(repo.conversations(bot.id), [chat]);
+  const restarted = new BotConversations(h.runner, new BotRepository(root, 'runner-1'), root);
+  assert.equal((await restarted.duplicate(bot.id, bot.revision, 'd1')).id, first.id);
+  await assert.rejects(restarted.duplicate(original.id, original.revision, 'd1'), /operation already belongs/);
+
+  rmdirSync(folder);
+  const unavailable = repo.setModelBinding(bot.id, bot.revision, { accountId: 'missing', provider: 'claude', model: 'claude-sonnet-4-6' });
+  const fallback = await service.duplicate(bot.id, unavailable.revision, 'd4');
+  assert.equal(fallback.workFolder, undefined);
+  assert.equal(fallback.modelBinding, undefined);
+});
+
+test('the copy rejects a Bot that is Private or changes while the source policy is awaiting its catalog', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const service = new BotConversations(h.runner, repo, root);
+  const source = repo.create({ name: 'Editor' });
+  const reconsider = service.duplicate(source.id, source.revision, 'd1');
+  const current = repo.setPrivate(source.id, source.revision, h.home, 'private-on', [], () => {});
+  await assert.rejects(reconsider, /private, so it cannot be copied/i);
+  await assert.rejects(service.duplicate(source.id, current.revision, 'd2'), /private, so it cannot be copied/i);
+  assert.equal(repo.list().length, 1);
+});
+
+test('attaching an idle local Thread keeps its transcript and CLI session across a failed confirmation and restart', async () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const h = makeHarness(home);
+  const repo = new BotRepository(root, 'runner-1');
+  const bot = repo.create({ name: 'Editor', instructions: '見出しを短くする' });
+  const convo = new BotConversations(h.runner, repo, root);
+  const threadId = h.runner.makeThread({ text: '', title: 'Existing notes' }).st.rec.id;
+  h.runner.send(threadId, '先に保存していた既存メッセージ');
+  await tick();
+  h.adapter.last.init();
+  const running = () => convo.attach(bot.id, bot.revision, threadId, 'attach-existing');
+  assert.throws(running, /idle/i);
+  h.adapter.last.result();
+  await tick();
+  const record = h.store.load(threadId)!;
+  const log = h.store.log(threadId);
+  const originalEvents = log.read(1, log.lastSeq);
+  const confirm = repo.confirmConversation.bind(repo);
+  repo.confirmConversation = () => { throw new Error('lost confirmation write'); };
+  assert.throws(running, /lost confirmation/);
+  repo.confirmConversation = confirm;
+  const saved = h.store.load(threadId)!;
+  assert.equal(saved.nativeSessionId, record.nativeSessionId);
+  assert.equal(saved.botLink?.botId, bot.id);
+  const restarted = h.restart();
+  const reopenedRepo = new BotRepository(root, 'runner-1');
+  const reopened = new BotConversations(restarted.runner, reopenedRepo, root);
+  assert.match(reopened.context(restarted.store.load(threadId)!), /見出しを短くする/);
+  const confirmed = reopened.attach(bot.id, bot.revision, threadId, 'attach-existing');
+  assert.deepEqual(reopened.attach(bot.id, bot.revision, threadId, 'attach-existing'), confirmed);
+  const events = restarted.store.log(threadId);
+  assert.deepEqual(events.read(1, events.lastSeq), originalEvents);
+  assert.deepEqual(restarted.store.load(threadId), { ...record, botLink: { botId: bot.id, conversationId: confirmed.id } });
+  assert.match(reopened.context(restarted.store.load(threadId)!), /見出しを短くする/);
+  assert.throws(() => reopened.create(bot.id, 'attach-existing'), /operation already belongs/i);
+});
+
+test('attaching refuses a different owner, a mismatched model, a Private Bot and a copied Thread', () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const bot = repo.create({ name: 'Editor' });
+  const st = h.runner.makeThread({ text: '', model: 'claude-sonnet-4-6' }).st;
+  const service = new BotConversations(h.runner, repo, root, undefined, { mayAttach: () => false });
+  assert.throws(() => service.attach(bot.id, bot.revision, st.rec.id, 'foreign'), /own/i);
+  const local = new BotConversations(h.runner, repo, root);
+  const chosen = repo.setModelBinding(bot.id, bot.revision, { accountId: 'claude-3', provider: 'claude', model: 'claude-opus-4-6' });
+  assert.throws(() => local.attach(bot.id, chosen.revision, st.rec.id, 'model'), /model/i);
+  const madePrivate = repo.setPrivate(bot.id, chosen.revision, h.home, 'private-on', [], () => {});
+  assert.throws(() => local.attach(bot.id, madePrivate.revision, st.rec.id, 'private'), /Private/);
+  const ordinary = repo.create({ name: 'Reader' });
+  st.rec.copied = true;
+  assert.throws(() => local.attach(ordinary.id, ordinary.revision, st.rec.id, 'read-only'), /copied|local/i);
+  assert.equal(h.store.load(st.rec.id)?.botLink, undefined);
+});
+
+test('an older idle Thread with no CLI session stays session-free during attachment', () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const bot = repo.create({ name: 'Editor' });
+  const { st } = h.runner.makeThread({ text: '', title: 'Legacy Thread' });
+  delete st.rec.nativeSessionId;
+  h.store.save(st.rec);
+  const service = new BotConversations(h.runner, repo, root);
+  const attached = service.attach(bot.id, bot.revision, st.rec.id, 'legacy-attach');
+  const record = h.store.load(st.rec.id)!;
+  assert.equal(record.nativeSessionId, undefined);
+  assert.deepEqual(record.botLink, { botId: bot.id, conversationId: attached.id });
+});
+
+test('a concurrent change of the owning Runner cannot commit a native Bot copy', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const bot = repo.create({ name: 'Editor' });
+  let owns = true;
+  const service = new BotConversations(h.runner, repo, root, undefined, { canModify: () => owns });
+  const copying = service.duplicate(bot.id, bot.revision, 'copy-during-handover');
+  owns = false;
+  await assert.rejects(copying, /current Runner/);
+  assert.equal(repo.list().length, 1);
+});
+
+test('the compatibility guard runs before a copy or existing Thread attachment is persisted', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, 'runner-1');
+  const bot = repo.create({ name: 'Editor' });
+  const thread = h.runner.makeThread({ text: '' }).st.rec;
+  const old = new BotConversations(h.runner, repo, root, undefined, {
+    protectRoster: () => { throw new Error('updated Bot supervisor required'); },
+  });
+  await assert.rejects(old.duplicate(bot.id, bot.revision, 'old-copy'), /updated Bot supervisor/);
+  assert.throws(() => old.attach(bot.id, bot.revision, thread.id, 'old-attach'), /updated Bot supervisor/);
+  assert.equal(repo.list().length, 1);
+  assert.equal(repo.pendingAttachment(thread.id), undefined);
+  assert.equal(h.store.load(thread.id)?.botLink, undefined);
+});
+
+
+test('copying uses the original validation of the saved avatar and palette', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const original = new BotRepository(root, 'runner-1').create({ name: 'Editor' });
+  const file = join(root, 'state.json');
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  Object.assign(saved.bots[0], { color: 'kimi', avatar: { shape: 'cat' }, sectionId: 'desk', browserGrants: ['no-copy'] });
+  writeFileSync(file, JSON.stringify(saved));
+  const repo = new BotRepository(root, 'runner-1');
+  const service = new BotConversations(h.runner, repo, root);
+  const copy = await service.duplicate(original.id, original.revision, 'appearance');
+  assert.equal(copy.color, 'charcoal');
+  assert.deepEqual(copy.avatar, { shape: 'cat' });
+  assert.equal(copy.sectionId, 'desk');
+  assert.equal(copy.browserGrants, undefined);
 });

@@ -789,6 +789,11 @@ if [ "$APP_ONLY" = 0 ] && [ "$RUNNER_ONLY" = 0 ]; then
   else
     skip "site build" "nothing the site reads changed"
   fi
+  if needed '^runner/src/bots/profile-panel/|^scripts/build-bot-profile-panel\.mjs$|^package-lock\.json$'; then
+    step "bot profile assets" "$ROOT" node scripts/build-bot-profile-panel.mjs --check
+  else
+    skip "bot profile assets" "no bundled profile sources changed"
+  fi
   if needed '^desktop/|^shared/i18n/|^scripts/i18n'; then
     step "localization" "$ROOT" node scripts/i18n-check.ts
     step "localization tests" "$ROOT" node --test scripts/i18n.test.ts

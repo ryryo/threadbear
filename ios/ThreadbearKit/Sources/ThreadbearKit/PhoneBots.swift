@@ -1,6 +1,130 @@
 import Foundation
 
 public let botWorkspaceAPIVersion = 108
+public let botNoteErasureAPIVersion = 110
+public let botDraftErasureAPIVersion = 112
+
+public struct PhoneBotNoteTarget: Sendable, Hashable, Decodable {
+    public let workspaceId: String
+    public let kind: String
+    public let scopeId: String
+    public let entryId: String
+
+    public init?(workspaceId: String, kind: String, scopeId: String, entryId: String) {
+        guard ["bot", "group"].contains(kind),
+              [workspaceId, scopeId, entryId].allSatisfy({ !$0.isEmpty && $0.utf16.count <= 128 }) else { return nil }
+        self.workspaceId = workspaceId
+        self.kind = kind
+        self.scopeId = scopeId
+        self.entryId = entryId
+    }
+
+    private enum CodingKeys: String, CodingKey { case workspaceId, scope, entryId }
+    private struct Scope: Decodable { let kind: String; let id: String }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let scope = try values.decode(Scope.self, forKey: .scope)
+        guard let target = Self(workspaceId: try values.decode(String.self, forKey: .workspaceId),
+                                kind: scope.kind, scopeId: scope.id, entryId: try values.decode(String.self, forKey: .entryId)) else {
+            throw DecodingError.dataCorruptedError(forKey: .scope, in: values, debugDescription: "Invalid Bot note identity.")
+        }
+        self = target
+    }
+
+    var arguments: JSONValue {
+        .object(["workspaceId": .string(workspaceId), "scope": .object(["kind": .string(kind), "id": .string(scopeId)]),
+                 "entryId": .string(entryId)])
+    }
+}
+
+public struct PhoneBotDraftErasures: Sendable, Decodable {
+    public let targets: [PhoneBotNoteTarget]
+    public let cursor: String?
+}
+
+public struct PhoneBotNoteDraft: Codable, Equatable {
+    public var text = ""
+    public var entryId: String?
+    public var removingEntryId: String?
+    public var revision: String
+    public var operationId = UUID().uuidString
+    public var commandId: String?
+
+    public init(text: String = "", entryId: String? = nil, removingEntryId: String? = nil, revision: String) {
+        self.text = text
+        self.entryId = entryId
+        self.removingEntryId = removingEntryId
+        self.revision = revision
+    }
+
+    public func target(workspaceId: String, kind: String, scopeId: String) -> PhoneBotNoteTarget? {
+        guard let noteId = entryId ?? removingEntryId else { return nil }
+        return PhoneBotNoteTarget(workspaceId: workspaceId, kind: kind, scopeId: scopeId, entryId: noteId)
+    }
+
+    public struct Stored: Hashable, Sendable {
+        public let key: String
+        public let target: PhoneBotNoteTarget
+    }
+
+    private static func target(_ draft: Self, key: String) -> PhoneBotNoteTarget? {
+        let parts = key.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 6, parts[0] == "bot-note-draft", Int(parts[3]) != nil else { return nil }
+        return draft.target(workspaceId: String(parts[2]), kind: String(parts[4]), scopeId: String(parts[5]))
+    }
+
+    private static func stored(_ key: String, defaults: UserDefaults) -> Stored? {
+        guard let data = defaults.data(forKey: key), let draft = try? JSONDecoder().decode(Self.self, from: data),
+              let target = target(draft, key: key) else { return nil }
+        return Stored(key: key, target: target)
+    }
+
+    public static func saved(in defaults: UserDefaults = .standard) -> [Stored] {
+        defaults.dictionaryRepresentation().keys.sorted().compactMap { stored($0, defaults: defaults) }
+    }
+
+    public static func clearErased(_ drafts: [Stored], confirmed: [Bool], in defaults: UserDefaults = .standard) {
+        guard drafts.count == confirmed.count else { return }
+        _ = confirmLocalRemoval(zip(drafts, confirmed).compactMap { $0.1 ? $0.0.target : nil }, in: defaults)
+    }
+
+    public static func storeID(in defaults: UserDefaults = .standard) -> String {
+        let key = "bot-note-storage-id"
+        if let id = defaults.string(forKey: key), UUID(uuidString: id) != nil { return id.lowercased() }
+        let id = UUID().uuidString.lowercased()
+        defaults.set(id, forKey: key)
+        return id
+    }
+
+    private static func erasureKey(_ target: PhoneBotNoteTarget) -> String {
+        let parts = [target.workspaceId, target.kind, target.scopeId, target.entryId]
+        return "bot-note-erased:" + parts.map { Data($0.utf8).base64EncodedString() }.joined(separator: ":")
+    }
+
+    public static func wasErased(_ target: PhoneBotNoteTarget, in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: erasureKey(target))
+    }
+
+    public static func persist(_ draft: Self, key: String, in defaults: UserDefaults = .standard) -> Bool {
+        if let target = target(draft, key: key), wasErased(target, in: defaults) { return false }
+        guard let data = try? JSONEncoder().encode(draft) else { return false }
+        defaults.set(data, forKey: key)
+        return true
+    }
+
+    public static func confirmLocalRemoval(_ targets: [PhoneBotNoteTarget], in defaults: UserDefaults = .standard) -> [PhoneBotNoteTarget] {
+        let selected = Set(targets)
+        for target in selected { defaults.set(true, forKey: erasureKey(target)) }
+        for draft in saved(in: defaults) where selected.contains(draft.target) {
+            defaults.removeObject(forKey: draft.key)
+        }
+        guard defaults.synchronize() else { return [] }
+        let remaining = Set(saved(in: defaults).map(\.target))
+        return targets.filter { !remaining.contains($0) && wasErased($0, in: defaults) }
+    }
+}
+
 
 public struct PhoneBotProfile: Codable, Sendable, Identifiable, Equatable {
     public let id: String

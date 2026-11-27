@@ -185,6 +185,7 @@ export const newThreadsPart = {
     onlyProvider?: Provider;
     model?: string;
     effort?: EffortLevel;
+    useModelDefaultEffort?: true;
     permissionMode?: PermissionMode;
     title?: string;
     origin?: MessageOrigin;
@@ -237,6 +238,7 @@ export const newThreadsPart = {
     onlyProvider?: Provider;
     model?: string;
     effort?: EffortLevel;
+    useModelDefaultEffort?: true;
     permissionMode?: PermissionMode;
     title?: string;
     origin?: MessageOrigin;
@@ -321,7 +323,8 @@ export const newThreadsPart = {
       pendingApprovals: [],
       ...(params.coordinatorHelperFor ? { coordinatorHelperFor: params.coordinatorHelperFor } : {}),
     };
-    const checked = this.checkSettings(account, params.model || this.defaultModelFor(account.provider), params.effort ?? this.defaultEffortFor(account.provider));
+    const effort = params.useModelDefaultEffort ? undefined : params.effort ?? this.defaultEffortFor(account.provider);
+    const checked = this.checkSettings(account, params.model || this.defaultModelFor(account.provider), effort);
     if (checked.model) {
       rec.model = checked.model;
       if (params.model === checked.model) rec.explicitModel = explicitModelKind(account, checked.model);

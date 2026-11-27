@@ -427,6 +427,7 @@ pub(crate) enum MenuAction {
     Detach(bool),
     /// A project's menu, or one of a thread's that acts on projects (projects.rs).
     Project(crate::projects::ProjectAction),
+    DuplicateBot(String, u64),
     /// Runs on: where the new thread starts, its default, and a folder on
     /// the chosen runner (new_thread.rs).
     Runner(Option<String>),
@@ -1369,6 +1370,9 @@ impl Threadbear {
             }
             MenuAction::DeleteSchedule(id) => return self.delete_schedule(id, window, cx),
             MenuAction::Project(action) => return self.run_project_action(action, window, cx),
+            MenuAction::DuplicateBot(bot, revision) => {
+                return self.duplicate_bot(bot, revision, window, cx)
+            }
             _ => {}
         }
         let Some(id) = thread else { return };
@@ -1458,7 +1462,8 @@ impl Threadbear {
             | MenuAction::RunSchedule(_)
             | MenuAction::PauseSchedule(..)
             | MenuAction::DeleteSchedule(_)
-            | MenuAction::Project(_) => {}
+            | MenuAction::Project(_)
+            | MenuAction::DuplicateBot(..) => {}
         }
         cx.notify();
     }

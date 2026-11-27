@@ -62,3 +62,34 @@ test('scope edits are idempotent, and restore rechecks secrets learned since the
   assert.equal(reopened.revision(), removed.revision);
   assert.deepEqual(reopened.list('2026-11-27'), []);
 });
+
+test('only the owner can erase a note, including from an archived Bot, after checking the writer', () => {
+  const root = tmpDir();
+  const repo = new BotRepository(root, 'fixture');
+  const bot = repo.create({ name: 'Writer' });
+  const own = { kind: 'bot', id: bot.id } as const;
+  const team = { kind: 'team', id: repo.workspaceId() } as const;
+  let guarded = false;
+  const memory = new ScopedMemory({ root, repo, protectErasure: () => {
+    if (!guarded) throw new Error('No compatible supervisor');
+  } });
+  const ownMemory = memory.open(own, owner, 'write');
+  const teamMemory = memory.open(team, owner, 'write');
+  const text = '合成テスト用。会話には入れない覚書。';
+  const note = ownMemory.add(text, {}, time);
+  teamMemory.add(text, {}, time);
+  const config = { entryId: note.id, operationId: randomUUID(), expectedRevision: ownMemory.revision(), time };
+  const botActor = { kind: 'bot', id: bot.id, private: false, grants: [] } as const;
+  assert.throws(() => memory.erase(own, botActor, config), /Only the owner/);
+  assert.throws(() => new ScopedMemory({ root, repo }).erase(own, owner, config), /unavailable/);
+  repo.archive(bot.id, bot.revision, time);
+  assert.throws(() => memory.open(own, owner, 'write'), /cannot use/);
+  assert.throws(() => memory.erase(own, owner, config), /No compatible supervisor/);
+  assert.equal(ownMemory.revision(), config.expectedRevision);
+  assert.equal(ownMemory.list('2026-11-27')[0].text, text);
+  guarded = true;
+  const result = memory.erase(own, owner, config);
+  assert.deepEqual(memory.erase(own, owner, config), result);
+  assert.deepEqual(ownMemory.list('2026-11-27'), []);
+  assert.equal(teamMemory.list('2026-11-27')[0].text, text);
+});

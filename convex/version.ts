@@ -514,4 +514,7 @@
 // 108: owner-readable Bot workspace projection and commands.
 // 109: Bot workspace ownership, destination Project preview, staged Thread
 //    and schedule claim, and scoped worker grants.
-export const API_VERSION = 109;
+// 110: durable scoped note erasure in the mirror and retention of receipt provenance.
+// 111: retired Bot workspace sources must acknowledge local copies of note erasures.
+// 112: registered paired draft stores acknowledge deletion before a Bot note erasure finishes.
+export const API_VERSION = 112;

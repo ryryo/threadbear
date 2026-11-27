@@ -4812,3 +4812,86 @@ test('making a Bot private waits for an older projection and then excludes it un
   assert.deepEqual(projections(), [1, 0, 1], 'a refused local change re-publishes the still public profile');
   sync.stop();
 });
+
+test('Bot note erasure waits for the previous projection and retries the exact identity after a lost reply', async () => {
+  let release!: () => void;
+  const previous = new Promise<void>(resolve => { release = resolve; });
+  let attempts = 0;
+  const { sync, calls } = setup({
+    answer: method => {
+      if (method === 'sync:heartbeat') return { apiVersion: BACKEND_API_VERSION };
+      if (method === 'sync:setBotWorkspace') return previous;
+      if (method === 'sync:eraseBotWorkspaceNote') {
+        attempts++;
+        if (attempts === 1) throw new Error('lost erasure reply');
+        if (attempts === 2) return { done: false, waitingForLegacy: true };
+        if (attempts === 3) return { done: false, waitingForSources: true };
+        if (attempts === 4) return { done: false, waitingForDevices: true };
+        return { done: true };
+      }
+      return null;
+    },
+    extra: { botWorkspace: () => ({
+      workspaceId: 'workspace', ownerRunnerId: 'r1', epoch: 2, profiles: [], notes: [], tasks: [], requests: [], groups: [],
+    }) },
+  });
+  const input = { workspaceId: 'workspace', epoch: 2, scope: { kind: 'bot' as const, id: 'editor' }, entryId: '1234' };
+  const mirror = () => calls.filter(call => call.fn === 'sync:setBotWorkspace' || call.fn === 'sync:eraseBotWorkspaceNote');
+  sync.start();
+  try {
+    await tick();
+    assert.deepEqual(mirror().map(call => call.fn), ['sync:setBotWorkspace']);
+    const pending = assert.rejects(sync.eraseBotWorkspaceNote(input), /lost erasure reply/);
+    await tick();
+    assert.deepEqual(mirror().map(call => call.fn), ['sync:setBotWorkspace']);
+    release();
+    await pending;
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForLegacy: true });
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForSources: true });
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForDevices: true });
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: true });
+    const [, first, retry, afterRetention, afterSources, afterDevices] = mirror();
+    assert.deepEqual(first?.args, retry?.args);
+    assert.deepEqual(retry?.args, afterRetention?.args);
+    assert.deepEqual(afterRetention?.args, afterSources?.args);
+    assert.deepEqual(afterSources?.args, afterDevices?.args);
+    assert.equal(first?.args.workspaceId, input.workspaceId);
+    assert.equal(first?.args.epoch, input.epoch);
+  } finally {
+    release();
+    await sync.stop();
+  }
+});
+
+test('Bot erasure cannot be acknowledged by an older backend or an unrecognized reply', async () => {
+  for (const apiVersion of [109, 111, BACKEND_API_VERSION]) {
+    const { sync, calls } = setup({ answer: fn => fn === 'sync:heartbeat' ? { apiVersion } : null });
+    sync.start();
+    try {
+      await tick();
+      await assert.rejects(sync.eraseBotWorkspaceNote({ workspaceId: 'workspace', epoch: 1,
+        scope: { kind: 'group', id: 'room' }, entryId: 'abcd' }),
+      apiVersion < BACKEND_API_VERSION ? /updated backend/ : /did not acknowledge/);
+      assert.equal(calls.some(call => call.fn === 'sync:eraseBotWorkspaceNote'), apiVersion >= BACKEND_API_VERSION);
+    } finally {
+      await sync.stop();
+    }
+  }
+});
+
+test('successful heartbeats retry the saved note erasure queue only on compatible backends', async () => {
+  for (const apiVersion of [BACKEND_API_VERSION - 1, BACKEND_API_VERSION]) {
+    let runs = 0;
+    const { h, sync } = setup({ answer: method => method === 'sync:heartbeat' ? { apiVersion } : null,
+      extra: { resumeBotNoteErasures: async () => { runs++; } } });
+    sync.start();
+    try {
+      await tick(20);
+      h.clock.advance(HEARTBEAT_MS);
+      await tick(20);
+      assert.equal(runs, apiVersion < BACKEND_API_VERSION ? 0 : 2);
+    } finally {
+      await sync.stop();
+    }
+  }
+});

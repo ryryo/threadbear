@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { msg, T, useMessages } from 'gt-react';
-import { useMutation } from 'convex/react';
+import { useConvex, useMutation } from 'convex/react';
 import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useLiveQuery } from './live';
 import { go, threadPath } from './route';
 import { CommandNote, useCommand } from './command-state';
+import { clearErasedDrafts, dropManagedNoteDraft, managedNoteStoreId, managedNoteWasErased, matchesManagedNoteDraft, matchesNoteTarget, noteDraftTarget,
+  readNoteDraft, removeManagedNoteDrafts, savedNoteDrafts, saveManagedNoteDraft, withManagedNoteStorage, type ErasureTarget } from './bot-note-drafts';
 
 type Settings = { name: string; role: string; instructions: string };
 type Profile = Settings & { id: string; revision: number };
@@ -145,13 +147,14 @@ function useWorkspaceAction(token: string, workspace: Workspace) {
 type ActionDraft = { operationId: string; action: Action; commandId?: Id<'commands'> };
 type ActionResult = { outcome: string; rows?: { id: string; text: string }[]; revision?: string; draft?: string };
 
-function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
+function useActionDraft(token: string, workspace: Workspace, scopeKey: string, checkErasure = false, registerDrafts = false) {
+  const convex = useConvex();
   const key = `bot-action-draft:${workspace.ownerRunnerId}:${workspace.workspaceId}:${workspace.epoch}:${scopeKey}`;
   const translate = useMessages();
   const mutation = useMutation(api.phone.actOnBotWorkspace);
   const [draft, setDraft] = useState<ActionDraft | null>(() => {
     try {
-      const stored = JSON.parse(sessionStorage.getItem(key) ?? 'null') as ActionDraft | null;
+      const stored = readNoteDraft(localStorage, sessionStorage, key) as ActionDraft | null;
       return typeof stored?.operationId === 'string' && typeof stored.action?.kind === 'string' ? stored : null;
     } catch {
       return null;
@@ -159,11 +162,84 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
   });
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState('');
+  const ownedSlot = useRef<string | undefined>(undefined);
+  const registration = useRef<{ token: string; storeId: string; target: ErasureTarget; answer: Promise<boolean> } | undefined>(undefined);
   const reply = useLiveQuery(api.phone.command, draft?.commandId ? { token, commandId: draft.commandId } : 'skip');
   const result = reply?.state === 'done' ? reply.result as ActionResult | undefined : undefined;
   const waiting = sending || !!draft?.commandId && (reply === undefined || reply?.state === 'pending' || reply?.state === 'taken');
 
-  useEffect(() => { persist(key, draft); }, [key, draft]);
+  useEffect(() => {
+    if (!registerDrafts) { persist(key, draft); return; }
+    const target = noteDraftTarget(workspace.workspaceId, draft?.action);
+    let closed = false;
+    async function keep() {
+      if (!draft || !target) {
+        if (!navigator.locks) {
+          persist(key, draft);
+          return;
+        }
+        await withManagedNoteStorage(() => {
+          if (closed) return;
+          dropManagedNoteDraft(localStorage, sessionStorage, key, ownedSlot.current);
+          persist(key, draft);
+        });
+        return;
+      }
+      const storeId = await withManagedNoteStorage(() => managedNoteStoreId(localStorage, () => crypto.randomUUID()));
+      if (closed) return;
+      let checked = registration.current;
+      if (!checked || checked.token !== token || checked.storeId !== storeId || !matchesNoteTarget(checked.target, target)) {
+        checked = { token, storeId, target, answer: convex.mutation(api.phone.registerBotNoteDraft, { token, storeId, target }) };
+        registration.current = checked;
+      }
+      let allowed;
+      try { allowed = await checked.answer; }
+      catch (error) {
+        if (registration.current === checked) registration.current = undefined;
+        throw error;
+      }
+      await withManagedNoteStorage(() => {
+        if (closed) return;
+        if (allowed && !ownedSlot.current && matchesManagedNoteDraft(localStorage, sessionStorage, key, draft)) return;
+        const slot = ownedSlot.current ??= crypto.randomUUID();
+        if (!allowed) removeManagedNoteDrafts(localStorage, sessionStorage, [target]);
+        if (!allowed || !saveManagedNoteDraft(localStorage, sessionStorage, key, slot, draft)) {
+          setDraft(current => matchesNoteTarget(noteDraftTarget(workspace.workspaceId, current?.action), target) ? null : current);
+        }
+      });
+    }
+    keep().catch(() => { /* Unregistered changes stay in this tab until the backend is available. */ });
+    return () => { closed = true; };
+  }, [convex, draft, key, registerDrafts, token, workspace.workspaceId]);
+
+  const target = noteDraftTarget(workspace.workspaceId, draft?.action);
+  const entryId = target?.entryId;
+  const kind = target?.scope.kind;
+  const scopeId = target?.scope.id;
+  useEffect(() => {
+    if (!checkErasure || !entryId || !kind || !scopeId) return;
+    const target = { workspaceId: workspace.workspaceId, scope: { kind, id: scopeId }, entryId };
+    const watch = convex.watchQuery(api.phone.botNoteErasures, { token, targets: [target] });
+    function check() {
+      try {
+        if (!(registerDrafts && managedNoteWasErased(localStorage, target)) && watch.localQueryResult()?.[0] !== true) return;
+        setDraft(current => matchesNoteTarget(noteDraftTarget(workspace.workspaceId, current?.action), target) ? null : current);
+        clearErasedDrafts(sessionStorage, [{ key, target }], [true]);
+        if (registerDrafts && !managedNoteWasErased(localStorage, target)) {
+          withManagedNoteStorage(() => removeManagedNoteDrafts(localStorage, sessionStorage, [target])).catch(() => {});
+        }
+      } catch {
+        // An unavailable backend provides no evidence that a draft was erased.
+      }
+    }
+    const stop = watch.onUpdate(check);
+    if (registerDrafts) window.addEventListener('storage', check);
+    check();
+    return () => {
+      stop();
+      if (registerDrafts) window.removeEventListener('storage', check);
+    };
+  }, [checkErasure, convex, entryId, key, kind, registerDrafts, scopeId, token, workspace.workspaceId]);
 
   function edit(action: Action | null) {
     setDraft(action ? { operationId: crypto.randomUUID(), action } : null);
@@ -183,7 +259,7 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
       const commandId = await mutation({ token, runnerId: workspace.ownerRunnerId,
         input: { workspaceId: workspace.workspaceId, epoch: workspace.epoch, operationId: next.operationId, action: next.action },
       });
-      setDraft({ ...next, commandId });
+      setDraft(current => current?.operationId === next.operationId ? { ...next, commandId } : current);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
     } finally {
@@ -195,9 +271,11 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
     problem: problem || (reply?.state === 'failed' ? reply.note || translate(msg('The Runner refused the action.')) : '') };
 }
 
-function Notes({ token, workspace, scope }: { token: string; workspace: Workspace; scope: Workspace['notes'][number] }) {
+function Notes({ token, workspace, scope, checkErasure, registerDrafts }: {
+  token: string; workspace: Workspace; scope: Workspace['notes'][number]; checkErasure: boolean; registerDrafts: boolean;
+}) {
   const translate = useMessages();
-  const action = useActionDraft(token, workspace, `notes:${scope.scope}:${scope.scopeId}`);
+  const action = useActionDraft(token, workspace, `notes:${scope.scope}:${scope.scopeId}`, checkErasure, registerDrafts);
   const initial = { scope: { kind: scope.scope, id: scope.scopeId }, expectedRevision: scope.revision };
   const draft = action.draft?.kind === 'note.edit' || action.draft?.kind === 'note.add' ? action.draft : undefined;
   const saved = action.result?.outcome === 'saved';
@@ -237,7 +315,9 @@ function Notes({ token, workspace, scope }: { token: string; workspace: Workspac
   </details>;
 }
 
-function GroupView({ token, workspace, group }: { token: string; workspace: Workspace; group: Workspace['groups'][number] }) {
+function GroupView({ token, workspace, group, checkErasure, registerDrafts }: {
+  token: string; workspace: Workspace; group: Workspace['groups'][number]; checkErasure: boolean; registerDrafts: boolean;
+}) {
   const translate = useMessages();
   const action = useActionDraft(token, workspace, `group:${group.id}`);
   const text = action.draft?.kind === 'group.post' ? action.draft.text : '';
@@ -247,7 +327,7 @@ function GroupView({ token, workspace, group }: { token: string; workspace: Work
     <summary>{group.title}</summary>
     <p>{group.status}{group.queued ? <> · {translate(msg('{count} queued'), { count: group.queued })}</> : null}</p>
     {group.events.map(row => <p key={row.id}>{row.text}</p>)}
-    {scope ? <Notes token={token} workspace={workspace} scope={scope} /> : null}
+    {scope ? <Notes token={token} workspace={workspace} scope={scope} checkErasure={checkErasure} registerDrafts={registerDrafts} /> : null}
     <form onSubmit={event => { event.preventDefault(); if (text.trim() && !saved) void action.submit(); }}>
       <label><T>Message the Group</T><textarea value={text} rows={3} maxLength={30_000} onChange={event => {
         action.edit({ kind: 'group.post', groupId: group.id, text: event.target.value });
@@ -272,13 +352,86 @@ function TaskView({ token, workspace, task }: { token: string; workspace: Worksp
   </div>;
 }
 
+function StoredNoteSweep({ token }: { token: string }) {
+  const convex = useConvex();
+  useEffect(() => {
+    const stops: (() => void)[] = [];
+    try {
+      const drafts = savedNoteDrafts(sessionStorage);
+      for (let offset = 0; offset < drafts.length; offset += 32) {
+        const batch = drafts.slice(offset, offset + 32);
+        const watch = convex.watchQuery(api.phone.botNoteErasures, { token, targets: batch.map(draft => draft.target) });
+        function check() {
+          try {
+            const answer = watch.localQueryResult();
+            if (answer) clearErasedDrafts(sessionStorage, batch, answer);
+          } catch {
+            // Keep drafts if storage or the backend is unavailable.
+          }
+        }
+        stops.push(watch.onUpdate(check));
+        check();
+      }
+    } catch {
+      // A tab with storage disabled has nothing to sweep.
+    }
+    return () => { for (const stop of stops) stop(); };
+  }, [convex, token]);
+  return null;
+}
+
+function ManagedNoteSweep({ token }: { token: string }) {
+  const convex = useConvex();
+  useEffect(() => {
+    let closed = false;
+    let checking = false;
+    async function sweep() {
+      if (checking || closed) return;
+      checking = true;
+      try {
+        const storeId = await withManagedNoteStorage(() => managedNoteStoreId(localStorage, () => crypto.randomUUID()));
+        let cursor: string | null = null;
+        const visited = new Set<string>();
+        do {
+          if (closed) return;
+          const page: FunctionReturnType<typeof api.phone.botNoteDraftErasures> = await convex.query(
+            api.phone.botNoteDraftErasures, { token, storeId, ...(cursor === null ? {} : { cursor }) },
+          );
+          if (closed) return;
+          if (page.targets.length) {
+            const cleared = await withManagedNoteStorage(() => removeManagedNoteDrafts(localStorage, sessionStorage, page.targets));
+            if (!closed && cleared.length) {
+              await convex.mutation(api.phone.confirmBotNoteDraftErasures, { token, storeId, targets: cleared });
+            }
+          }
+          cursor = page.cursor;
+          if (cursor !== null && visited.has(cursor)) break;
+          if (cursor !== null) visited.add(cursor);
+        } while (cursor !== null);
+      } catch {
+        // A failed query or write stays pending until the next sweep.
+      } finally {
+        checking = false;
+      }
+    }
+    void sweep();
+    const timer = window.setInterval(() => { void sweep(); }, 10_000);
+    return () => { closed = true; window.clearInterval(timer); };
+  }, [convex, token]);
+  return null;
+}
+
 export default function BotsPage({ token }: { token: string }) {
   const me = useLiveQuery(api.phone.me, { token });
   const capable = (me?.apiVersion ?? 0) >= 108;
+  const checkErasure = (me?.apiVersion ?? 0) >= 110;
+  const registerDrafts = (me?.apiVersion ?? 0) >= 112;
   const workspaces = useLiveQuery(api.phone.botWorkspaces, capable ? { token } : 'skip');
   return <main className="bot-device-page">
     <a href="/" onClick={e => { e.preventDefault(); go('/'); }}><T>Threads</T></a>
     <h1><T>Bots</T></h1>
+    {checkErasure ? <StoredNoteSweep token={token} /> : null}
+    {registerDrafts && navigator.locks ? <ManagedNoteSweep token={token} /> : null}
     {me && !capable ? <p><T>This backend needs an update to show Bots.</T></p> : null}
     {capable && workspaces === undefined ? <p><T>Loading Bots…</T></p> : null}
     {workspaces?.length === 0 ? <p><T>No Bot workspace is available on this device.</T></p> : null}
@@ -286,9 +439,9 @@ export default function BotsPage({ token }: { token: string }) {
       {workspace.profiles.map(profile => <div key={`${workspace.epoch}:${profile.id}`}>
         <ProfileEditor token={token} workspaceId={workspace.workspaceId} runnerId={workspace.ownerRunnerId} epoch={workspace.epoch} profile={profile} />
         {workspace.notes.filter(scope => scope.scope === 'bot' && scope.scopeId === profile.id)
-          .map(scope => <Notes key={scope.scopeId} token={token} workspace={workspace} scope={scope} />)}
+          .map(scope => <Notes key={scope.scopeId} token={token} workspace={workspace} scope={scope} checkErasure={checkErasure} registerDrafts={registerDrafts} />)}
       </div>)}
-      {workspace.groups.map(group => <GroupView key={group.id} token={token} workspace={workspace} group={group} />)}
+      {workspace.groups.map(group => <GroupView key={`${workspace.ownerRunnerId}:${workspace.epoch}:${group.id}`} token={token} workspace={workspace} group={group} checkErasure={checkErasure} registerDrafts={registerDrafts} />)}
       {workspace.tasks.map(task => <TaskView key={task.id} token={token} workspace={workspace} task={task} />)}
       {workspace.requests.map(request => <p key={request.id}><a href={threadPath(request.targetThreadId)}><T>Bot request</T></a> · {request.status}</p>)}
     </section>)}

@@ -4,12 +4,21 @@
 // Modified for Threadbear: extract publish/recover and journal helpers from
 // ds-bot/src/host/memory.js. The Runner owns the write lock, root and atomic writes.
 
-import { appendFileSync, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, rmSync, truncateSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, truncateSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { atomicWriteFileSync } from '../../fsutil.ts';
+import { atomicWriteFileSync, removeTempFiles, renameWithRetry } from '../../fsutil.ts';
 import { inside, pendingPath, read as readPending, serialize } from './memory-pending.js';
 
 const JOURNAL_TAIL_BYTES = 4096;
+const digest = data => createHash('sha256').update(data).digest('hex');
+
+function regularBytes(path) {
+  const file = lstatSync(path, { throwIfNoEntry: false });
+  if (!file) return undefined;
+  if (!file.isFile()) throw new Error('The memory erasure needs regular journal files');
+  return readFileSync(path);
+}
 
 function unreadable(path, error) {
   throw Object.assign(new Error(`Could not read the memory journal at ${path}`, { cause: error }), { code: 'memory/journal' });
@@ -125,15 +134,24 @@ export class MemoryJournal {
     this.pending = pendingPath(this.root);
     this.journal = join(this.root, 'journal.jsonl');
     this.torn = join(this.root, 'journal-torn.jsonl');
+    this.erasure = join(this.root, 'journal-erasure.jsonl');
   }
 
   stepsFor(change) {
     if (change.id !== change.row.id || change.scope !== change.row.scope || change.op !== change.row.op) {
       throw new Error('The pending memory record and its journal row do not match');
     }
+    if (change.op === 'erase') {
+      const { before, after } = change.rewrite ?? {};
+      if (![before, after].every(hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash))) {
+        throw new Error('The pending memory erasure does not name both journal checksums');
+      }
+    } else if (change.rewrite !== undefined) {
+      throw new Error('Only a pending memory erasure can replace the journal');
+    }
     const steps = change.steps.map(step => {
       const path = inside(this.root, step.path);
-      if (path === this.root || path === this.pending || path === this.journal || path === this.torn) {
+      if (path === this.root || path === this.pending || path === this.journal || path === this.torn || path === this.erasure) {
         throw new Error('A pending memory step targets a reserved path');
       }
       checkPath(this.root, path);
@@ -144,17 +162,64 @@ export class MemoryJournal {
     return steps;
   }
 
+  // The journal can be larger than pending.json. Stage only its sanitized
+  // replacement and bind both versions to the existing, bounded intent.
+  verifyRewrite({ before, after }) {
+    checkPath(this.root, this.erasure);
+    const staged = regularBytes(this.erasure);
+    const current = digest(regularBytes(this.journal) ?? '');
+    if (staged === undefined ? current !== after : digest(staged) !== after || current !== before) {
+      throw new Error('The memory erasure journal checksum did not match');
+    }
+    return staged !== undefined;
+  }
+
+  installRewrite(staged) {
+    if (staged) renameWithRetry(this.erasure, this.journal);
+  }
+
   finish(change, steps) {
+    const staged = change.rewrite === undefined ? undefined : this.verifyRewrite(change.rewrite);
     for (const step of steps) {
       if (step.action === 'remove') rmSync(step.path, { force: true });
       else atomicWriteFileSync(step.path, step.text, 0o600);
     }
-    journalRow(this.journal, this.torn, change.row);
+    if (staged === undefined) journalRow(this.journal, this.torn, change.row);
+    else {
+      this.installRewrite(staged);
+      // A stopped Runner can leave an older atomic write in the same
+      // folder. Use the existing generated-file and process checks.
+      removeTempFiles(this.root);
+    }
     rmSync(this.pending, { force: true });
+  }
+
+  erase(change, sanitizedJournal) {
+    this.recoverPending();
+    if (change.op !== 'erase' || !sanitizedJournal.endsWith(JSON.stringify(change.row) + '\n')) {
+      throw new Error('The memory erasure journal is missing its receipt');
+    }
+    checkPath(this.root, this.journal);
+    checkPath(this.root, this.torn);
+    if (regularBytes(this.torn)?.length) throw new Error('Repair the torn memory journal before erasing a note');
+    const rewrite = { before: digest(regularBytes(this.journal) ?? ''), after: digest(sanitizedJournal) };
+    const accepted = { ...change, rewrite };
+    const steps = this.stepsFor(accepted);
+    const intent = serialize(accepted);
+    checkPath(this.root, this.erasure);
+    atomicWriteFileSync(this.erasure, sanitizedJournal, 0o600);
+    try {
+      atomicWriteFileSync(this.pending, intent, 0o600);
+    } catch (error) {
+      rmSync(this.erasure, { force: true });
+      throw error;
+    }
+    this.finish(accepted, steps);
   }
 
   publish(change) {
     this.recoverPending();
+    if (change.op === 'erase' || change.rewrite !== undefined) throw new Error('Memory erasure needs a journal replacement');
     const steps = this.stepsFor(change);
     atomicWriteFileSync(this.pending, serialize(change), 0o600);
     this.finish(change, steps);
@@ -163,6 +228,11 @@ export class MemoryJournal {
   recoverPending() {
     checkPath(this.root, this.pending);
     const change = readPending(this.root);
-    if (change !== undefined) this.finish(change, this.stepsFor(change));
+    if (change !== undefined) {
+      this.finish(change, this.stepsFor(change));
+    } else if (lstatSync(this.erasure, { throwIfNoEntry: false })) {
+      checkPath(this.root, this.erasure);
+      rmSync(this.erasure);
+    }
   }
 }

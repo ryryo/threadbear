@@ -13,7 +13,8 @@ import { messageButton, threadFields, views } from './schema';
 import { checkPhoneToken, hasLiveKey, pageLimit, readRunnerOrder, runnerStatsRows, saveRunnerOrder, sha256, watchRunnersFor } from './lib';
 import { API_VERSION } from './version';
 import { pushLocale } from './pushText';
-import { botDeviceAction, botProfileEdit, botWorkspaceProjection } from './botWorkspaceValues';
+import { botDeviceAction, botNoteTarget, botProfileEdit, botWorkspaceProjection } from './botWorkspaceValues';
+import { botNoteCommand, botNoteErased, botWorkspaceOwner, erasedBotNoteCommand, safeBotNoteResult } from './botWorkspaceAuthority';
 import { pushOff } from './pushHealth';
 import { imagesFrom, phoneImage, replyImagesFrom, siteUrl } from './share';
 import { deleteIfUnused, endCommandFiles, eventBodyAnswer, finishedArgs, readEventBody, runnerName } from './sync';
@@ -544,12 +545,13 @@ export const command = query({
     if (c.kind === 'designReviews' && c.result) result = c.result;
     else if ((c.kind === 'slashCommands' || c.kind === 'botProfileEdit' || c.kind === 'botDeviceAction') && c.result) {
       try {
-        result = JSON.parse(c.result);
+        result = JSON.parse(c.kind === 'botDeviceAction' ? await safeBotNoteResult(ctx, c, c.result) : c.result);
       } catch {
         result = undefined;
       }
     }
-    return { state: c.state, ...(c.note ? { note: c.note } : {}), ...(c.resultThreadId ? { threadId: c.resultThreadId } : {}), ...(result !== undefined ? { result } : {}) };
+    const note = c.note && await erasedBotNoteCommand(ctx, c) ? 'This Bot memory note was permanently erased.' : c.note;
+    return { state: c.state, ...(note ? { note } : {}), ...(c.resultThreadId ? { threadId: c.resultThreadId } : {}), ...(result !== undefined ? { result } : {}) };
   },
 });
 
@@ -734,6 +736,85 @@ export const botWorkspaces = query({
   },
 });
 
+export const botNoteErasures = query({
+  args: { token: v.string(), targets: v.array(botNoteTarget) },
+  returns: v.array(v.boolean()),
+  handler: async (ctx, { token, targets }) => {
+    await checkPhoneToken(ctx, token);
+    checkDraftTargets(targets);
+    return Promise.all(targets.map(({ workspaceId, scope, entryId }) => botNoteErased(ctx, workspaceId, scope, entryId)));
+  },
+});
+
+type BotNoteTarget = Infer<typeof botNoteTarget>;
+const storeArgs = { token: v.string(), storeId: v.string() };
+function checkDraftStoreId(storeId: string) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(storeId)) {
+    throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot note draft storage ID.' });
+  }
+}
+function checkDraftTargets(targets: BotNoteTarget[]) {
+  if (targets.length > 32 || targets.some(target =>
+    [target.workspaceId, target.scope.id, target.entryId].some(id => !id || id.length > 128))) {
+    throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot note erasure lookup.' });
+  }
+}
+function noteDraftCopy(ctx: QueryCtx | MutationCtx, tokenId: Id<'tokens'>, storeId: string, t: BotNoteTarget) {
+  return ctx.db.query('botNoteDraftCopies').withIndex('by_store_target', q => q.eq('tokenId', tokenId).eq('storeId', storeId)
+    .eq('workspaceId', t.workspaceId).eq('kind', t.scope.kind).eq('scopeId', t.scope.id).eq('entryId', t.entryId)).unique();
+}
+
+export const registerBotNoteDraft = mutation({
+  args: { ...storeArgs, target: botNoteTarget },
+  returns: v.boolean(),
+  handler: async (ctx, { token, storeId, target }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    checkDraftTargets([target]);
+    const { workspaceId, scope, entryId } = target;
+    if (await botNoteErased(ctx, workspaceId, scope, entryId)) return false;
+    if (!await botWorkspaceOwner(ctx, workspaceId)) throw new ConvexError({ kind: 'notFound', message: 'This Bot workspace is unavailable.' });
+    if (!await noteDraftCopy(ctx, tokenId, storeId, target)) {
+      await ctx.db.insert('botNoteDraftCopies', { tokenId, storeId, workspaceId, kind: scope.kind, scopeId: scope.id, entryId });
+    }
+    return true;
+  },
+});
+
+export const botNoteDraftErasures = query({
+  args: { ...storeArgs, cursor: v.optional(v.string()) },
+  returns: v.object({ targets: v.array(botNoteTarget), cursor: v.union(v.string(), v.null()) }),
+  handler: async (ctx, { token, storeId, cursor }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    const page = await ctx.db.query('botNoteDraftCopies').withIndex('by_store_pending',
+      q => q.eq('tokenId', tokenId).eq('storeId', storeId).eq('confirmed', undefined)).paginate({ numItems: 32, cursor: cursor ?? null });
+    const targets = await Promise.all(page.page.map(async ({ workspaceId, kind, scopeId, entryId }) => {
+      const scope = { kind, id: scopeId };
+      return await botNoteErased(ctx, workspaceId, scope, entryId) ? { workspaceId, scope, entryId } : null;
+    }));
+    return { targets: targets.filter(t => t !== null), cursor: page.isDone ? null : page.continueCursor };
+  },
+});
+
+export const confirmBotNoteDraftErasures = mutation({
+  args: { ...storeArgs, targets: v.array(botNoteTarget) },
+  returns: v.array(botNoteTarget),
+  handler: async (ctx, { token, storeId, targets }) => {
+    const { id: tokenId } = await checkPhoneToken(ctx, token);
+    checkDraftStoreId(storeId);
+    checkDraftTargets(targets);
+    const confirmed: BotNoteTarget[] = [];
+    for (const target of targets) {
+      const copy = await noteDraftCopy(ctx, tokenId, storeId, target);
+      if (!copy || !await botNoteErased(ctx, target.workspaceId, target.scope, target.entryId)) continue;
+      if (!copy.confirmed) await ctx.db.patch('botNoteDraftCopies', copy._id, { confirmed: true });
+      confirmed.push(target);
+    }
+    return confirmed;
+  },
+});
+
 export const editBotProfile = mutation({
   args: { token: v.string(), runnerId: v.string(), edit: botProfileEdit },
   returns: v.id('commands'),
@@ -767,10 +848,14 @@ export const actOnBotWorkspace = mutation({
       : action.kind === 'task.stop' ? workspace.tasks.some(task => task.id === action.taskId)
       : workspace.notes.some(note => note.scopeId === action.scope.id && note.scope === action.scope.kind);
     if (!visible) throw new ConvexError({ kind: 'notFound', message: 'That work is unavailable on this device.' });
+    if ((action.kind === 'note.edit' || action.kind === 'note.remove') &&
+        await botNoteErased(ctx, input.workspaceId, action.scope, action.entryId)) {
+      throw new ConvexError({ kind: 'notFound', message: 'This Bot memory note was permanently erased.' });
+    }
     if (input.operationId.length > 128 || ('text' in action && action.text.length > (action.kind === 'group.post' ? 30_000 : 300))) {
       throw new ConvexError({ kind: 'badArgs', message: 'The Bot action is too long.' });
     }
-    return queue(ctx, runnerId, 'botDeviceAction', undefined, input);
+    return queue(ctx, runnerId, 'botDeviceAction', undefined, input, botNoteCommand(input));
   },
 });
 
@@ -1464,14 +1549,15 @@ async function knownRunner(ctx: QueryCtx, runnerId: string): Promise<string> {
 // what the runner's own pendingCommands reads. One that waits too long goes
 // (sync:pruneFiles, COMMAND_KEEP_MS). Its photos are recorded in commandFiles
 // so a delete elsewhere sees they're still on their way (sync.ts storageInUse).
-async function queue(ctx: MutationCtx, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk' | 'schedule' | 'picture' | 'press' | 'slashCommands' | 'interrupt' | 'designReviews' | 'respondReview' | 'botProfileEdit' | 'botDeviceAction', threadId: string | undefined, args: Record<string, unknown>) {
+async function queue(ctx: MutationCtx, runnerId: string, kind: 'send' | 'respond' | 'update' | 'create' | 'page' | 'share' | 'quickAsk' | 'schedule' | 'picture' | 'press' | 'slashCommands' | 'interrupt' | 'designReviews' | 'respondReview' | 'botProfileEdit' | 'botDeviceAction', threadId: string | undefined, args: Record<string, unknown>, botNote?: Doc<'commands'>['botNote']) {
   let n = 0;
   let bytes = docBytes(args);
   for await (const c of ctx.db.query('commands').withIndex('by_runner_state', (q) => q.eq('runnerId', runnerId).eq('state', 'pending'))) {
     bytes += docBytes(c);
     if (++n >= WAITING_PER_RUNNER || bytes > WAITING_BYTES_PER_RUNNER) throw new ConvexError({ kind: 'tooMany', message: 'Too much is waiting for that runner: it takes it when it next comes online.' });
   }
-  const commandId = await queued(ctx, { runnerId, ...(threadId ? { threadId } : {}), kind, args, createdAt: Date.now() });
+  const commandId = await queued(ctx, { runnerId, ...(threadId ? { threadId } : {}), kind, args, createdAt: Date.now(),
+    ...(kind === 'botDeviceAction' ? { botDeviceReceiptVersion: 1 } : {}), ...(botNote ? { botNote } : {}) });
   for (const image of Array.isArray(args.images) ? (args.images as { storageId: Id<'_storage'> }[]) : []) await ctx.db.insert('commandFiles', { storageId: image.storageId, commandId });
   return commandId;
 }

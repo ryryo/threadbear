@@ -52,7 +52,11 @@ The shared files most features hook into:
   app's `gpui/src/bots.rs` owns the workspace view. `third_party/dsbot/`
   records the pinned DS-Bot code, original licences and ported files. Keep
   the release compatibility checks when taking the UI out of a fork with
-  Bot-linked data on disk.
+  Bot-linked data on disk. The settings profile uses the existing URL panel
+  renderer and the original React components and styles in
+  `runner/src/bots/profile-panel/`. After editing its JavaScript or labels,
+  run `node scripts/build-bot-profile-panel.mjs` to update the asset shipped
+  with the Runner.
 - `runner/src/threadbear-mcp.ts`: the agent tools (`buildThreadbearTools`)
   and the instructions agents get (`SHOWING_THE_USER`, `FILING_PROJECTS`).
 - `runner/src/runner.ts`: the thread engine. `runner/src/rpc.ts`: method

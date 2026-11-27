@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as botWorkspaceMoves from "../botWorkspaceMoves.js";
 import type * as boxHooks from "../boxHooks.js";
 import type * as boxImage from "../boxImage.js";
 import type * as boxMachine from "../boxMachine.js";
@@ -60,6 +61,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  botWorkspaceMoves: typeof botWorkspaceMoves;
   boxHooks: typeof boxHooks;
   boxImage: typeof boxImage;
   boxMachine: typeof boxMachine;

@@ -575,4 +575,259 @@ test('two paired devices keep a note deletion receipt through a lost reply and a
   assert.deepEqual(conflict, { outcome: 'conflict', revision: deletion.revision, rows: [], draft: 'Never omit the date' });
   assert.deepEqual(memory.list(h.runner.isoNow().slice(0, 10)), []);
   assert.equal(memory.history().filter(row => row.op === 'remove').length, 1);
+
+  memory.erase(keep.id, 'owner-erasure-fixture', memory.revision(), h.runner.isoNow(), () => {});
+  const late = await send(webToken, { ...edit, operationId: 'offline-after-erasure' });
+  const lateAction = await take(late);
+  await assert.rejects(reopened.runtime.applyDeviceAction(lateAction, String), /permanently erased/);
+  await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId: late, ok: false, note: 'This memory note was permanently erased' });
+  assert.equal(s.row(late).result, undefined);
+  assert.deepEqual(s.row(late).args, {});
+  assert.deepEqual(memory.list(h.runner.isoNow().slice(0, 10)), []);
+});
+
+test('the mirror keeps a scoped erasure through stale projections, paired edits and Runner handover', async () => {
+  const s = await setup();
+  const note = { id: 'abcd', text: '削除する合成覚書', pinned: false };
+  const secondScopeNote = { ...note, text: '別のスコープに残す覚書' };
+  const other = { ...note, id: 'eeee', text: '同じスコープに残す覚書' };
+  const workspaceId = 'p10-mirror-workspace';
+  const identity = { workspaceId, epoch: 1 };
+  const scope = { kind: 'bot', id: 'editor' };
+  const workspace = {
+    ...identity, ownerRunnerId: MINI, profiles: [], tasks: [], requests: [], groups: [],
+    notes: [
+      { scope: 'bot', scopeId: scope.id, revision: 'old', rows: [note, other] },
+      { scope: 'bot', scopeId: 'reader', revision: 'old', rows: [secondScopeNote] },
+    ],
+  };
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const publish = () => call(s.ctx, sync.setBotWorkspace, { ...binding, workspace });
+  const erase = (overrides = {}) => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, ...identity, scope, entryId: note.id, ...overrides });
+  const queue = (operationId: string, scopeId = scope.id, entryId = note.id) => call(s.ctx, phone.actOnBotWorkspace, {
+    token: TOKEN, runnerId: MINI, input: { ...identity, operationId, action: {
+      kind: 'note.edit', scope: { ...scope, id: scopeId }, entryId, expectedRevision: 'old', text: note.text,
+    } },
+  });
+  const take = (commandId: string) => call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId, attempt: ATTEMPT });
+  await publish();
+  const waiting = await queue('waiting');
+  const inFlight = await queue('in-flight');
+  const independent = await queue('other-scope', 'reader');
+  assert.equal(await take(inFlight), true);
+  // Its arguments still identify the scope even if an older backend queued it.
+  await s.ctx.db.patch('commands', inFlight, { botNote: undefined });
+  assert.equal(await outcome(erase({ key: CLOUD_KEY })), 'forbidden');
+  assert.equal(await outcome(erase({ key: OWNER })), 'forbidden');
+  assert.equal(await outcome(erase({ startedAt: 'stale-release' })), 'forbidden');
+  assert.equal(await outcome(erase({ epoch: 2 })), 'forbidden');
+  await erase();
+  await erase();  // retry after the erasure acknowledgment was lost
+  assert.equal(s.rows('botWorkspaceErasedNotes').length, 1);
+  const visible = async () => (await call(s.ctx, phone.botWorkspaces, { token: TOKEN }))[0].notes;
+  const safe = [{ ...workspace.notes[0], rows: [other] }, workspace.notes[1]];
+  assert.deepEqual(await visible(), safe);
+  await publish();
+  assert.deepEqual(await visible(), safe, 'an old same-epoch projection cannot reintroduce erased rows');
+  assert.equal(await outcome(queue('paired-offline-edit')), 'notFound');
+  const choices = await call(s.ctx, sync.pendingCommands, { key: MINI_KEY, runnerId: MINI });
+  assert.ok(!choices.some((row: { commandId: string }) => row.commandId === waiting));
+  assert.equal(await take(waiting), false);
+  assert.deepEqual(s.row(waiting).args, {});
+  assert.equal(await take(inFlight), false, 'a lost take reply must not start an erased edit');
+  await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId: inFlight, ok: true, note: note.text,
+    result: JSON.stringify({ outcome: 'conflict', rows: [note], draft: note.text }) });
+  assert.equal((await s.seen(inFlight)).state, 'failed');
+  assert.ok(!JSON.stringify(s.row(inFlight)).includes(note.text));
+  assert.equal(await take(independent), true);
+  assert.equal(await outcome(queue('unrelated-entry', scope.id, other.id)), 'ok');
+
+  const moves = load('botWorkspaceMoves');
+  const pack = Buffer.from('sealed fixture');
+  const checksum = await sha256('sealed fixture');
+  const moveId = 'p10-erasure-move';
+  const noteErasure = await call(s.ctx, moves.verifyBotWorkspaceNoteErasures, { ...binding, workspaceId, moveId });
+  await call(s.ctx, moves.begin, { ...binding, ...identity, moveId, targetRunnerId: CLOUD, checksum,
+    bytes: pack.length, parts: 1, sealedChecksum: checksum, threadIds: [], noteErasureRevision: noteErasure.revision });
+  assert.equal(await outcome(erase()), 'forbidden', 'even the owner must wait for an in-progress move');
+  await call(s.ctx, moves.putPart, { ...binding, workspaceId, moveId, index: 0, data: pack.toString('base64') });
+  const recipient = { ...binding, key: CLOUD_KEY, runnerId: CLOUD };
+  const received = await call(s.ctx, moves.verifyBotWorkspaceNoteErasures, { ...recipient, workspaceId, moveId });
+  await call(s.ctx, moves.claim, { ...recipient, workspaceId, moveId, checksum, noteErasureRevision: received.revision });
+  assert.equal(await outcome(erase()), 'forbidden');
+  await call(s.ctx, sync.setBotWorkspace, { key: CLOUD_KEY, runnerId: CLOUD, startedAt: 'x',
+    workspace: { ...workspace, ownerRunnerId: CLOUD, epoch: 2 } });
+  assert.deepEqual(s.rows('botWorkspaces').find(row => row.runnerId === CLOUD)?.workspace.notes, safe);
+});
+
+test('the mirror scrubs finished note results by scope, with resumable batches and no change to other receipts', async () => {
+  const s = await setup();
+  const note = { id: 'abcd', text: '消す合成覚書', pinned: false };
+  const companion = { ...note, id: '1234', text: '残す合成覚書' };
+  const workspaceId = 'scoped-device-receipts';
+  const identity = { workspaceId, epoch: 1 };
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const scope = { kind: 'bot', id: 'editor' };
+  const otherScope = { ...scope, id: 'reader' };
+  const workspace = {
+    ...identity, ownerRunnerId: MINI, profiles: [], tasks: [], requests: [], groups: [],
+    notes: [scope, otherScope].map(ref => ({ scope: ref.kind, scopeId: ref.id, revision: 'before', rows: [note, companion] })),
+  };
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace });
+  const queueEdit = (operationId: string, whose = scope, item = note) => call(s.ctx, phone.actOnBotWorkspace, {
+    token: TOKEN, runnerId: MINI, input: { ...identity, operationId, action: {
+      kind: 'note.edit', scope: whose, entryId: item.id, expectedRevision: 'before', text: item.text,
+    } },
+  });
+  const take = (commandId: string) => call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId, attempt: ATTEMPT });
+  const finish = (commandId: string, draft = note.text) => call(s.ctx, sync.finishCommand, {
+    key: MINI_KEY, commandId, ok: true, result: JSON.stringify({ outcome: 'conflict', revision: 'old-result', rows: [note, companion], draft }),
+  });
+  const unrelated = await queueEdit('other-scope', otherScope);
+  await take(unrelated);
+  await finish(unrelated);
+  const unrelatedReceipt = await s.seen(unrelated);
+  const completed = [];
+  for (let index = 0; index < 18; index++) {
+    const id = await queueEdit('finished-' + index);
+    await take(id);
+    await finish(id);
+    completed.push(id);
+  }
+  const later = await queueEdit('late-other-note', scope, companion);
+  await take(later);
+  const waiting = await queueEdit('queued');
+  const last = completed.at(-1)!;
+  await s.ctx.db.patch('commands', last, { note: note.text });
+  const erase = () => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, ...identity, scope, entryId: note.id });
+  assert.deepEqual(await erase(), { done: false });
+  assert.ok(s.rows('botWorkspaceErasedNotes')[0].receiptCursor, 'the first transaction persists progress');
+  const safeReceipt = { state: 'done', result: { outcome: 'conflict', revision: 'old-result', rows: [companion] } };
+  for (const id of completed) assert.deepEqual(await s.seen(id),
+    id === last ? { ...safeReceipt, note: 'This Bot memory note was permanently erased.' } : safeReceipt,
+    'readers already see the filtered receipt');
+  await finish(later, '別件の下書き');
+  assert.deepEqual((await s.seen(later)).result, { ...safeReceipt.result, draft: '別件の下書き' });
+  assert.deepEqual(await erase(), { done: true }, 'a retry resumes the cleanup from its saved cursor');
+  assert.deepEqual(await erase(), { done: true }, 'a repeated completed request leaves the same receipt');
+  assert.equal(s.row(waiting).state, 'failed');
+  assert.deepEqual(s.row(waiting).args, {});
+  assert.ok([...completed, later, waiting].every(id => !JSON.stringify(s.row(id)).includes(note.text)));
+  assert.deepEqual(await s.seen(unrelated), unrelatedReceipt);
+  assert.ok(s.row(unrelated).result.includes(note.text), 'note IDs are local to a scope');
+});
+
+test('a legacy result with possible erased text prevents a complete mirror acknowledgment until normal prune', async () => {
+  const s = await setup();
+  const workspaceId = 'legacy-note-receipt';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const identity = { workspaceId, epoch: 1 };
+  const scope = { kind: 'bot', id: 'editor' };
+  const note = { id: 'abcd', text: '旧端末に残った覚書', pinned: false };
+  const workspace = { ...identity, ownerRunnerId: MINI, profiles: [], tasks: [], requests: [], groups: [],
+    notes: [{ scope: 'bot', scopeId: scope.id, revision: 'old', rows: [note] }] };
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace });
+  const queue = (operationId: string) => call(s.ctx, phone.actOnBotWorkspace, { token: TOKEN, runnerId: MINI,
+    input: { ...identity, operationId, action: { kind: 'note.edit', scope, entryId: note.id, expectedRevision: 'old', text: note.text } } });
+  const completeLegacy = async (operationId: string, result: object) => {
+    const commandId = await queue(operationId);
+    await call(s.ctx, sync.takeCommand, { key: MINI_KEY, commandId, attempt: ATTEMPT });
+    await call(s.ctx, sync.finishCommand, { key: MINI_KEY, commandId, ok: true, result: JSON.stringify(result) });
+    await s.ctx.db.patch('commands', commandId, { botNote: undefined, botDeviceReceiptVersion: undefined });
+    return commandId;
+  };
+  const legacy = await completeLegacy('ambiguous-legacy', { outcome: 'conflict', revision: 'old', rows: [], draft: note.text });
+  const harmless = await completeLegacy('safe-legacy', { outcome: 'saved', revision: 'old' });
+  const knownPending = await queue('legacy-pending');
+  // Rolling deploy: an older queue wrote the arguments without a receipt scope.
+  await s.ctx.db.patch('commands', knownPending, { botNote: undefined, botDeviceReceiptVersion: undefined });
+  const oldReceipt = await s.seen(legacy);
+  const erase = () => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, ...identity, scope, entryId: note.id });
+  assert.deepEqual(await erase(), { done: false });
+  assert.deepEqual(await erase(), { done: false, waitingForLegacy: true });
+  assert.deepEqual(await s.seen(legacy), oldReceipt, 'do not infer a scope for the existing result');
+  assert.equal(s.row(knownPending).state, 'failed', 'scope confirmed from pending args, so it can already close');
+  assert.deepEqual(s.row(knownPending).args, {});
+  await later(24 * 60 * 60_000 + 5, () => call(s.ctx, sync.pruneOld, {}));
+  assert.equal(await outcome(s.seen(legacy)), 'notFound');
+  assert.equal(await outcome(s.seen(harmless)), 'notFound');
+  assert.deepEqual(await erase(), { done: true });
+  assert.deepEqual(await erase(), { done: true });
+  assert.equal(s.rows('botWorkspaceErasedNotes').length, 1);
+});
+
+test('a paired device can check exact erasure records for saved drafts even when the old scope is no longer mirrored', async () => {
+  const s = await setup();
+  const workspaceId = 'draft-workspace';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const scope = { kind: 'bot', id: 'desk' };
+  const entryId = 'same-note-id';
+  const workspace = { workspaceId, epoch: 1, ownerRunnerId: MINI, profiles: [], notes: [], groups: [], requests: [], tasks: [] };
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace });
+  const target = { workspaceId, scope, entryId };
+  const targets = [target, { ...target, workspaceId: 'other-workspace' }, { ...target, scope: { ...scope, kind: 'group' } },
+    { ...target, scope: { ...scope, id: 'other-bot' } }, { ...target, entryId: 'expired-not-erased' }];
+  const read = (token = TOKEN, list = targets) => call(s.ctx, phone.botNoteErasures, { token, targets: list });
+  assert.deepEqual(await read(), [false, false, false, false, false]);
+  assert.equal(await outcome(read('unpaired')), 'auth');
+  assert.equal(await outcome(read(TOKEN, Array.from({ length: 33 }, () => target))), 'badArgs');
+  await call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, ...target, epoch: 1 });
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: null });
+  assert.deepEqual(await read(), [true, false, false, false, false]);
+});
+
+test('a note erasure waits for each paired draft store without confusing a different scope', async () => {
+  const s = await setup();
+  const workspaceId = 'managed-drafts';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const target = { workspaceId, scope: { kind: 'bot', id: 'desk' }, entryId: 'same-note-id' };
+  const other = { ...target, scope: { kind: 'group', id: 'desk' } };
+  const a = '9039c2bf-a2ba-437e-9f1e-074a66f92c52';
+  const b = '68b5794d-7a41-486c-b2c6-f38cfde8a441';
+  const second = 'second-paired-store';
+  const { sha256 } = load('lib') as { sha256: (raw: string) => Promise<string> };
+  const secondId = await s.ctx.db.insert('tokens', { hash: await sha256(second), name: 'second', kind: 'browser', expiresAt: Date.now() + 60_000, createdAt: 1 });
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: {
+    workspaceId, epoch: 1, ownerRunnerId: MINI, profiles: [], notes: [], groups: [], requests: [], tasks: [],
+  } });
+  const register = (storeId: string, note = target, token = TOKEN) => call(s.ctx, phone.registerBotNoteDraft, { token, storeId, target: note });
+  const pending = (storeId: string, token = TOKEN) => call(s.ctx, phone.botNoteDraftErasures, { token, storeId });
+  const confirm = (storeId: string, notes = [target], token = TOKEN) => call(s.ctx, phone.confirmBotNoteDraftErasures, { token, storeId, targets: notes });
+  const erase = (note = target) => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, epoch: 1, ...note });
+
+  assert.equal(await register(a), true);
+  assert.equal(await register(a), true);
+  assert.equal(await register(b), true);
+  assert.equal(await register(a, target, second), true);
+  assert.equal(await register(a, other), true);
+  assert.deepEqual(await confirm(a), []);
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.equal(await register(b), false, 'the old write cannot make another copy after the erasure');
+  assert.deepEqual(await pending(a), { targets: [target], cursor: null });
+  assert.deepEqual(await confirm(a, [other]), []);
+  assert.deepEqual(await confirm(a), [target]);
+  assert.deepEqual(await confirm(a), [target], 'a lost confirmation can be retried');
+  assert.deepEqual(await pending(b), { targets: [target], cursor: null });
+  assert.deepEqual(await confirm(b), [target]);
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.deepEqual(await pending(a, second), { targets: [target], cursor: null });
+  await s.ctx.db.patch('tokens', secondId, { revokedAt: Date.now() });
+  assert.equal(await outcome(confirm(a, [target], second)), 'auth');
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true }, 'revoking a token does not erase its copy');
+});
+
+test('the current owner can complete an erasure when the final registered store confirms', async () => {
+  const s = await setup();
+  const workspaceId = 'one-managed-draft';
+  const binding = { key: MINI_KEY, runnerId: MINI, startedAt: 'x' };
+  const target = { workspaceId, scope: { kind: 'bot', id: 'desk' }, entryId: 'same-note-id' };
+  const storeId = '9039c2bf-a2ba-437e-9f1e-074a66f92c52';
+  await call(s.ctx, sync.setBotWorkspace, { ...binding, workspace: {
+    workspaceId, epoch: 1, ownerRunnerId: MINI, profiles: [], notes: [], groups: [], requests: [], tasks: [],
+  } });
+  assert.equal(await call(s.ctx, phone.registerBotNoteDraft, { token: TOKEN, storeId, target }), true);
+  const erase = () => call(s.ctx, sync.eraseBotWorkspaceNote, { ...binding, epoch: 1, ...target });
+  assert.deepEqual(await erase(), { done: false, waitingForDevices: true });
+  assert.deepEqual(await call(s.ctx, phone.confirmBotNoteDraftErasures, { token: TOKEN, storeId, targets: [target] }), [target]);
+  assert.deepEqual(await erase(), { done: true });
 });

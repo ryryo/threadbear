@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { Given, Then, When } from '@cucumber/cucumber';
 import { GpuiDriver } from '../support/gpui.ts';
+import { okValue } from '../support/driver.ts';
 import type { ThreadbearWorld } from '../support/world.ts';
 import { BOT_FIXTURE_REPLY } from '../../runner/test/helpers/managed-runner.ts';
 
-type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string; requestSource?: string };
+type BotWorld = ThreadbearWorld & { firstBotThread?: string; secondBotThread?: string; requestSource?: string; attachment?: string; attachmentEvents?: unknown[]; profileUrl?: string; libraryPhoto?: string };
 
 Given('the app is connected to an isolated Bot Runner', async function (this: BotWorld) {
   await this.until('the app connected to the Bot Runner', d => d.connection === 'connected', 30_000);
@@ -140,6 +142,359 @@ When("I open the Bot's Conversations tab", async function (this: BotWorld) {
 
 When("I open the Bot's Memory tab", async function (this: BotWorld) {
   await click(this, 'Memory');
+});
+
+type ProfilePage = { key: string; hidden?: boolean; loading?: boolean; hasKeyboard?: boolean };
+const profilePages = (dump: unknown) => (dump as { webPanels?: { pages?: ProfilePage[] } }).webPanels?.pages ?? [];
+
+When('I narrow the window beside Highlights', async function (this: BotWorld) {
+  await this.app.do({ cmd: 'resize', w: 1180, h: 800 });
+});
+
+function profileField(label: string) {
+  return `document.querySelector('[aria-label="${label}"]')`;
+}
+
+async function profileValue(world: BotWorld, js: string) {
+  return (JSON.parse(okValue(await world.app.do({ cmd: 'webPanel', do: 'eval', key: world.profileUrl, js }))) as { value?: unknown }).value;
+}
+
+When('I open the original Bot profile editor', async function (this: BotWorld) {
+  await click(this, 'Settings');
+  await click(this, 'Open profile editor');
+  this.profileUrl = await this.until('the original profile page laid out and loaded', dump =>
+    profilePages(dump).find(page => page.key.startsWith('http://127.0.0.1:') && page.key.includes('/?lang=') && !page.hidden && page.loading === false)?.key,
+  75_000);
+});
+
+Then('the original profile cards show the Bot {string}', async function (this: BotWorld, name: string) {
+  assert.equal(await profileValue(this, 'document.querySelectorAll(".bt-set-card").length'), 3);
+  assert.equal(await profileValue(this, 'getComputedStyle(document.querySelector(".bt-set-card")).borderRadius'), '12px');
+  assert.equal(await profileValue(this, profileField('Name') + '.value'), name);
+});
+
+Then('the original memory card shows {string}', async function (this: BotWorld, label: string) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const shown = await profileValue(this, 'document.querySelector(".bt-mem-row-go")?.parentElement.querySelector(".bt-bs-label")?.textContent');
+    if (shown === label) return;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The original memory card did not show ' + label);
+});
+
+When('I give the Bot {string} the note {string}', async function (this: BotWorld, name: string, text: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { bots } = await client.call<{ bots: { id: string; name: string }[] }>('bots.list', {});
+    const bot = bots.find(item => item.name === name);
+    assert.ok(bot);
+    const scope = { kind: 'bot', id: bot.id };
+    const { revision } = await client.call<{ revision: string }>('bots.memory.scope.read', { scope });
+    await client.call('bots.memory.scope.add', { scope, expectedRevision: revision, text, operationId: randomUUID() });
+  });
+});
+
+When('I manage the memory from the original profile', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-mem-row-go' }));
+});
+
+async function originalAvatarEditor(world: BotWorld) {
+  okValue(await world.app.do({ cmd: 'webPanel', do: 'click', key: world.profileUrl, selector: '.bt-avatar-trigger' }));
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (await profileValue(world, 'Boolean(document.querySelector(".bt-avedit .bt-shape"))')) return;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The original avatar editor did not open');
+}
+
+When("I choose the original avatar's Star and Aurora", async function (this: BotWorld) {
+  await originalAvatarEditor(this);
+  assert.equal(await profileValue(this, 'getComputedStyle(document.querySelector(".bt-avedit")).borderRadius'), '16px');
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star] svg path") !== null'), true);
+  await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star]").click(); document.querySelector(".bt-color[aria-label=Aurora]").click();');
+});
+
+async function avatarPersisted(world: BotWorld, name: string, shape?: string, color?: string) {
+  assert.ok(world.app instanceof GpuiDriver);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { bots } = await world.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { shape?: string }; color?: string }[] }>('bots.list', {}));
+    const bot = bots.find(item => item.name === name);
+    if (bot && bot.color === color && (shape ? bot.avatar?.shape === shape : bot.avatar === undefined)) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail('The Runner did not save the expected avatar for ' + name);
+}
+
+Then('the Bot {string} has the saved Star and Aurora avatar', async function (this: BotWorld, name: string) {
+  await avatarPersisted(this, name, 'star', 'aurora');
+});
+
+Then('the Bot {string} has its default avatar', async function (this: BotWorld, name: string) {
+  await avatarPersisted(this, name);
+});
+
+When('I reset the original avatar to its default', async function (this: BotWorld) {
+  await originalAvatarEditor(this);
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star]").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-color[aria-label=Aurora]").getAttribute("aria-pressed")'), 'true');
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-reset' }));
+});
+
+When('I upload a raster photo using the original Bot editor', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-tab:nth-of-type(2)' }));
+  await chooseAvatarFixture(this, '.bt-dropzone input[type=file]', '#006bea');
+});
+
+async function chooseAvatarFixture(world: BotWorld, selector: string, color: string) {
+  await profileValue(world, `(() => {
+    const input = document.querySelector(${JSON.stringify(selector)});
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 22;
+    const brush = canvas.getContext('2d');
+    brush.fillStyle = ${JSON.stringify(color)}; brush.fillRect(0, 0, 32, 22);
+    canvas.toBlob(blob => {
+      const files = new DataTransfer();
+      files.items.add(new File([blob], 'photo.png', { type: 'image/png' }));
+      input.files = files.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 'image/png');
+  })()`);
+}
+
+async function photoInPanel(world: BotWorld, expression: string, expected?: string): Promise<string> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const value = await profileValue(world, expression);
+    if (typeof value === 'string' && (expected === undefined || expected === value)) return value;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The avatar library did not update the displayed photo');
+}
+
+When('I import a different photo into the original avatar library', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-tab:nth-of-type(3)' }));
+  const oldPhoto = await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src');
+  await chooseAvatarFixture(this, '.bt-lib input[type=file]', '#b03de0');
+  this.libraryPhoto = await photoInPanel(this, 'document.querySelector(".bt-lib-pick img")?.src');
+  assert.notEqual(this.libraryPhoto, oldPhoto);
+});
+
+When('I use the imported photo for the Bot', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-lib-pick' }));
+  assert.ok(this.libraryPhoto);
+  await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src', this.libraryPhoto);
+});
+
+When('I remove the imported photo from the library', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-lib-del' }));
+  await photoInPanel(this, 'document.querySelector(".bt-lib .bt-note")?.textContent', 'No photos in the library yet.');
+});
+
+Then('the Bot {string} still uses the imported photo', async function (this: BotWorld, name: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  assert.ok(this.libraryPhoto);
+  await photoInPanel(this, 'document.querySelector(".bt-avatar-trigger img")?.src', this.libraryPhoto);
+  const { bots } = await this.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { image?: string } }[] }>('bots.list', {}));
+  assert.equal(bots.find(bot => bot.name === name)?.avatar?.image, this.libraryPhoto);
+});
+
+Then('the original Bot {string} shows its saved photo', async function (this: BotWorld, name: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { bots } = await this.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { image?: string } }[] }>('bots.list', {}));
+    const image = bots.find(bot => bot.name === name)?.avatar?.image;
+    if (image && /^data:image\/(?:webp|png);base64,/.test(image) &&
+        await profileValue(this, 'document.querySelector(".bt-avatar-trigger img")?.naturalWidth') === 160) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail('The original avatar crop did not render and save a 160-pixel photo');
+});
+
+When('I set the original profile label to {string}', async function (this: BotWorld, label: string) {
+  const field = profileField('Label');
+  await profileValue(this, field + '.focus();' + field + '.select()');
+  await this.app.do({ cmd: 'webPanel', do: 'focus', key: this.profileUrl });
+  await this.until('the profile card has the keyboard', dump => profilePages(dump).some(page => page.key === this.profileUrl && page.hasKeyboard));
+  await this.app.do({ cmd: 'native-keys', text: label });
+  assert.equal(await profileValue(this, field + '.value'), label);
+  await profileValue(this, profileField('Name') + '.focus()');
+});
+
+Then('the Bot {string} has the label {string}', async function (this: BotWorld, name: string, label: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const driver = this.app;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { bots } = await driver.withManagedRunner(client => client.call<{ bots: { name: string; role: string }[] }>('bots.list', {}));
+    if (bots.find(bot => bot.name === name)?.role === label) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail(`The Runner did not save the expected profile for ${name}`);
+});
+
+When('I close the original Bot profile editor', async function (this: BotWorld) {
+  await click(this, 'Close profile editor');
+});
+
+Then('the old profile view cannot read the Bot', async function (this: BotWorld) {
+  assert.ok(this.profileUrl);
+  const url = new URL(this.profileUrl);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const reply = await fetch(new URL('/api/profile', url), { headers: { 'X-Threadbear-Profile': url.hash.slice(1) } });
+    await reply.body?.cancel();
+    if (reply.status === 403) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail('The closed profile was still readable');
+});
+
+When('I duplicate the Bot from the menu of {string}', async function (this: BotWorld, name: string) {
+  const deadline = Date.now() + 10_000;
+  let row: { x: number; y: number } | undefined;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string; x: number; y: number; role?: string; disabled?: boolean }[];
+    row = labels.find(label => label.label === name && label.role === 'Button' && !label.disabled);
+    if (!row) await new Promise(resolve => setTimeout(resolve, 100));
+  } while (!row && Date.now() < deadline);
+  assert.ok(row, 'The original Bot is in the sidebar');
+  await this.app.do({ cmd: 'click-at', x: row.x, y: row.y, right: true });
+  assert.match(await this.app.do({ cmd: 'context-menus' }), /Duplicate/);
+  await this.app.do({ cmd: 'click', title: 'Duplicate' });
+});
+
+Then('{string} has no conversations or notes', async function (this: BotWorld, name: string) {
+  await click(this, name);
+  await click(this, 'Memory');
+  await click(this, `Bot: ${name}`);
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { bots } = await client.call<{ bots: { id: string; name: string }[] }>('bots.list', {});
+    const bot = bots.find(row => row.name === name);
+    assert.ok(bot);
+    const { conversations } = await client.call<{ conversations: unknown[] }>('bots.get', { botId: bot.id });
+    assert.deepEqual(conversations, []);
+    const { notes } = await client.call<{ notes: unknown[] }>('bots.memory.scope.read', { scope: { kind: 'bot', id: bot.id } });
+    assert.deepEqual(notes, []);
+  });
+});
+
+Then('{string} still has the note {string}', async function (this: BotWorld, name: string, note: string) {
+  await click(this, name);
+  await click(this, 'Memory');
+  await click(this, `Bot: ${name}`);
+  await seeRequestResult(this, note);
+});
+
+Given('a normal Thread called {string} has a saved reply', async function (this: BotWorld, title: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const driver = this.app;
+  await driver.withManagedRunner(async client => {
+    const { thread } = await client.call<{ thread: { id: string } }>('threads.create', { text: '短い編集会議', title, worktree: false });
+    this.attachment = thread.id;
+    for (let i = 0; i < 100; i += 1) {
+      const reply = await client.call<{ threads: { status: string }[] }>('threads.list', { ids: [thread.id] });
+      if (reply.threads[0]?.status === 'idle') {
+        const { events } = await client.call<{ events: unknown[] }>('threads.events', { threadId: thread.id });
+        assert.ok(JSON.stringify(events).includes('日本語の見出し案。'));
+        this.attachmentEvents = events;
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.fail('The normal Thread did not finish its fixture reply.');
+  });
+});
+
+When('I choose the existing Thread {string} for the Bot', async function (this: BotWorld, title: string) {
+  await click(this, 'Attach existing Thread');
+  await click(this, title);
+});
+
+Then('the ordinary Thread has no Bot yet', async function (this: BotWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const { threads } = await this.app.withManagedRunner(client =>
+    client.call<{ threads: { botLink?: unknown }[] }>('threads.list', { ids: [this.attachment] }));
+  assert.equal(threads[0].botLink, undefined);
+});
+
+When('I confirm the Bot attachment', async function (this: BotWorld) {
+  await click(this, 'Attach this Thread');
+});
+
+Then('I see the existing Thread with its saved reply and new Bot link', async function (this: BotWorld) {
+  await this.until('the attached Thread with its original transcript', d => d.selection?.id === this.attachment && d.transcript.state === 'loaded');
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { threads } = await client.call<{ threads: { botLink?: { botId: string } }[] }>('threads.list', { ids: [this.attachment] });
+    assert.ok(threads[0].botLink?.botId);
+    const { events } = await client.call<{ events: unknown[] }>('threads.events', { threadId: this.attachment });
+    assert.ok(this.attachmentEvents);
+    assert.deepEqual(events.slice(0, this.attachmentEvents.length), this.attachmentEvents);
+  });
+});
+
+async function openBotBackups(world: BotWorld) {
+  await openEditorialNotes(world);
+  await click(world, 'Open note backups');
+}
+
+async function openEditorialNotes(world: BotWorld) {
+  await click(world, 'Bots: assistants with their own settings and notes');
+  await click(world, 'Editorial Bot');
+  await click(world, 'Memory');
+  await click(world, 'Bot: Editorial Bot');
+}
+
+When('I open the scoped notes for the Editorial Bot', async function (this: BotWorld) {
+  await openEditorialNotes(this);
+});
+When('I click the permanent erasure control for its note', async function (this: BotWorld) {
+  await click(this, 'Erase note permanently');
+});
+When('I cancel permanent note erasure', async function (this: BotWorld) {
+  await click(this, 'Cancel');
+});
+When('I confirm permanent note erasure', async function (this: BotWorld) {
+  await click(this, 'Erase permanently');
+});
+When('I check note erasure status again', async function (this: BotWorld) {
+  await click(this, 'Check note erasure status');
+});
+Then('the note erasure says {string}', async function (this: BotWorld, expected: string) {
+  const deadline = Date.now() + 10_000;
+  do {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+    if (labels.some(row => row.label === expected)) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.fail(`Could not see the note erasure status: ${expected}`);
+});
+Then('the erased note has no undo action', async function (this: BotWorld) {
+  const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+  assert.equal(labels.some(row => row.label === 'Undo change'), false);
+});
+
+When("I view the backup for the Bot's memory", async function (this: BotWorld) {
+  await openBotBackups(this);
+  await click(this, '2026-11-27T10:00:00.000Z · 10000000');
+});
+
+When('I open the note backups for the Bot', async function (this: BotWorld) {
+  await openBotBackups(this);
+});
+
+When('I back up the current Bot notes', async function (this: BotWorld) {
+  await click(this, 'Back up these notes');
+});
+
+Then('I can open the newly created backup', async function (this: BotWorld) {
+  await click(this, '2026-11-27T11:00:00.000Z · 20000000');
+});
+
+When('I select the backed-up note {string}', async function (this: BotWorld, note: string) {
+  await click(this, note);
+});
+
+When('I confirm restoration of the selected note', async function (this: BotWorld) {
+  await click(this, 'Restore this note');
 });
 
 When('I select {string} in Bot memory', async function (this: BotWorld, scope: string) {

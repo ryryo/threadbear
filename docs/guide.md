@@ -2162,6 +2162,37 @@ From a Bot conversation, choose **Run on another Runner** and give it a brief.
 The owning Runner keeps the Bot settings and memory. **Worker requests** shows
 the runs and opens their results from the original conversation.
 
+In a Bot's **Settings**, choose **Open profile editor** to edit its name,
+label or instructions. Name and label save on Enter or when you leave the
+field. Instructions can have multiple lines and save when you leave the
+field. Escape restores the saved text. The **Memory** card shows how many
+notes this Bot has. Choose **Manage** to open the Bot's Memory tab.
+Select the Bot's picture to choose a character and color, upload a photo,
+or reset its appearance. The list uses the same character or photo.
+In the avatar editor, use **Library** to keep photos on this Runner and reuse
+them for another Bot. A Bot keeps the photo it adopted when you remove that
+photo from the Library.
+
+Right-click a Bot in the list and choose **Duplicate** to start a separate Bot
+with the same profile. In **Conversations**, choose **Attach existing Thread**,
+select a local idle Thread and confirm. The Thread keeps its transcript and
+CLI session. The Bot settings apply when it next runs. Private Bots require
+their own work folder and cannot use these two actions.
+
+In **Memory**, select a Bot or Group scope and choose **Open note backups**.
+Choose **Back up these notes** to save the current notes on this Runner.
+To restore from a backup, choose the backup, select a note and
+confirm **Restore this note**. The Runner checks the scope, current note
+revision and deletion records before bringing back that one note.
+
+To erase a Bot or Group note and its managed copies, choose
+**Erase note permanently** next to that note. For a note you already
+removed from memory, use the same action in **History**. Confirm the scope
+and note in the dialog. **Check note erasure status** shows whether this
+Runner, a previous Runner or a paired device still has a registered copy.
+Conversation history, provider copies, external backups and
+unregistered drafts can still contain the note.
+
 Use **Move Bot workspace** to transfer ownership of the entire workspace.
 Choose the destination Runner and decide where each Project's Bot notes and
 conversation links should go. You can leave a Project on the original Runner.

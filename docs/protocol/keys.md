@@ -411,7 +411,11 @@ anyone's); "any runner" is any good key. Anything not sorted is owner only.
 | `dropShareImages` | its own | the thread's row is its runner's; none: nothing |
 | `setProjects` | its own | `runnerId` |
 | `setBotWorkspace` | its own | Current owning Runner process and workspace epoch |
+| `eraseBotWorkspaceNote` | its own | Current owning process and epoch, while the workspace is unfrozen |
 | `previewBotWorkspaceMove` | its own | Current workspace owner and epoch; only the distinct destination Runner's active Project IDs and titles |
+| `verifyBotWorkspaceNoteErasures` | its own | Current workspace owner or intended receiver of its staged move |
+| `retiredNoteErasure` | its own | Read scoped erasure requests for this Runner’s recorded former workspace |
+| `ackRetiredNoteErasure` | its own | Confirm scoped erasure on this Runner’s recorded former workspace |
 | `beginBotWorkspaceMove` | its own | Source Runner, current workspace epoch and a distinct available target |
 | `putBotWorkspacePart` | its own | Staged source and the declared move and part |
 | `readBotWorkspacePart` | its own | Staged target and the declared move and part |

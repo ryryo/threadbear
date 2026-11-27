@@ -13,7 +13,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/src/bots/repository.ts",
-      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation. Chief activation and replacement at L922–949 are extracted into runner/src/bots/chief-rules.ts and applied atomically to the native team row."
+      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation. The unchanged freshName, duplicateBot and cleanAvatar bodies are extracted into runner/src/bots/ported/roster-copy.js with the source palette. Chief activation and replacement at L922–949 are extracted into runner/src/bots/chief-rules.ts and applied atomically to the native team row."
     },
     {
       "upstreamPath": "ds-bot/test/roster.test.js",
@@ -23,7 +23,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/test/unit/bots/repository.test.ts",
-      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction. L439–480 role replacement, primary order and last Chief protection are adapted in runner/test/unit/bots/chief-rules.test.ts."
+      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction. The concurrent copy case at L1017 is exercised through runner/test/unit/bots/conversations.test.ts. L439–480 role replacement, primary order and last Chief protection are adapted in runner/test/unit/bots/chief-rules.test.ts."
     },
     {
       "upstreamPath": "ds-bot/src/host/threads.js",
@@ -450,6 +450,136 @@
       "portMode": "B",
       "portPath": "runner/src/bots/ported/result-text.js",
       "changes": "Copy headOf verbatim. ThreadStore remains the source of full results."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/bot-settings.js",
+      "upstreamBlob": "c9cf9edb6fad779f5a7ef3b2dfb941b003925cd1",
+      "sha256": "afc97d4b623a9d3670d9b96ba982f02899d0b42d3990f82f6664abdfee1bfb31",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/bot-settings.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
+      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab. Copy CharacterGrid, ShapeRing and AvatarEditor character, upload and library tabs; attach the original hero markup to the native roster."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/styles.js",
+      "upstreamBlob": "748aa1387037762d67c6414dde733e9e4fa47f0d",
+      "sha256": "0a62d4a862c7b5779dacbf286e526d529ab0cb2f55a43601460fe0a4336edd33",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/styles.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.css",
+      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js. Copy the memory action row icon and label layout. Copy the original avatar CSS and evaluate its original inks and spring values in the asset build."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/locales/ja.js",
+      "upstreamBlob": "5c675a05e477c6a2b6113f52551de3272056541d",
+      "sha256": "689f7645e919198f2e25164cdec237b345eee35f6fe1c45e42ec42d914b3cbae",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/locales/ja.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-ja.json",
+      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels. Reuse available Japanese translations of avatar controls and colors. Copy the labels and available host errors for the Avatar Library."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/memory-panel.js",
+      "upstreamBlob": "06f33201da90e21ab0f9c900ac2ef5d8dca23e21",
+      "sha256": "3d1d23fd66aa7549ff7cca351e31d2878598e3c56ebd4e1d99fa50c7e4acbf54",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/memory-panel.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/memory-count.mjs",
+      "changes": "Copy the count cache, subscription and React useMemoryCount hook. The Threadbear adapter exposes only the selected Bot count."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/icons.js",
+      "upstreamBlob": "e49be4496feb3b8dd255c637e3378e53b4aa6868",
+      "sha256": "789d9f24b843b4aa51c4471e7e468c5419c831087452399e0cfc4c7cec3f55d7",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/icons.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
+      "changes": "Copy the original ChevronRightIcon used by the Memory card. Use the original pencil icon and its lineIcon helper in the Avatar editor. Copy the original TrashIcon for the Library."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/avatar.js",
+      "upstreamBlob": "dab3dddc31a1c42c191c197b5ac3bebc454a80e2",
+      "sha256": "fb3090994cc98e42222996a5a9e519447a18932b856d061a1d4c34cc64f5e141",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/avatar.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/avatar-image.js",
+      "changes": "Copy the byte limit, MIME signature checks and data URL normalization, using the MAX_AVATAR_IMAGE constant already copied from the roster."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/characters.js",
+      "upstreamBlob": "b9507288e4bdff62d46f8d9173f73fabe4bc1742",
+      "sha256": "d0c6ded534e8db5cc87bad32d2aca3872733a0b459bc76a643382b2eeeadf954",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/characters.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/characters.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/inks.js",
+      "upstreamBlob": "f46f0f05037276020ebb64241968498da864a98a",
+      "sha256": "f5c9d5a288a6eda1f24a3cd263346dd84e5b052fd90f92338f8b2af9492ba00b",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/inks.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/inks.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/motion.js",
+      "upstreamBlob": "2fe74e75dd9d2c7d8046dcbac30944ee60b32877",
+      "sha256": "bde599e925e88ad30082256dc886219c8db7e8182b8a82bfa6f955f7a9ef11b4",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/motion.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/motion.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/mark.js",
+      "upstreamBlob": "2c11b4c570ec10f34a86690ab6e3421d5a2d392f",
+      "sha256": "6a830112fed908b40901b47078e5db613106a448794745e17fdc4f589b02a158",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/mark.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/avatar-mark.mjs",
+      "changes": "Copy BotMark and its original hooks and states."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/avatar-library.js",
+      "upstreamBlob": "209f8c69f90b684420ee00534ffae214c0243a8b",
+      "sha256": "2b9d5ca8d4cf75afe671ad6592dcbe10c6106686cbd99b8c83ced8e0566b2e3b",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/avatar-library.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/avatar-library.mjs",
+      "changes": "Copy the original raster crop, batching, paging, photo picker and CSS. Adapt only local imports."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/avatar-library.js",
+      "upstreamBlob": "600faf5202cc15b93930b3a180af2f56c3a0d2a2",
+      "sha256": "23948d575f857f8363c6cb7e4e481a59e56ed1fc513764239f66e7de3a15c3ab",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/avatar-library.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/avatar-library.js",
+      "changes": "Retain the original content-hash storage, queue, import results and paging. Use the Runner atomic write and the selected profile lease with a local directory check."
+    },
+    {
+      "upstreamPath": "ds-bot/test/avatar-library.test.js",
+      "upstreamBlob": "08f1f54d83f0a2f9bd44686885d0b10c521fd87b",
+      "sha256": "a7df919e9987873dfb701ddaf6ac504d5356a1e92d5c0d4f5341dba38ce8c77e",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/avatar-library.test.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/test/ported-dsbot/avatar-library.test.js",
+      "changes": "Run seven original storage tests through the ported install function. The read concurrency case releases the first eight reads in reverse order with explicit barriers."
     }
   ]
 }

@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { ErrorCode, RpcError } from '../protocol.ts';
 import type { BotConversations } from './conversations.ts';
-import { botOperationId, type BotRepository } from './repository.ts';
+import { botOperationId, type Bot, type BotRepository } from './repository.ts';
+import { rosterMark } from './roster-mark.mjs';
 import type { BotReviews } from './reviews.ts';
-import { MEMORY_LIMITS } from './ported/memory-entries.js';
+import { entryId, MEMORY_LIMITS, parseMemory } from './ported/memory-entries.js';
 import type { ScopeChange } from './ported/personal-memory.js';
 import type { ScopeRef } from './scoped-memory.ts';
 import type { BotRequests } from './request-service.ts';
@@ -51,6 +52,8 @@ export function botRequestMethods(requests: () => BotRequests): Record<string, (
 }
 
 const privacy = identity.extend({ expectedRevision: z.int().positive(), folder: z.string().trim().min(1), operationId: botOperationId });
+const rosterMarks = z.object({ includeRosterMarks: z.boolean().optional() });
+const withRosterMark = (bot: Bot) => ({ ...bot, rosterMark: rosterMark(bot) });
 
 export function botMethods(workspace: () => { repo: BotRepository; conversations: BotConversations }, reviews?: () => BotReviews, makePrivate?: (p: z.infer<typeof privacy>) => unknown, protectFormat?: () => void, requestsAvailable?: () => boolean): Record<string, (p: Record<string, unknown>) => unknown> {
   const repo = () => workspace().repo;
@@ -65,13 +68,18 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     }),
   }));
   return {
-    'bots.list': () => ({ bots: repo().list() }),
-    'bots.get': method(identity, ({ botId }) => {
+    'bots.list': method(rosterMarks, ({ includeRosterMarks }) => {
+      const bots = repo().list();
+      return { bots: includeRosterMarks ? bots.map(withRosterMark) : bots };
+    }),
+    'bots.get': method(identity.extend(rosterMarks.shape), ({ botId, includeRosterMarks }) => {
       const store = repo();
       const bot = store.get(botId);
-      return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
+      return { bot: includeRosterMarks ? withRosterMark(bot) : bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
     }),
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
+    'bots.duplicate': method(identity.extend({ expectedRevision: z.int().positive(), operationId: botOperationId }),
+      async ({ botId, expectedRevision, operationId }) => ({ bot: await conversations().duplicate(botId, expectedRevision, operationId) })),
     'bots.update': method(settings.partial().extend({ botId, expectedRevision: z.int().positive() }), ({ botId, expectedRevision, ...p }) => ({ bot: repo().update(botId, expectedRevision, p) })),
     'bots.archive': method(identity.extend({ expectedRevision: z.int().positive() }), p => ({ bot: conversations().archive(p.botId, p.expectedRevision) })),
     'bots.settings.conversationModel': method(identity.extend({ expectedRevision: z.int().positive(), threadId: z.uuid().nullable() }), p => ({ bot: conversations().conversationModel(p.botId, p.expectedRevision, p.threadId) })),
@@ -79,6 +87,11 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
       const service = conversations();
       const conversation = service.create(p.botId, p.operationId);
       return { conversation, thread: service.summary(conversation.threadId) };
+    }),
+    'bots.conversations.attach': method(memoryTarget.extend({ expectedRevision: z.int().positive(), operationId: botOperationId }), p => {
+      const service = conversations();
+      const conversation = service.attach(p.botId, p.expectedRevision, p.threadId, p.operationId);
+      return { conversation, thread: service.summary(p.threadId) };
     }),
     'bots.memory.read': method(memoryTarget, p => ({ notes: conversations().notes(p.botId, p.threadId) })),
     'bots.memory.search': method(memoryTarget.extend({ query: z.string().trim().min(1).max(300) }), p => ({ notes: conversations().search(p.botId, p.threadId, p.query) })),
@@ -96,7 +109,15 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
     'bots.memory.scope.add': method(scopeWrite.extend({ text: z.string(), until: z.iso.date().optional() }), p => change(p, { op: 'add', text: p.text, until: p.until })),
     'bots.memory.scope.edit': method(scopeWrite.extend({ entryId: z.string().min(1), text: z.string() }), p => change(p, { op: 'edit', entryId: p.entryId, text: p.text })),
     'bots.memory.scope.remove': method(scopeWrite.extend({ entryId: z.string().min(1) }), p => change(p, { op: 'remove', entryId: p.entryId })),
-    'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => memory(scope, 'read').historyPage(before)),
+    'bots.memory.scope.history': method(scoped.extend({ before: z.uuid().optional() }), ({ scope, before }) => {
+      const page = memory(scope, 'read').historyPage(before);
+      if (scope.kind !== 'bot' && scope.kind !== 'group') return page;
+      return { ...page, rows: page.rows.map(row => {
+        if (row.op !== 'remove' || !row.before || row.erasedEntryId) return row;
+        const [entry, ...rest] = parseMemory(row.before).entries;
+        return entry && !rest.length ? { ...row, erasureTarget: entryId(entry) } : row;
+      }) };
+    }),
     'bots.memory.scope.restore': method(scopeWrite.extend({ changeId: z.uuid() }), p => change(p, { op: 'restore', changeId: p.changeId })),
     ...(reviews && protectFormat && { 'bots.memory.scope.tidy': method(scopeWrite.extend({ botId }), p => reviews().tidy(p.botId, () => memory(p.scope, 'write'), p.expectedRevision, p.operationId, protectFormat)) }),
     ...(makePrivate && { 'bots.settings.privacy': method(privacy, async p => ({ bot: await makePrivate(p) })) }),

@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BotRepository } from '../../src/bots/repository.ts';
 import { BotWorkspaceWire, connectNativeWorkspaceRunner } from '../../src/bots/workspace-wire.ts';
+import { backupMemoryRestoreInput, listManagedMemoryBackups, readManagedMemoryBackup, scopedBackupNotes, selectBackupMemoryNote, captureManagedMemoryBackup, saveManagedMemoryBackup, openManagedMemoryBackup, scrubManagedMemoryBackups } from '../../src/bots/managed-memory-restore.ts';
 import { BotWorkspaceTransfer } from '../../src/bots/workspace-transfer.ts';
 import { BotConversations } from '../../src/bots/conversations.ts';
+import { PersonalMemory } from '../../src/bots/ported/personal-memory.js';
+import { ReviewCheckpoints } from '../../src/bots/review-checkpoints.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { GroupStore } from '../../src/bots/group-store.ts';
 import { nullLogger } from '../../src/log.ts';
-import { sha256 as digest } from '../../src/move-pack.ts';
+import { archive, readTree, sha256 as digest } from '../../src/move-pack.ts';
 import { Projects } from '../../src/projects.ts';
 import { SecretStore } from '../../src/secrets.ts';
 import { makeHarness, tick, tmpDir } from '../helpers/fakes.ts';
@@ -122,6 +125,185 @@ test('the saved owner can freeze a move and only the staged target can claim it 
   assert.equal(await outcome(t.publish(SOURCE, 1)), 'forbidden');
   await t.publish(TARGET, 2);
   assert.deepEqual((await t.deviceList()).map((row: { ownerRunnerId: string; epoch: number }) => [row.ownerRunnerId, row.epoch]), [[TARGET, 2]]);
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources').map(
+    ({ workspaceId, moveId, sourceRunnerId, epoch }) => ({ workspaceId, moveId, sourceRunnerId, epoch }),
+  ), [{ workspaceId: WORKSPACE, moveId: 'move-1', sourceRunnerId: SOURCE, epoch: 1 }]);
+});
+
+test('the last legacy claim and later retired sources persist across repeated moves', async () => {
+  const t = await fixture();
+  await t.begin();
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
+  await t.upload();
+  await t.claim();
+  // Simulate a claim made before this version recorded the retiring source.
+  for (const row of t.rows('botWorkspaceRetiredSources')) await t.ctx.db.delete('botWorkspaceRetiredSources', row._id);
+  const [owner] = t.rows('botWorkspaceOwners');
+  await t.ctx.db.patch('botWorkspaceOwners', owner._id, { retiredSourcesCovered: undefined });
+  const next = { workspaceId: WORKSPACE, moveId: 'move-2', epoch: 2, targetRunnerId: OTHER, checksum: DIGEST,
+    bytes: Buffer.byteLength('sealed fixture'), parts: 1, sealedChecksum: digest(Buffer.from('sealed fixture')),
+    threadIds: [] };
+  assert.equal(await outcome(t.invoke(SOURCE, 'botWorkspaceMoves:begin', next)), 'forbidden');
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
+  assert.equal((await t.invoke(TARGET, 'botWorkspaceMoves:begin', next)).state, 'staged');
+  const sources = () => t.rows('botWorkspaceRetiredSources').map(({ sourceRunnerId, epoch }) => [sourceRunnerId, epoch]);
+  assert.deepEqual(sources(), [[SOURCE, 1]]);
+  const locator = { workspaceId: WORKSPACE, moveId: next.moveId };
+  await t.invoke(TARGET, 'botWorkspaceMoves:putPart', { ...locator, index: 0, data: Buffer.from('sealed fixture').toString('base64') });
+  const claim = () => t.invoke(OTHER, 'botWorkspaceMoves:claim', { ...locator, checksum: DIGEST });
+  assert.equal((await claim()).state, 'claimed');
+  assert.equal((await claim()).state, 'claimed');
+  assert.deepEqual(sources(), [[SOURCE, 1], [TARGET, 2]]);
+  const cancelled = { ...next, moveId: 'move-3', epoch: 3, targetRunnerId: TARGET };
+  await t.invoke(OTHER, 'botWorkspaceMoves:begin', cancelled);
+  await t.invoke(OTHER, 'botWorkspaceMoves:cancel', { workspaceId: WORKSPACE, moveId: cancelled.moveId });
+  assert.deepEqual(sources(), [[SOURCE, 1], [TARGET, 2]]);
+});
+
+test('only the retired process can acknowledge the scoped erasure and unblock its current owner', async () => {
+  const t = await fixture();
+  await t.begin();
+  await t.upload();
+  await t.claim();
+  const loc = { workspaceId: WORKSPACE, moveId: 'move-1', epoch: 1 };
+  const scope = { kind: 'bot', id: 'bot-id' };
+  const entryId = 'same-entry';
+  const expected = { revision: 1, scope, entryId };
+  const pending = (id = SOURCE, args = loc) => t.invoke(id, 'botWorkspaceMoves:retiredNoteErasure', args);
+  const ack = (id = SOURCE, row = expected) => t.invoke(id, 'botWorkspaceMoves:ackRetiredNoteErasure', { ...loc, ...row });
+  const erase = () => call(t.ctx, sync.eraseBotWorkspaceNote, { key: t.key(TARGET), runnerId: TARGET, startedAt: RELEASE,
+    workspaceId: WORKSPACE, epoch: 2, scope, entryId });
+  assert.deepEqual(await pending(), { items: [], cursor: null });
+  assert.deepEqual(await erase(), { done: false, waitingForSources: true });
+  assert.deepEqual(await erase(), { done: false, waitingForSources: true }, 'an offline source is still outstanding');
+  assert.equal(await outcome(pending(OTHER)), 'forbidden');
+  assert.equal(await outcome(pending(SOURCE, { ...loc, epoch: 2 })), 'forbidden');
+  assert.equal(await outcome(t.invoke(SOURCE, 'botWorkspaceMoves:retiredNoteErasure', { ...loc, startedAt: 'old-process' })), 'forbidden');
+  assert.deepEqual(await pending(), { items: [expected], cursor: null });
+  assert.equal(await ack(SOURCE, { ...expected, scope: { ...scope, kind: 'group' } }), false);
+  assert.equal(await outcome(ack(TARGET)), 'forbidden');
+  assert.equal(await ack(), false, 'the sealed transfer copy is still queued for reclamation');
+  await call(t.ctx, moves.discardSealedBotWorkspace, { workspaceId: WORKSPACE, moveId: loc.moveId });
+  assert.equal(await ack(), true);
+  assert.equal(await ack(), true, 'a lost acknowledgment can be safely repeated');
+  assert.deepEqual(await pending(), { items: [], cursor: null });
+  assert.deepEqual(await erase(), { done: true });
+  const [owner] = t.rows('botWorkspaceOwners');
+  await t.ctx.db.patch('botWorkspaceOwners', owner._id, { epoch: 3, transfer: undefined });
+  assert.deepEqual(await call(t.ctx, sync.eraseBotWorkspaceNote, { key: t.key(TARGET), runnerId: TARGET, startedAt: RELEASE,
+    workspaceId: WORKSPACE, epoch: 3, scope, entryId }), { done: false, waitingForSources: true });
+});
+
+test('a retired source can confirm one note while a different scope with the same ID remains pending', async () => {
+  const t = await fixture();
+  const loc = { workspaceId: WORKSPACE, moveId: 'move-1', epoch: 1 };
+  await t.begin();
+  await t.upload();
+  await t.claim();
+  await call(t.ctx, moves.discardSealedBotWorkspace, { workspaceId: WORKSPACE, moveId: loc.moveId });
+  const one = { scope: { kind: 'bot', id: 'scope' }, entryId: 'shared-id' };
+  const two = { scope: { kind: 'group', id: 'scope' }, entryId: 'shared-id' };
+  const erase = (note: typeof one) => call(t.ctx, sync.eraseBotWorkspaceNote, { key: t.key(TARGET), runnerId: TARGET,
+    startedAt: RELEASE, workspaceId: WORKSPACE, epoch: 2, ...note });
+  const pending = () => t.invoke(SOURCE, 'botWorkspaceMoves:retiredNoteErasure', loc);
+  const ack = (item: Record<string, unknown>) => t.invoke(SOURCE, 'botWorkspaceMoves:ackRetiredNoteErasure', { ...loc, ...item });
+  await erase(one);
+  const [prior] = (await pending()).items;
+  await erase(two);
+  assert.equal(await ack({ ...prior, revision: 2 }), false);
+  assert.equal(await ack(prior), true);
+  assert.deepEqual(await erase(one), { done: true });
+  assert.deepEqual(await erase(two), { done: false, waitingForSources: true });
+  const [second] = (await pending()).items;
+  assert.deepEqual(second, { revision: 2, ...two });
+  assert.equal(await ack(second), true);
+  assert.deepEqual(await erase(two), { done: true });
+  assert.deepEqual(await erase(one), { done: true });
+});
+
+test('the retired native Runner erases only the exact scope and retries across a lost reply and restart', async () => {
+  const source = makeHarness(tmpDir());
+  const destination = makeHarness(tmpDir());
+  const oldRoot = join(source.home, 'bots');
+  const repo = new BotRepository(oldRoot, SOURCE);
+  const bot = repo.create({ name: 'Editor', instructions: '' });
+  const identity = repo.workspaceIdentity();
+  const scope = { kind: 'bot', id: bot.id } as const;
+  const now = '2026-11-28T00:00:00Z';
+  const memRoot = join(oldRoot, 'memory', bot.id);
+  const oldMemory = new PersonalMemory(memRoot);
+  const draft = 'private synthetic text on the retired Runner';
+  const stored = oldMemory.change({ op: 'add', text: draft }, 'before-move', 'empty', now);
+  assert.ok(stored.note);
+  const entryId = stored.note.id;
+  const otherBot = repo.create({ name: 'Second Editor', instructions: '' });
+  const otherMemory = new PersonalMemory(join(oldRoot, 'memory', otherBot.id));
+  const otherEntry = otherMemory.change({ op: 'add', text: 'independent synthetic copy' }, 'healthy-note', 'empty', now).note!;
+  const packId = saveManagedMemoryBackup(source.home, captureManagedMemoryBackup(identity,
+    { scope, expectedRevision: stored.revision, operationId: 'retired-backup' }, oldMemory));
+  const fullPackId = randomUUID();
+  const fullPack = join(source.home, 'bot-backups', fullPackId + '.pack');
+  const legacy = archive([...readTree(oldRoot, 'bots'),
+    { path: 'bots/memory/' + bot.id + '/opaque.snapshot', data: Buffer.from(draft) }]);
+  writeFileSync(fullPack, legacy);
+  const projectId = randomUUID();
+  const otherRoot = join(oldRoot, 'memory', 'project-' + projectId);
+  cpSync(memRoot, otherRoot, { recursive: true });
+  const ordinary = source.runner.makeThread({ title: 'Unrelated Thread', text: '' }).st.rec;
+  const backend = await fixture(identity.workspaceId);
+  const secret = new SecretStore(join(destination.home, 'secrets'));
+  let lostReply = true;
+  const wire = (runnerId: string, h: typeof source, allowed = true) => connectNativeWorkspaceRunner(h.runner, {
+    runnerId, store: new BotWorkspaceTransfer(h.home, runnerId, () => {}),
+    supportsNoteErasures: () => true, canScrubRetiredNoteErasures: () => allowed,
+    key: async () => secret.publicKey(),
+    call: async (_kind, method, params) => {
+      const response = await backend.invoke(runnerId, method, params);
+      if (method === 'botWorkspaceMoves:ackRetiredNoteErasure' && params.entryId === entryId && lostReply) {
+        lostReply = false;
+        throw new Error('lost acknowledgment reply');
+      }
+      return response;
+    },
+    open: (bytes, info) => secret.openBytes(bytes, info), validateTarget: () => {}, adopted: () => {},
+  });
+  const sender = wire(SOURCE, source);
+  const receiver = wire(TARGET, destination);
+  await sender.start({ identity, target: TARGET, moveId: 'retired-source', projects: 'detach', idle: () => true });
+  await receiver.poll();
+  await sender.poll();
+  await call(backend.ctx, moves.discardSealedBotWorkspace, { workspaceId: identity.workspaceId, moveId: 'retired-source' });
+  const erase = (botId = bot.id, id = entryId) => call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(TARGET), runnerId: TARGET,
+    startedAt: RELEASE, workspaceId: identity.workspaceId, epoch: 2, scope: { ...scope, id: botId }, entryId: id });
+  assert.deepEqual(await erase(), { done: false, waitingForSources: true });
+  assert.deepEqual(await erase(otherBot.id, otherEntry.id), { done: false, waitingForSources: true });
+  await wire(SOURCE, source, false).poll();
+  assert.equal(oldMemory.list(now)[0]?.id, entryId);
+  await assert.rejects(sender.poll(), /unknown file in its memory scope/);
+  const remaining = openManagedMemoryBackup(source.home, { backupId: fullPackId });
+  assert.ok(Buffer.concat(remaining.files.map(file => file.data)).includes(draft));
+  assert.ok(!Buffer.concat(remaining.files.map(file => file.data)).includes('independent synthetic copy'));
+  assert.equal(otherMemory.list(now).length, 0);
+  assert.deepEqual(await erase(otherBot.id, otherEntry.id), { done: true });
+  assert.deepEqual(await erase(), { done: false, waitingForSources: true });
+  rmSync(fullPack);
+  const state = join(oldRoot, 'state.json');
+  const original = readFileSync(state);
+  writeFileSync(state, JSON.stringify({ ...JSON.parse(original.toString()), ownerEpoch: 2 }));
+  await assert.rejects(wire(SOURCE, source).poll(), /identity does not match/);
+  assert.deepEqual(await erase(), { done: false, waitingForSources: true });
+  writeFileSync(state, original);
+  await assert.rejects(wire(SOURCE, source).poll(), /lost acknowledgment reply/);
+  await wire(SOURCE, source).poll();
+  assert.deepEqual(await erase(), { done: true });
+  assert.equal(oldMemory.list(now).length, 0);
+  const history = oldMemory.history();
+  assert.equal(history.filter(row => row.op === 'erase' && row.entryId === entryId).length, 1);
+  assert.ok(!JSON.stringify(history).includes(draft));
+  const scoped = openManagedMemoryBackup(source.home, { backupId: packId });
+  assert.ok(!Buffer.concat(scoped.files.map(file => file.data)).includes(draft));
+  assert.equal(new PersonalMemory(otherRoot).list(now)[0]?.id, entryId);
+  assert.equal(source.runner.store.load(ordinary.id)?.title, ordinary.title);
 });
 
 test('a cancelled staged move releases only the source with its existing epoch', async () => {
@@ -134,6 +316,43 @@ test('a cancelled staged move releases only the source with its existing epoch',
   assert.equal(await outcome(t.publish(TARGET, 2)), 'forbidden');
   await t.publish(SOURCE, 1);
   assert.deepEqual((await t.deviceList()).map((row: { ownerRunnerId: string; epoch: number }) => [row.ownerRunnerId, row.epoch]), [[SOURCE, 1]]);
+  assert.deepEqual(t.rows('botWorkspaceRetiredSources'), []);
+});
+
+test('the backend reclaims settled sealed parts and protects the active offer from stale cleanup', async () => {
+  const t = await fixture();
+  const locator = { workspaceId: WORKSPACE, moveId: 'move-1' };
+  const cleanup = (moveId = locator.moveId) => call(t.ctx, moves.discardSealedBotWorkspace, { ...locator, moveId });
+  const parts = () => t.rows('botWorkspaceParts');
+  const hasCleanupScheduled = (moveId: string) => t.scheduled.some(job => {
+    const { fn, args } = job as { fn: string; args: { moveId?: string } };
+    return fn.endsWith('discardSealedBotWorkspace') && args.moveId === moveId;
+  });
+  await t.begin();
+  await t.upload();
+  await cleanup();
+  assert.equal(parts().length, 1, 'active parts survive a late cleanup');
+  await t.claim();
+  assert.ok(hasCleanupScheduled(locator.moveId));
+  const oldArgs = { ...locator, epoch: 2, targetRunnerId: OTHER, checksum: DIGEST,
+    bytes: Buffer.byteLength('sealed fixture'), parts: 1, sealedChecksum: digest(Buffer.from('sealed fixture')),
+    threadIds: [] };
+  assert.equal(await outcome(t.invoke(TARGET, 'botWorkspaceMoves:begin', oldArgs)), 'conflict');
+  const moveId = 'move-2';
+  await t.invoke(TARGET, 'botWorkspaceMoves:begin', { ...oldArgs, moveId });
+  await t.invoke(TARGET, 'botWorkspaceMoves:putPart', { ...locator, moveId, index: 0, data: Buffer.from('sealed fixture').toString('base64') });
+  for (let index = 1; index < 17; index++) {
+    await t.ctx.db.insert('botWorkspaceParts', { ...locator, index, data: 'AA==' });
+  }
+  await cleanup();
+  assert.deepEqual(parts().map(row => row.moveId).sort(), ['move-1', 'move-2']);
+  await cleanup();
+  await cleanup();
+  assert.deepEqual(parts().map(row => row.moveId), ['move-2']);
+  await t.invoke(TARGET, 'botWorkspaceMoves:cancel', { ...locator, moveId });
+  assert.ok(hasCleanupScheduled(moveId));
+  await cleanup(moveId);
+  assert.deepEqual(parts(), []);
 });
 
 test('public Bot reservations retain their identity and next run when the workspace claims a new owner', async () => {
@@ -527,4 +746,255 @@ test('the native owner can cancel an unclaimed transfer and keep the source work
   assert.equal(discarded, 1, 'the placed Thread is discarded at the target');
   assert.equal(target.runner.threads.has(chat.threadId), false);
   assert.equal(source.runner.threads.has(chat.threadId), true);
+});
+
+test('a protected move authenticates the current erasure revision and exposes it only to the participating Runners', async () => {
+  const f = await fixture();
+  const scope = { kind: 'bot', id: 'editor' };
+  const entryId = 'a10b';
+  const erase = () => call(f.ctx, sync.eraseBotWorkspaceNote, { key: f.key(SOURCE), runnerId: SOURCE, startedAt: RELEASE,
+    workspaceId: WORKSPACE, epoch: 1, scope, entryId });
+  await erase();
+  await erase();
+  const lookup = (id: string, moveId?: string) => f.invoke(id, 'botWorkspaceMoves:verifyBotWorkspaceNoteErasures', { workspaceId: WORKSPACE, moveId });
+  assert.deepEqual(await lookup(SOURCE), { revision: 1, epoch: 1, ownerRunnerId: SOURCE, rows: [{ scope, entryId }], cursor: null });
+  assert.equal(await outcome(lookup(TARGET, 'move-1')), 'forbidden');
+  assert.equal(await outcome(f.begin()), 'conflict', 'old senders cannot stage unverified packs');
+  const binding = { key: f.key(SOURCE), runnerId: SOURCE, startedAt: RELEASE };
+  const sealed = Buffer.from('sealed fixture');
+  const offer = { ...binding, workspaceId: WORKSPACE, moveId: 'move-1', epoch: 1, targetRunnerId: TARGET, checksum: DIGEST,
+    bytes: sealed.length, parts: 1, sealedChecksum: digest(sealed), threadIds: [] };
+  await call(f.ctx, moves.begin, { ...offer, noteErasureRevision: 1 });
+  assert.deepEqual(await lookup(TARGET, 'move-1'), await lookup(SOURCE));
+  assert.equal(await outcome(lookup(OTHER, 'move-1')), 'forbidden');
+  assert.equal(await outcome(erase()), 'forbidden', 'erasures cannot change during a staged offer');
+  await f.upload();
+  assert.equal(await outcome(f.claim()), 'conflict', 'old receivers cannot claim without examining the pack');
+  await f.invoke(TARGET, 'botWorkspaceMoves:claim', { workspaceId: WORKSPACE, moveId: 'move-1', checksum: DIGEST, noteErasureRevision: 1 });
+  assert.deepEqual(await lookup(TARGET), { revision: 1, epoch: 2, ownerRunnerId: TARGET, rows: [{ scope, entryId }], cursor: null });
+});
+
+test('a native move stops an older backup at the source and carries the erasure to the target', async () => {
+  const home = tmpDir();
+  const stale = tmpDir();
+  const target = tmpDir();
+  const root = join(home, 'bots');
+  const repo = new BotRepository(root, SOURCE);
+  const editor = repo.create({ name: 'Editor' });
+  const identity = repo.workspaceIdentity();
+  const memory = new PersonalMemory(join(root, 'memory', editor.id));
+  const time = '2026-11-27T00:00:00Z';
+  const input = { op: 'add' as const, text: '古い保存から復元されない合成覚書' };
+  const stored = memory.change(input, 'first-operation', 'empty', time);
+  assert.ok(stored.note);
+  cpSync(root, join(stale, 'bots'), { recursive: true });
+  memory.erase(stored.note.id, 'erase-on-owner', stored.revision, time, () => {});
+  const backend = await fixture(identity.workspaceId);
+  await call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(SOURCE), runnerId: SOURCE, startedAt: RELEASE,
+    workspaceId: identity.workspaceId, epoch: identity.epoch, scope: { kind: 'bot', id: editor.id }, entryId: stored.note.id });
+  const keys = new SecretStore(join(target, 'secrets'));
+  const store = new BotWorkspaceTransfer(target, TARGET, () => {});
+  const sender = (local: string) => new BotWorkspaceWire({
+    runnerId: SOURCE, store: new BotWorkspaceTransfer(local, SOURCE, () => {}), supportsNoteErasures: () => true,
+    key: async () => keys.publicKey(), call: (_kind, method, args) => backend.invoke(SOURCE, method, args),
+    open: () => assert.fail('sender must not open an incoming pack'), validateTarget: () => {}, adopted: () => {},
+  });
+  const offer = { identity, target: TARGET, moveId: 'after-erasure', idle: () => true, threadFiles: () => [] };
+  const oldBackup = readTree(join(stale, 'bots'), 'bots');
+  const currentBackup = readTree(root, 'bots');
+  const check = sender(home);
+  await assert.rejects(check.verifyMemoryRestore(oldBackup, identity), /required memory erasure/);
+  await assert.rejects(check.verifyMemoryRestore(currentBackup, { ...identity, epoch: identity.epoch + 1 }), /saved Bot workspace identity/);
+  await check.verifyMemoryRestore(currentBackup, identity);
+  const copy = currentBackup.find(file => file.path === 'bots/state.json')!;
+  await assert.rejects(check.verifyMemoryRestore([...currentBackup, { ...copy, path: 'bots/STATE.JSON' }], identity), /duplicate file/);
+  const oldTools = new BotWorkspaceWire({
+    runnerId: SOURCE, store: new BotWorkspaceTransfer(home, SOURCE, () => {}),
+    key: async () => keys.publicKey(), call: (_kind, method, args) => backend.invoke(SOURCE, method, args),
+    open: () => assert.fail('restore checking does not open a sealed offer'), validateTarget: () => {}, adopted: () => {},
+  });
+  await assert.rejects(oldTools.verifyMemoryRestore(currentBackup, identity), /updated sync/);
+  await assert.rejects(sender(stale).send(offer), /required memory erasure/);
+  assert.equal(await backend.invoke(TARGET, 'botWorkspaceMoves:pending', {}), null);
+  const staleStore = new BotWorkspaceTransfer(stale, SOURCE, () => {});
+  staleStore.abandonPreparation(offer.moveId);
+  const unverified = new BotWorkspaceWire({
+    runnerId: SOURCE, store: staleStore, key: async () => keys.publicKey(),
+    call: (_kind, method, args) => backend.invoke(SOURCE, method,
+      method === 'botWorkspaceMoves:begin' ? { ...args, noteErasureRevision: 1 } : args),
+    open: () => assert.fail('sender must not open an incoming pack'), validateTarget: () => {}, adopted: () => {},
+  });
+  await unverified.send({ ...offer, moveId: 'stale-candidate' });
+  let loseClaimReply = true;
+  const receiver = () => new BotWorkspaceWire({
+    runnerId: TARGET, store, supportsNoteErasures: () => true,
+    key: async () => assert.fail('receiver must not send its own offer'),
+    call: async (_kind, method, args) => {
+      const reply = await backend.invoke(TARGET, method, args);
+      if (method === 'botWorkspaceMoves:claim' && loseClaimReply) {
+        loseClaimReply = false;
+        throw new Error('claim reply lost');
+      }
+      return reply;
+    },
+    open: (bytes, info) => keys.openBytes(bytes, info), validateTarget: () => {}, adopted: () => {},
+  });
+  await assert.rejects(receiver().poll(), /required memory erasure/);
+  assert.equal(store.progress(), undefined, 'the recipient never saves the stale candidate');
+  await unverified.cancel('stale-candidate');
+  await sender(home).send(offer);
+  await assert.rejects(receiver().poll(), /claim reply lost/);
+  assert.equal(store.progress()?.state, 'receiving');
+  await receiver().poll();
+  const moved = new PersonalMemory(join(target, 'bots', 'memory', editor.id));
+  assert.deepEqual(moved.list('2026-11-27'), []);
+  assert.deepEqual(moved.change(input, 'first-operation', 'empty', time), { revision: stored.revision });
+  assert.equal(store.progress()?.state, 'accepted');
+});
+
+test('an owner restores one selected note only after the archive and current workspace agree', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, SOURCE);
+  const bot = repo.create({ name: 'Editor' });
+  const other = repo.create({ name: 'Other' });
+  const identity = repo.workspaceIdentity();
+  const folder = join(root, 'memory', bot.id);
+  const memory = new PersonalMemory(folder);
+  const time = '2026-11-27T00:00:00Z';
+  const saved = memory.change({ op: 'add', text: 'バックアップの覚書' }, 'original', 'empty', time);
+  const outside = new PersonalMemory(join(root, 'memory', other.id));
+  outside.change({ op: 'add', text: '別のBotの覚書' }, 'other-original', 'empty', time);
+  assert.ok(saved.note);
+  const id = saved.note.id;
+  const backupRoot = join(h.home, 'bot-backups');
+  mkdirSync(backupRoot);
+  const backupId = randomUUID();
+  const path = join(backupRoot, backupId + '.pack');
+  const pack = archive(readTree(root, 'bots'));
+  writeFileSync(path, pack);
+  const removed = memory.change({ op: 'remove', entryId: id }, 'forget', saved.revision, time);
+  const current = memory.change({ op: 'add', text: '現在の覚書' }, 'current', removed.revision, time);
+  const input = backupMemoryRestoreInput.parse({
+    backupId, checksum: digest(pack), scope: { kind: 'bot', id: bot.id }, entryId: id,
+    operationId: 'backup-recovery', expectedRevision: current.revision,
+  });
+
+  assert.throws(() => readManagedMemoryBackup(h.home, { ...input, checksum: DIGEST }), /selected checksum/);
+  const symlink = randomUUID();
+  symlinkSync(path, join(backupRoot, symlink + '.pack'));
+  assert.throws(() => readManagedMemoryBackup(h.home, { ...input, backupId: symlink }), /unavailable/);
+  const files = readManagedMemoryBackup(h.home, input);
+  assert.deepEqual(listManagedMemoryBackups(h.home).map(row => row.id), [backupId]);
+  const preview = scopedBackupNotes(files, input.scope, input.checksum);
+  assert.deepEqual(memory.previewBackupNotes(preview), [{ id, text: 'バックアップの覚書' }]);
+  const redact = new PersonalMemory(folder, { redact: text => text.replaceAll('バックアップ', '[redacted]') });
+  assert.deepEqual(redact.previewBackupNotes(preview), []);
+  assert.throws(() => selectBackupMemoryNote(files, { ...input, scope: { kind: 'bot', id: other.id } }), /one matching note/);
+  const backend = await fixture(identity.workspaceId);
+  const wire = connectNativeWorkspaceRunner(h.runner, {
+    runnerId: SOURCE, store: new BotWorkspaceTransfer(h.home, SOURCE, () => {}),
+    supportsNoteErasures: () => true,
+    key: async () => assert.fail('restoring a local backup does not use delivery keys'),
+    call: (_kind, method, args) => backend.invoke(SOURCE, method, args),
+    open: () => assert.fail('restoring a local backup does not open a move'),
+    validateTarget: () => {}, adopted: () => {},
+  });
+  const apply = () => memory.restoreBackupNote(selectBackupMemoryNote(files, input), input.operationId, input.expectedRevision, time, () => {});
+  await assert.rejects(wire.recoverMemory(files, { ...identity, ownerRunnerId: TARGET }, () => assert.fail('foreign owner wrote')),
+    /workspace owner/);
+  await assert.rejects(wire.recoverMemory(files, { ...identity, epoch: 2 }, () => assert.fail('stale epoch wrote')),
+    /saved Bot workspace identity/);
+  const result = await wire.recoverMemory(files, identity, apply);
+  assert.deepEqual(await wire.recoverMemory(files, identity, apply), result);
+  assert.deepEqual(memory.previewBackupNotes(preview), []);
+  assert.deepEqual(memory.list('2026-11-27').map(note => note.text).sort(), ['バックアップの覚書', '現在の覚書']);
+  assert.equal(outside.list('2026-11-27')[0]?.text, '別のBotの覚書');
+  assert.deepEqual(readFileSync(path), pack);
+});
+
+test('scoped backup packs keep current notes, replay the creation, and discard only an erased note', async () => {
+  const home = tmpDir();
+  const repo = new BotRepository(join(home, 'bots'), SOURCE);
+  const bot = repo.create({ name: 'Editor', instructions: 'not a backed up prompt' });
+  const identity = repo.workspaceIdentity();
+  const scope = { kind: 'bot', id: bot.id } as const;
+  const time = '2026-11-27T00:00:00Z';
+  const memory = new PersonalMemory(join(home, 'bots', 'memory', scope.id));
+  const erased = memory.change({ op: 'add', text: '消す覚書' }, 'add-erased', 'empty', time);
+  const kept = memory.change({ op: 'add', text: '残す覚書' }, 'add-keep', erased.revision, time);
+  assert.ok(erased.note && kept.note);
+  const other = { kind: 'group', id: randomUUID() } as const;
+  const otherMemory = new PersonalMemory(join(home, 'bots', 'memory', 'group-' + other.id), { scope: 'group' });
+  const otherNote = otherMemory.restoreBackupNote({ entryId: erased.note.id, file: 'MEMORY.md', checksum: DIGEST,
+    line: memory.files()[0].lines.find(line => line.includes('消す覚書'))!.replace('消す覚書', '同じIDの別Scope') }, 'other', 'empty', time, () => {});
+  const input = { scope, expectedRevision: kept.revision, operationId: 'save-backup' };
+  const capture = captureManagedMemoryBackup(identity, input, memory);
+  const backupId = saveManagedMemoryBackup(home, capture);
+  assert.equal(saveManagedMemoryBackup(home, capture), backupId);
+  const otherId = saveManagedMemoryBackup(home, captureManagedMemoryBackup(identity,
+    { scope: other, expectedRevision: otherNote.revision, operationId: 'another-backup' }, otherMemory));
+  const copied = openManagedMemoryBackup(home, { backupId });
+  assert.doesNotMatch(Buffer.concat(copied.files.map(file => file.data)).toString('utf8'), /not a backed up prompt|add-erased/);
+  assert.deepEqual(scopedBackupNotes(copied.files, other, copied.checksum), []);
+  const untouched = openManagedMemoryBackup(home, { backupId: otherId });
+  const reserve = repo.reserveConversation(scope.id, 'legacy-archive-review');
+  const link = repo.confirmConversation('legacy-archive-review', reserve.threadId);
+  const reviews = new ReviewCheckpoints(join(home, 'bots', 'reviews'));
+  const review = reviews.record({ purpose: 'bot-memory-review', botId: scope.id, conversationId: link.id,
+    threadId: link.threadId, configRevision: 1, scopeRevision: kept.revision,
+    first: 1, through: 2, provider: 'claude', model: 'test', accountId: 'fixture' }, 0, { rejected: 0, changes: [
+    { op: 'edit', id: erased.note.id, before: '消す覚書', text: '消すレビュー' },
+    { op: 'remove', id: kept.note.id, before: '残す覚書' },
+  ] });
+  const legacy = archive(readTree(join(home, 'bots'), 'bots'));
+
+  memory.erase(erased.note.id, 'erase', kept.revision, time, () => {});
+  const tombstone = memory.history().find(row => row.op === 'erase')!;
+  const required = { scope, entryId: erased.note.id };
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  const cleaned = openManagedMemoryBackup(home, { backupId });
+  assert.notEqual(cleaned.checksum, copied.checksum);
+  assert.doesNotMatch(Buffer.concat(cleaned.files.map(file => file.data)).toString('utf8'), /消す覚書/);
+  assert.deepEqual(scopedBackupNotes(cleaned.files, scope, cleaned.checksum).map(row => row.entryId), [kept.note.id]);
+  assert.equal(openManagedMemoryBackup(home, { backupId: otherId }).checksum, untouched.checksum);
+  assert.equal(scopedBackupNotes(untouched.files, other, untouched.checksum)[0]?.entryId, erased.note.id);
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  assert.equal(openManagedMemoryBackup(home, { backupId }).checksum, cleaned.checksum);
+  assert.equal(saveManagedMemoryBackup(home, capture), backupId, 'a stale same-operation retry never rewrites the pack');
+  assert.equal(openManagedMemoryBackup(home, { backupId }).checksum, cleaned.checksum);
+
+  const backend = await fixture(identity.workspaceId);
+  await call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(SOURCE), runnerId: SOURCE, startedAt: RELEASE,
+    workspaceId: identity.workspaceId, epoch: identity.epoch, ...required });
+  const wire = new BotWorkspaceWire({
+    runnerId: SOURCE, store: new BotWorkspaceTransfer(home, SOURCE, () => {}), supportsNoteErasures: () => true,
+    key: async () => assert.fail('local backup uses no delivery keys'), call: (_kind, method, args) => backend.invoke(SOURCE, method, args),
+    open: () => assert.fail('local backup is not a move'), validateTarget: () => {}, adopted: () => {},
+  });
+  await assert.rejects(wire.verifyMemoryRestore(copied.files, identity), /required memory erasure/);
+  await wire.verifyMemoryRestore(cleaned.files, identity);
+  await wire.verifyMemoryRestore(untouched.files, identity);
+
+  const forgotten = memory.change({ op: 'remove', entryId: kept.note.id }, 'forget-saved', memory.revision(), time);
+  const restore = { backupId, scope, checksum: cleaned.checksum, entryId: kept.note.id, operationId: 'restore-saved', expectedRevision: forgotten.revision };
+  await wire.verifyMemoryRestore(cleaned.files, identity);
+  memory.restoreBackupNote(selectBackupMemoryNote(cleaned.files, restore), restore.operationId, restore.expectedRevision, time, () => {});
+  assert.deepEqual(memory.list('2026-11-27').map(note => note.text), ['残す覚書']);
+
+  const legacyId = randomUUID();
+  const legacyPath = join(home, 'bot-backups', legacyId + '.pack');
+  writeFileSync(legacyPath, legacy);
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  const safeLegacy = openManagedMemoryBackup(home, { backupId: legacyId });
+  assert.doesNotMatch(Buffer.concat(safeLegacy.files.map(file => file.data)).toString('utf8'), /消す覚書|消すレビュー/);
+  assert.equal(scopedBackupNotes(safeLegacy.files, other, safeLegacy.checksum)[0]?.entryId, erased.note.id);
+  const reviewFile = safeLegacy.files.find(file => file.path === 'bots/reviews/' + link.id + '.json');
+  const reviewed = JSON.parse(reviewFile!.data.toString());
+  assert.equal(reviewed.cursor, 2);
+  assert.equal(reviewed.reports[0].id, review.id);
+  assert.deepEqual(reviewed.reports[0].changes, [{ op: 'erased', decision: 'erased' }, review.changes[1]]);
+  await wire.verifyMemoryRestore(safeLegacy.files, identity);
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  assert.equal(openManagedMemoryBackup(home, { backupId: legacyId }).checksum, safeLegacy.checksum);
 });

@@ -2368,6 +2368,9 @@ impl Threadbear {
     ) -> impl IntoElement {
         let page = self.home_page();
         let banners = self.render_banners(window, cx);
+        if page != Some(SidebarMode::Bots) || self.open_project().is_some() {
+            self.dismiss_bot_profile(false, cx);
+        }
         // The new-thread page comes up afresh each time it's shown
         // (open_motion.rs): anything else in its place resets its clock.
         if self.pane.is_some()

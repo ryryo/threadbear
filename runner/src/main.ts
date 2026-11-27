@@ -84,7 +84,7 @@ import { RpcServer } from './rpc.ts';
 import { AppSeen } from './app-seen.ts';
 import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
-import { BOT_TRANSFER_FORMAT, checkBotDataFormat, protectBotData, supervisorGuardsBotData } from './bots/format.ts';
+import { BOT_ERASE_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, protectBotData, supervisorGuardsBotData } from './bots/format.ts';
 import { BOT_EXPERIMENT, BotRuntime } from './bots/runtime.ts';
 import { keptGroupCall } from './bots/group-rpc.ts';
 import { acceptKeptBotRequest, BotRequestHandover } from './bots/request-handover.ts';
@@ -93,6 +93,7 @@ import { keptRemember, type RememberInput } from './bots/memory-tool.ts';
 import { method as botMethod } from './bots/rpc.ts';
 import { BotWorkers, requestBotWorker, workerResultParams } from './bots/worker.ts';
 import { connectNativeWorkspaceRunner, workspaceMoveInput, workspaceMovePreviewInput, workspaceMoveReceipt } from './bots/workspace-wire.ts';
+import { backupMemoryCreateInput, backupMemoryPreviewInput, backupMemoryRestoreInput } from './bots/managed-memory-restore.ts';
 import { workspaceMemoryProjects } from './bots/workspace-projects.ts';
 import { botConversationSchedules, botScheduleMethods } from './bots/schedule-rpc.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
@@ -604,6 +605,7 @@ async function main(): Promise<void> {
   // The mirror and the Bot workspace use the same Runner identity. A draining
   // Runner can finish the inputs already in its CLIs, but the workspace moves
   // to the primary along with the process lock.
+  let movesRef: Moves | undefined;
   const syncRunnerId = cfg.sync.runnerId ?? ensureRunnerId(cfg.home);
   const bots = new BotRuntime({
     home: cfg.home, runner: () => runner, owner: () => syncRunnerId,
@@ -612,7 +614,10 @@ async function main(): Promise<void> {
     owns: () => !box && !draining,
     canChangePrivacy: () => !draining && peers.status().length === 0,
     peerOwns: id => peers.owns(id),
+    threadUnavailableForAttachment: id => Boolean(movesRef?.gone(id) || movesRef?.movingOf(id)),
     archiveExporting: () => experimentOn(cfg.home, ARCHIVE_EXPERIMENT),
+    eraseNoteFromMirror: box ? undefined : input => sync.eraseBotWorkspaceNote(input),
+    readyForNoteErasure: () => !box && sync.botManagedNoteErasuresAvailable(),
     withdrawDeviceProfile: async id => {
       if (cfg.sync.url || fs.existsSync(path.join(cfg.home, 'sync-state.json'))) return sync.withdrawBotProfile(id);
       return () => {};
@@ -1022,7 +1027,6 @@ async function main(): Promise<void> {
   };
   const republishRemote = () => runner.publish({ method: 'remoteThreads.updated', params: dressRemote(sync.remoteThreads()) });
   // Set once moves are made, further down; sync leaves out what's moved away.
-  let movesRef: Moves | undefined;
   // A thread here, as a move's other runner needs to know it (moves.ts).
   const describeMove = (id: string) => runner.describeForMove(id, scheduler.list(id).filter((sc) => sc.threadId === id && !sc.finishedAt).length);
   // For a preview: that, and what this runner would leave behind, which only
@@ -1101,6 +1105,7 @@ async function main(): Promise<void> {
     // The phone's commands, through the same methods the app's RPCs use,
     // on whichever runner has the thread.
     ...(box ? {} : {
+      resumeBotNoteErasures: () => bots.resumeNoteErasures(),
       botWorkspace: (scrub: (text: string) => string, excluded?: ReadonlySet<string>) => {
         if (!bots.devicesAvailable()) return null;
         const workspace = bots.devices().snapshot(scrub, excluded);
@@ -1558,6 +1563,8 @@ async function main(): Promise<void> {
   methods['bots.status'] = () => ({
     ...bots.status(), workers: canRunBotWorkers() && sync.botWorkersAvailable(),
     workspaceMoves: bots.workspaceMovesAvailable() && sync.botWorkersAvailable(),
+    rosterOperations: !box && !draining && supervisorGuardsBotData(cfg.home, BOT_ERASE_FORMAT),
+    managedMemoryRestore: bots.workspaceMovesAvailable() && sync.botWorkersAvailable() && sync.botNoteErasuresAvailable() && bots.managedMemoryRestoreAvailable(),
   });
   Object.assign(methods, {
     'bots.workers.targets': async (p: Record<string, unknown>) => {
@@ -1925,6 +1932,9 @@ async function main(): Promise<void> {
         return sync.botWorkerTarget(identity.workspaceId, identity.epoch, target);
       },
       call: (...args) => sync.botWorkspaceMoveCall(...args),
+      supportsNoteErasures: () => sync.botNoteErasuresAvailable(),
+      canScrubRetiredNoteErasures: () => bots.workspaceMovesAvailable() && sync.botRetiredNoteErasuresAvailable() &&
+        supervisorGuardsBotData(cfg.home, BOT_ERASE_FORMAT),
       open: (bytes, info) => runner.secrets.openBytes(bytes, info),
       validateTarget: () => { bots.workspaceMoveStore(); },
       adopted: () => bots.workspaceAdopted(),
@@ -1936,6 +1946,13 @@ async function main(): Promise<void> {
     }
   };
   Object.assign(methods, {
+    'bots.memory.backups': () => bots.listMemoryBackups(),
+    'bots.memory.createBackup': botMethod(backupMemoryCreateInput, input =>
+      bots.createMemoryBackup(input, (...args) => workspaceMoves().recoverMemory(...args))),
+    'bots.memory.backupNotes': botMethod(backupMemoryPreviewInput, input =>
+      bots.previewMemoryBackup(input, (...args) => workspaceMoves().recoverMemory(...args))),
+    'bots.memory.recoverFromBackup': botMethod(backupMemoryRestoreInput, input =>
+      bots.recoverMemoryFromBackup(input, (...args) => workspaceMoves().recoverMemory(...args))),
     'bots.workspace.moveStatus': () => ({ move: bots.workspaceMoveStore().progress() ?? null }),
     'bots.workspace.movePreview': botMethod(workspaceMovePreviewInput, async ({ runnerId }) => {
       workspaceMoves();
@@ -2113,6 +2130,7 @@ async function main(): Promise<void> {
     log,
     clis: updates,
     methods,
+    botProfilePanel: bots.profilePanelControl(),
     remote: peers,
     relay,
     virtualStart: (p) => virtualRunners.start(p),

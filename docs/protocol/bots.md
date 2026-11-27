@@ -34,8 +34,36 @@ can open the Bot page. `bots.memory.read`,
 and `bots.memory.restore` take `botId` and `threadId`; the thread must belong to
 that Bot. Edit and remove take `entryId`, restore takes the history `changeId`,
 and history returns up to 50 changes, newest first, with a `more` cursor.
+
+`bots.status` advertises `profilePanel` when the owning Runner can edit the
+Bot profile. A local authenticated GPUI connection may call
+`bots.profilePanel.open` with the selected `botId`. It receives an `id` and
+a loopback URL, with the short-lived capability in the URL fragment. The
+panel reads only the selected profile and sends one of `name`, `role` or
+`instructions` with its displayed `expectedRevision`. The panel uses the
+same profile revision check as `bots.update`. Switching Bots or closing
+the view sends `bots.profilePanel.close` with that `id`. Disconnecting or
+opening another profile also invalidates the old capability. Its memory
+card can read only the selected Bot's note count. Clicking **Manage**
+sends `bots.profilePanel.memory` with the capability `id` and `botId`
+only to the desktop connection that opened it. The desktop matches both
+against the open view before switching to that Bot's Memory tab. The panel
+can also update that Bot's avatar or color using the same profile revision.
+It keeps the character's original defaults and lets the owner reset either
+appearance field with `null`. Uploaded photos are validated as bounded raster
+data. Its Library can list a page, import a batch of raster photos, or remove
+one content ID through the same local connection. The library stays on this
+Runner. A Bot adopting a photo keeps its own copy, so removing the library
+entry leaves that Bot's appearance intact. The panel link does not enter
+the Thread, Highlights or the project's patch summary.
+
 Bot RPCs require the owner's credential. A Thread key cannot use them at any
 permission level.
+
+For the native roster, `bots.list` and `bots.get` accept `includeRosterMarks`.
+When true, each returned Bot includes a static `rosterMark` with a `light`
+SVG and, when the color changes with the theme, a `dark` SVG. The Bot's
+existing `avatar.image` takes priority when it is a drawable raster image.
 
 `bots.status` reports whether the owner can open the local Bot workspace and,
 when unavailable, gives a reason. Bot conversations stay on the workspace's
@@ -44,6 +72,26 @@ owning Runner. A local copy of real threads keeps them as a read-only transcript
 When given a linked conversation, its login, model and effort
 become the Bot's defaults for new conversations. A null `threadId` restores
 the Runner defaults. Existing conversations retain their own settings.
+
+The owner-only `bots.duplicate` takes `botId`, `expectedRevision` and an
+`operationId`. It creates a fresh Bot with DS-Bot’s copy naming and profile
+rules. A saved receipt makes the same operation safe to retry after a reply
+or restart. Private Bots cannot be copied. The copy has its own conversation,
+memory and permissions. An unavailable login or model and a missing folder
+fall back to the Runner’s usual defaults. An explicitly selected model default
+effort stays a model default for a new conversation.
+`bots.status` advertises `rosterOperations` when the active Runner supports
+copying Bots and attaching existing Threads.
+
+The owner-only `bots.conversations.attach` takes `botId`, `expectedRevision`,
+`threadId` and an `operationId`. It associates an idle, local Thread that has
+no previous Bot link with an active non-Private Bot. The Thread must already
+fit the Bot’s login, model, permission ceiling and folder restrictions. The
+Runner reserves the identity before saving the link in the ThreadStore.
+Repeating the operation completes the same reserved link. It retains the
+original transcript and CLI session settings. Copy receipts and attachment
+reservations require Bot data format 11. The recorded copies and attached
+links use workspace envelope version 3 when they move.
 
 ## Bot memory review and visibility
 
@@ -158,6 +206,11 @@ for the abandoned child is dropped. A late answer remains readable through `bots
 and does not queue another result. Saving this state requires Bot data
 format 10. Its workspace transfer uses envelope version 2 so an unsupported
 target cannot stage or claim it.
+
+A memory journal with a permanent-erasure record requires Bot data format 11
+and uses workspace envelope version 3. The receiver must protect format 11
+before saving the pack or recording a claim. An interrupted journal rewrite must
+be recovered before it can travel with the workspace.
 `bots.requests.retry` takes the same fields and reconciles delivery state.
 `bots.requests.rerun` takes those fields, a new or edited `text` and an
 `operationId`. The owner creates a new attempt linked by `rerunOf` to the
@@ -345,6 +398,104 @@ the scope's existing journal. It returns the stored receipt for a retry
 of that operation. If it cannot reach the primary, the old Runner does
 not write a copy.
 
+With backend API 110, a Runner can submit a scoped note erasure to the mirror only while it owns
+an unfrozen workspace. The mirror remembers the workspace ID, scope kind,
+scope ID and note ID across changes of Runner and epoch. It removes that row
+from its device projection and ignores the same row in later projections,
+including a projection sent before the erasure. A connected device cannot
+queue another edit or removal for the erased ID. An already queued edit or
+removal does not reach the Runner, and a late command completion for that ID
+cannot save the result or draft text. The mirror retains the scope with
+new note-command receipts. As soon as it remembers the erasure, reads omit the
+erased row and any draft addressed to that row. Repeating the erasure request
+with the same IDs redacts retained receipts in bounded transactions. Its
+`done` field confirms that the mirror checked scoped receipts and older
+receipts that might contain the erased note. When scope cannot be recovered
+from a retained result, the mirror keeps that result until the ordinary
+command-retention sweep expires it and replies with `waitingForLegacy`.
+The same request can resume checking without guessing a scope. The operation
+is internal to the Runner.
+Backend API 112 adds confirmations for registered device draft stores.
+Before writing an edit or removal draft for an existing note, a device
+registers the exact workspace, scope and note under its pairing and
+storage ID. The server records no draft text. After removing the locally
+persisted copy, the same paired store confirms the exact erasure.
+An offline, expired or revoked pairing with an outstanding copy keeps
+that note pending. Confirmation of registered stores makes no claim
+about drafts saved before registration was supported.
+On the website, a managed draft is stored in the origin's shared storage.
+The tab's session keeps its reference. Duplicating a tab cannot give it
+a second stored copy of the note body. The browser saves and erases
+under the same origin lock, and keeps an exact marker so a delayed save
+cannot put the note body back. The phone uses its existing app storage
+with an installation-specific ID. A device that cannot register a new
+targeted draft keeps that change in memory.
+The owning Runner records a body-free intent after the journal has validated
+the requested change and before it writes. Subsequent successful sync
+heartbeats resume the journal, linked review checkpoints and mirror steps
+with the same identity. A failure to sanitize a linked review leaves the
+intent pending, and the next pass can continue after a partial write.
+Running a workspace move waits for the saved erasure intent to clear.
+
+The local owner can start a permanent erasure with `bots.memory.erase`
+when `bots.memory.erasureStatus` reports `available` for a Bot or Group
+scope. Pass the returned workspace ID and epoch, exact scope and note
+ID, the current memory revision, a stable operation ID and
+`confirmed: true`. A changed revision or ownership invalidates the
+confirmation. Retrying a submitted operation preserves the receipt.
+The status includes the pending note IDs, operation IDs and progress.
+The history keeps a body-free receipt and shows completion once the
+local and registered copies are confirmed. Conversation transcripts,
+provider histories, external backups and unregistered drafts are managed
+separately.
+A workspace that has erased notes must carry the authority’s current note
+erasure revision in both its offer and its claim. Only the owner and that
+move's intended recipient can read the paged requirements. Before accepting
+the pack, each checks the matching journal receipts and absence of erased
+note bodies in the relevant memory scope. Older Runners can still move
+workspaces that have no permanent note erasures. A managed restore preflight
+checks the workspace and owner epoch of the backup candidate, then verifies
+the same current erasure records. It refuses stale or mixed copies. Checking
+a frozen candidate does not change the backup or install it.
+
+The Runner can scrub an older managed workspace archive whose saved
+identity, memory layout and linked review records it recognizes. It
+keeps unrelated files and replaces the archive atomically after
+verification. An unresolved journal, unknown file in the target scope or
+unrecognized review keeps the erasure pending.
+
+On an owning Runner with a compatible supervisor and backend,
+`bots.status` advertises `managedMemoryRestore`. The owner can list the
+Runner’s staged backup IDs and saved times with `bots.memory.backups`.
+`bots.memory.createBackup` takes a Bot or Group `scope`, its
+`expectedRevision`, and an `operationId`. It saves the scope's current
+notes to the Runner's `bot-backups` folder and returns the updated backup
+list. It copies neither note history nor conversation content. The same
+operation ID can recover the saved result after a lost reply. The backup
+is refused if the scope, its revision or the owning Runner changes while
+the current erasure records are checked.
+`bots.memory.backupNotes` takes `backupId` and `scope` and returns the
+verified `checksum`, the live scope `revision`, and `notes` containing
+only the ID and text of each restorable note in that scope. Listing the
+archive does not write a note. The owner then explicitly selects a note.
+
+The owner can recover a specific note with `bots.memory.recoverFromBackup`.
+It takes `backupId`, `checksum`, `scope`, `entryId`, `expectedRevision`
+and `operationId`. It reads only the chosen pre-staged local pack at
+`bot-backups/<backupId>.pack`. The Runner verifies its checksum, owner
+epoch and current erasures before applying a change. It uses the current
+scope’s existing journal to append the selected note, with its original
+ID and metadata, only if both its topic and the scope remain valid.
+It refuses a changed live revision or an existing or erased note, and
+rechecks the current secret policy. The backup, other notes and the
+Runner’s other records stay intact. A successful or interrupted write
+can be retried with the same operation ID.
+A paired device can query `phone:botNoteErasures` with at most 32 exact
+workspace, scope and note IDs from its own drafts. The booleans in the
+reply follow the input order. Neither the old Runner nor whether the
+scope currently appears in the mirror affects the lookup. An absent note
+or an unsupported backend gives the device no reason to discard a draft.
+
 ### Workers on another Runner
 
 A workspace owner can give a regular public Bot conversation a worker
@@ -398,3 +549,22 @@ and permission ceilings. A reservation with an unsettled run prevents
 the move. A reservation cannot start or be edited during the claim.
 The authority also remembers a cancellation issued before the offer
 arrives. A late copy of the cancelled offer cannot freeze the workspace.
+
+For a claimed move the authority keeps the source Runner, workspace, move
+ID and retiring epoch. These records survive later moves and contain no
+note text. Staged and cancelled moves do not add a retired source. The
+most recent claim from an older backend is recorded before starting a
+new move. Claims already replaced by the older backend are outside this
+record; absence of earlier sources is not proof that old copies are gone.
+
+On backend API 111, a signed-in retiring Runner reads pending erasures for
+its own workspace, move ID and retiring epoch. The list contains scoped
+note IDs and their revisions. The Runner acknowledges each exact erasure
+after it applies it locally and the sealed transport parts are gone.
+An unresolved copy of one note does not block another. The current owner
+waits for each retiring generation's acknowledgment of the selected note.
+A missing ownership generation also keeps the erasure pending.
+
+The backend drops the sealed transport parts in bounded batches after a
+claim or cancellation. An active offer keeps its parts for restart and
+retry. A new offer cannot reuse the ID of a recorded completed move.
