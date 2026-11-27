@@ -71,7 +71,7 @@
     <string name="pair_security_warning">自分のMacに表示されたコードを読み取った場合にだけ、続行してください。</string>
     <string name="pair_with_host">%1$s とペアリングしますか？</string>
     <string name="paired_with">接続先</string>
-    <string name="paste_a_pairing_code">ペアリングコードを貼り付け</string>
+    <string name="paste_a_pairing_code">コードを貼り付け</string>
     <string name="phone">スマートフォン</string>
     <string name="picked">選択済み</string>
     <string name="plan">計画</string>
