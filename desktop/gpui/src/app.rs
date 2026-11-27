@@ -406,7 +406,9 @@ impl Threadbear {
         crate::terminal::install(&cx.entity(), cx);
         // A key with ⌘ held puts the keys shown beside the buttons away.
         crate::key_hints::install(cx.entity().downgrade(), cx);
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search threads (⌘P)"));
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(threadbear_core::tr!("Search threads (⌘P)"))
+        });
         // The filter is worked out at render, so a change only needs a redraw.
         let searching = cx.subscribe(&search, |_, _, ev: &InputEvent, cx| {
             if matches!(ev, InputEvent::Change) {
@@ -1695,6 +1697,27 @@ impl Threadbear {
         if let Some(pane) = &self.pane {
             pane.update(cx, |pane, cx| pane.remeasure_rows(cx));
         }
+        let (search, main) = (self.search.clone(), self.main_window);
+        let settings = self
+            .settings_window
+            .as_ref()
+            .map(|(window, view)| (*window, view.downgrade()));
+        cx.defer(move |cx| {
+            main.update(cx, |_, window, cx| {
+                search.update(cx, |field, cx| {
+                    field.set_placeholder(threadbear_core::tr!("Search threads (⌘P)"), window, cx);
+                });
+            })
+            .ok();
+            if let Some((window, view)) = settings {
+                window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |view, cx| view.refresh_language(window, cx))
+                            .ok();
+                    })
+                    .ok();
+            }
+        });
         self.sync_menus(cx);
         cx.refresh_windows();
     }

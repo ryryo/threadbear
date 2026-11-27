@@ -891,7 +891,7 @@ pub fn trailing<Tz: TimeZone>(
             Trailing {
                 text,
                 kind: TrailingKind::Working,
-                tip: Some("Working".into()),
+                tip: Some(crate::tr!("Working").into()),
             }
         }
         RowStatus::Background => {
@@ -908,14 +908,14 @@ pub fn trailing<Tz: TimeZone>(
             tip: None,
         },
         RowStatus::Failed => Trailing {
-            text: "Failed".into(),
+            text: crate::tr!("Failed").into(),
             kind: TrailingKind::Failed,
-            tip: Some("The last turn failed".into()),
+            tip: Some(crate::tr!("The last turn failed").into()),
         },
         RowStatus::Stopped => Trailing {
-            text: "Stopped".into(),
+            text: crate::tr!("Stopped").into(),
             kind: TrailingKind::Stopped,
-            tip: Some("Stopped when the runner restarted".into()),
+            tip: Some(crate::tr!("Stopped when the runner restarted").into()),
         },
     }
 }

@@ -93,8 +93,8 @@ pub fn percent(value: f64) -> String {
 
 fn short_name(window: &UsageWindow) -> String {
     match window.kind.as_str() {
-        "five_hour" => "5h".to_owned(),
-        "weekly" => "week".to_owned(),
+        "five_hour" => crate::tr!(context "quota window", "5h").to_owned(),
+        "weekly" => crate::tr!(context "quota window", "week").to_owned(),
         _ => window.title.clone(),
     }
 }
@@ -103,19 +103,24 @@ fn short_name(window: &UsageWindow) -> String {
 pub fn room_line(usage: Option<&AccountUsage>) -> Option<String> {
     let usage = usage?;
     if usage.blocked {
-        return Some("Limit reached".to_owned());
+        return Some(crate::tr!("Limit reached").to_owned());
     }
     let main = main_windows(usage);
     if main.is_empty() {
         return None;
     }
-    Some(format!(
-        "{} left",
-        main.iter()
-            .map(|w| format!("{} {}", short_name(w), percent(w.remaining_percent)))
-            .collect::<Vec<_>>()
-            .join(" · ")
-    ))
+    let usage = main
+        .iter()
+        .map(|w| {
+            crate::trf!(
+                "{window} {percent}",
+                window = short_name(w),
+                percent = percent(w.remaining_percent)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    Some(crate::trf!("{usage} left", usage = usage))
 }
 
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

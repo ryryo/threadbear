@@ -232,9 +232,9 @@ impl Font {
 
     pub fn title(self) -> &'static str {
         match self {
-            Font::System => "System",
-            Font::Serif => "Serif",
-            Font::Mono => "Monospaced",
+            Font::System => threadbear_core::tr!(context "font", "System"),
+            Font::Serif => threadbear_core::tr!("Serif"),
+            Font::Mono => threadbear_core::tr!("Monospaced"),
             Font::Allo => "Allo",
         }
     }

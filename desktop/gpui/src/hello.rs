@@ -1022,7 +1022,7 @@ impl Threadbear {
                         h_flex()
                             .gap(px(4.))
                             .text_color(secondary)
-                            .child("Or")
+                            .child(threadbear_core::tr!("Or"))
                             .child(
                                 link(
                                     "hello-website",

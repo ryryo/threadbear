@@ -44,6 +44,13 @@ Then('the Settings title is {string} in {string}', async function (this: Threadb
 });
 
 
+Then('the instructions field shows the hint {string}', async function (this: ThreadbearWorld, hint: string) {
+  await this.until('the translated instructions hint', (dump) => {
+    const settings = (dump as { settingsWindow?: { instructionsPlaceholder: string } }).settingsWindow;
+    return settings?.instructionsPlaceholder === hint;
+  });
+});
+
 When('I relaunch the localized desktop', async function (this: ThreadbearWorld) {
   await this.app.relaunch();
 });

@@ -872,7 +872,11 @@ impl SidePane {
                     .border_1()
                     .border_color(style::button_edge(cx))
                     .when(!trusting, |s| s.cursor_pointer())
-                    .child(div().text_size(px(style::size::DETAIL)).child("Trust")),
+                    .child(
+                        div()
+                            .text_size(px(style::size::DETAIL))
+                            .child(threadbear_core::tr!("Trust")),
+                    ),
                 tip,
             )
             .when(!trusting, |b| {
@@ -1284,7 +1288,10 @@ impl SidePane {
                     .map(|p| p.title.clone()),
                 _ => None,
             };
-            let badge_tip = shelf.origin.tip("These buttons", project_title.as_deref());
+            let badge_tip = shelf.origin.tip(
+                threadbear_core::tr!("These buttons"),
+                project_title.as_deref(),
+            );
             let badge_face: AnyElement = match &shelf.origin {
                 core::PanelOrigin::Project(_) => {
                     match crate::patch_icons::project_mark(&shelf.origin, thread, project_icons) {

@@ -10,12 +10,14 @@ Feature: Desktop language
     When I choose Japanese as the desktop language
     Then the Settings title is "一般" in "ja"
     And the "ファイル" menu lists "閉じる"
+    And the instructions field shows the hint "例：React、TypeScript、Convexで開発します。簡潔で分かりやすく書いてください。"
     When I relaunch the localized desktop
     And I open Settings
     Then the Settings title is "一般" in "ja"
     When I choose English as the desktop language
     Then the Settings title is "General" in "en"
     And the "File" menu lists "Close"
+    And the instructions field shows the hint "For example: I build with React, TypeScript and Convex. Write plainly and briefly."
 
   @settings.language @swift-pending @mac-pending @windows-pending
   Scenario: System follows the locale of the Linux desktop session

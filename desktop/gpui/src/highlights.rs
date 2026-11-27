@@ -3069,7 +3069,7 @@ impl SidePane {
                 .size_full()
                 .bg(bg)
                 .child(crate::files::pane_note(
-                    "Pick a thread to see its Highlights.",
+                    threadbear_core::tr!("Pick a thread to see its Highlights."),
                     p,
                 ))
                 .into_any_element();

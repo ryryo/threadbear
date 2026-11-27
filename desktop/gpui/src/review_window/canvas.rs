@@ -1982,7 +1982,7 @@ impl ReviewWindow {
                     .bg(hsla(0., 0., 0., 0.45))
                     .text_color(white())
                     .text_size(px(13.))
-                    .child("Opening the page\u{2026}")
+                    .child(threadbear_core::tr!("Opening the page…"))
                     .into_any_element(),
             );
         }

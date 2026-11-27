@@ -336,7 +336,17 @@ fn section_info(id: &str, title: &str, about: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+fn instructions_placeholder() -> &'static str {
+    tr!("For example: I build with React, TypeScript and Convex. Write plainly and briefly.")
+}
+
 impl SettingsWindow {
+    pub(crate) fn refresh_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.instructions.update(cx, |field, cx| {
+            field.set_placeholder(instructions_placeholder(), window, cx);
+        });
+    }
+
     fn new(
         app: WeakEntity<Threadbear>,
         client: std::sync::Arc<threadbear_client::runner::Client>,
@@ -346,7 +356,8 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.set_global(SettingsApp(app.clone()));
-        let instructions = cx.new(|cx| TextareaState::new(window, cx).placeholder(tr!("For example: I build with React, TypeScript and Convex. Write plainly and briefly.")));
+        let instructions =
+            cx.new(|cx| TextareaState::new(window, cx).placeholder(instructions_placeholder()));
         let mut subs =
             vec![
                 cx.subscribe_in(&instructions, window, |this, _, ev: &InputEvent, _, cx| {
@@ -2344,6 +2355,7 @@ impl SettingsWindow {
             "accent": style::accent_choice().name(),
             "compact": style::compact(),
             "font": style::font_choice().name(),
+            "instructionsPlaceholder": self.instructions.read(cx).presentation().placeholder().to_string(),
             "defaultFolder": settings.as_ref().map(|s| s.default_cwd.clone()),
             "keepAwake": settings.as_ref().and_then(|s| s.keep_awake),
             "fullSync": settings.as_ref().and_then(|s| s.full_sync),

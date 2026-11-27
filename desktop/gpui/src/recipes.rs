@@ -915,7 +915,7 @@ impl Threadbear {
                 .test_support()
                 .child(
                     Button::new("recipe-page-add-button")
-                        .label("Add")
+                        .label(threadbear_core::tr!("Add"))
                         .primary()
                         .small()
                         .loading(busy)
@@ -1486,7 +1486,7 @@ impl Threadbear {
                         .loading(removing)
                         .disabled(removing)
                         .tooltip(
-                            "Delete its schedules, stop its habit and take it back to the gallery. Its files stay",
+                            threadbear_core::tr!("Delete its schedules, stop its habit and take it back to the gallery. Its files stay"),
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.remove_recipe(remove_id.clone(), window, cx)

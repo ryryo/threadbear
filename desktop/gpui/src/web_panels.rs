@@ -1064,7 +1064,7 @@ pub(crate) fn browser_view(
         .unwrap_or_else(|| url.to_owned());
     let open = Some(Opener {
         url: url.clone(),
-        tip: "Open in browser".into(),
+        tip: threadbear_core::tr!("Open in browser").into(),
     });
     match running(&key, "this page", main, open.clone(), window, cx) {
         Ok(parent) => slot(&panels, &key, &url, || PanelKind::Browser, parent, open, cx),
@@ -1082,7 +1082,7 @@ fn public_page(
 ) -> AnyElement {
     let open = Some(Opener {
         url: url.to_owned(),
-        tip: "Open in browser".into(),
+        tip: threadbear_core::tr!("Open in browser").into(),
     });
     if !loads_in_panel(url) {
         return away(

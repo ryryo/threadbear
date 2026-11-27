@@ -1268,9 +1268,9 @@ impl Threadbear {
                         .min_w_0()
                         .text_size(px(11.5))
                         .text_color(style::secondary_text(cx))
-                        .child(
-                            "Read and written by coordinator and helpers · hidden from your brief",
-                        ),
+                        .child(threadbear_core::tr!(
+                            "Read and written by coordinator and helpers · hidden from your brief"
+                        )),
                 )
                 .child(
                     crate::highlights::tipped(
@@ -1322,7 +1322,7 @@ impl Threadbear {
                         }
                     }))
                     .child(
-                        "Technical notes from the coordinator and helpers appear here. Double-click to edit.",
+                        threadbear_core::tr!("Technical notes from the coordinator and helpers appear here. Double-click to edit."),
                     ),
             );
         }

@@ -178,7 +178,9 @@ impl Threadbear {
         let mut page = v_flex().gap(px(12.)).max_w(px(680.));
         if details.conversations.is_empty() {
             return page
-                .child("Start a conversation before starting a background task.")
+                .child(tr!(
+                    "Start a conversation before starting a background task."
+                ))
                 .into_any_element();
         }
         page = page
@@ -229,7 +231,7 @@ impl Threadbear {
                     ),
             );
         if self.bots.tasks.is_empty() && !busy {
-            page = page.child("No background tasks yet.");
+            page = page.child(tr!("No background tasks yet."));
         }
         for task in &self.bots.tasks {
             page = page.child(self.render_background_bot_task_card(task, cx));
@@ -363,7 +365,7 @@ impl Threadbear {
                     .child(result.text.clone()),
             );
             if !result.whole {
-                row = row.child("The full result is unavailable.");
+                row = row.child(tr!("The full result is unavailable."));
             }
         }
         row.into_any_element()
