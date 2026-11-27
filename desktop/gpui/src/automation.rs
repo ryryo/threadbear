@@ -11,6 +11,7 @@
 // spec presses what a person would press.
 use crate::app::Threadbear;
 use crate::{call, RT};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::test::{TestEventExt as _, TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::*;
 use serde_json::{json, Value};
@@ -534,14 +535,14 @@ pub(crate) fn whole_point(drawn: Bounds<Pixels>) -> Option<(i32, i32)> {
 }
 
 /// Draws the main window until nothing in it is moving (the dock's panels,
-/// a thread's flight, an opening), for 3 seconds at most. What's moving says
+/// a thread's flight, an opening or a dialog leaving), for 3 seconds at most. What's moving says
 /// so for 40 ms after each frame it draws, so a frame comes first each time.
 async fn settle_motion(app: &Entity<Threadbear>, main: AnyWindowHandle, cx: &mut AsyncApp) {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
         let moving = cx.update_window(main, |_, window, cx| {
             window.render_frame(cx);
-            app.read(cx).moving(cx)
+            window.has_exiting_dialog(cx) || app.read(cx).moving(cx)
         });
         if !matches!(moving, Ok(true)) || std::time::Instant::now() >= until {
             return;
@@ -569,7 +570,7 @@ fn step(
         | "runners-front" => crate::automation_compat::step(app, cmd, window, cx),
         "size" => shell_step(app, cmd, window, cx),
         // Whether anything's on its way across the window (the panels
-        // gliding, an archive flight), which the spec driver asks before
+        // gliding, an archive flight, a dialog leaving), which the spec driver asks before
         // every click so it never reads a control's spot mid-move
         // (features/support/gpui.ts, `settle`). A covered window gets no
         // frames from the system, and a glide ends at a frame.
@@ -578,7 +579,7 @@ fn step(
             // each frame it draws, and a covered window can go longer than
             // that without one, mid-move (Codex's review, 18 Nov).
             window.render_frame(cx);
-            Ok(json!({ "moving": app.read(cx).moving(cx) }))
+            Ok(json!({ "moving": window.has_exiting_dialog(cx) || app.read(cx).moving(cx) }))
         }
         "dump" => {
             // A window covered by another gets no frames from the system on a

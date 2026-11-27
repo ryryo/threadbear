@@ -234,8 +234,9 @@ at the pinned version with its popup menus drawn as macOS draws its own. The
 kit draws every menu's rows itself (their height, padding and gaps, the tick
 in the icon's place) and nothing outside the crate reaches them, and every
 dropdown, context menu and the sidebar's menus go through it. Its first commit
-is the crate as published, so `git log -p desktop/vendor` is the whole fork;
-a gpui-kit bump copies the new version in and puts that back.
+is the crate as published, so `git log -p desktop/vendor` is the whole fork.
+The automation driver also reads whether a dialog's exit is still mounted
+before clicking another control. A gpui-kit bump carries these patches forward.
 
 `desktop/vendor/gpui-base` keeps the input, text and test-support fixes listed
 in `desktop/Cargo.toml`. `desktop/vendor/gpui-pre` is GPUI 0.3.11 with file
