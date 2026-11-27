@@ -304,3 +304,13 @@ empty entries with glossary terms and exact, unambiguous catalog matches.
 The script verifies the source catalog blobs against
 `third_party/t3code/manifest.json` and prints where each candidate came from.
 Check the candidates in the screens that use them.
+
+Web copy uses General Translation. Mark visible copy with `T` or `msg`,
+run `npm run web:i18n:generate`, then update the Japanese catalog. The
+check extracts the English catalog in a temporary directory. Android uses
+`values/strings.xml` and `values-ja/strings.xml`. Keep positional format
+arguments in both languages and pass `android` to the seed script to
+fill missing entries.
+
+`npm run i18n:check` checks desktop, Web and Android. The standard check
+runs the Web and Android catalog checks through `npm run web:test`.

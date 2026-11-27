@@ -8,6 +8,10 @@
 
 ---
 
+## 今回の対象範囲
+
+今回はP0〜P5、P7、P8を対象とする。P6のiOSアプリと通知拡張の日本語化は対象外とし、既存の実装案はローカルブランチ `thread/localization-mobile-verified` に保管する。iOSの実装、検証、`main` への反映は今回の完了条件に含めない。公開サイトの日本語ルートは任意拡張とする。
+
 ## 実装記録
 
 ### デスクトップの言語切替（P0・P1）
@@ -24,6 +28,12 @@
 - 承認画面では、操作の説明を日本語にする。実行するコマンドやファイル名はそのまま表示する。設定の言語切替は、メニュー項目が呼ぶ操作に影響しない。
 - X250 の仮想画面で5シナリオ104ステップが通った。言語切替と再起動後の保持、日本語メッセージの送信、権限選択、承認の許可と拒否、検索、休止、アーカイブを確認した。英語のゴールデンテストを含め、Rustのコアテストは1,377件が通った。
 - macOS の実機確認では、IMEの変換確定、ネイティブメニューの表示、主要画面の見切れを確認する。
+
+### Web、通知、Androidと統合検査（P4・P5・P7・P8）
+
+- Web版はChromiumで言語の切り替え、再読み込み後の保持、英語への復帰を確認した。通知はテスト用リレーで英日と旧クライアントの互換性を確認した。実端末への通知配信は未確認。
+- Androidの日本語化をローカル `main` の `1cd20eec9` に反映した。385件のテストと両APKのビルドが通った。Android 16のエミュレーターで日英切り替え、設定保持、ペアリング確認を検証した。
+- Webの英語カタログを一時ディレクトリに再生成し、キーと文面の差分を検査する。Androidは日英のキーと書式指定子を照合する。標準チェックのWebテストに組み込み、Androidの翻訳ファイルを編集したときも過去の検査結果を使い回さない。
 
 ## 0. 基準リポジトリ・固定リビジョン・ライセンス確認
 
@@ -399,7 +409,7 @@ flowchart TB
 
 ---
 
-### P6: `ios/` iOS アプリ＆NotificationService 日本語化
+### P6: `ios/` iOS アプリ＆NotificationService 日本語化（今回の対象外。以下は将来の作業案）
 
 - **目的**: iPhone 版 Threadbear（`ios/Threadbear`, `ThreadbearKit`, `NotificationService`）を Apple 標準の String Catalog と共通語彙辞書で日本語化する。
 - **作成・変更ファイル**:
@@ -436,7 +446,7 @@ flowchart TB
 
 - **目的**: 日本語化が今後の開発や上流取り込みで劣化しないよう CI ゲートとテストを恒久化し、ドキュメントを最新化する。
 - **作成・変更ファイル**:
-  - `check.sh`: `node scripts/i18n-check.ts` を標準チェックへ組み込む
+  - 標準チェックではデスクトップの既存検査を使い、`npm run web:test` でWebとAndroidのカタログも検査する。
   - `features/localization.feature` + `features/steps/localization.steps.ts`:
     - 既定（自動化）で英語表示されること
     - `Settings > General > Language` で `日本語` に切り替えると即時反映されること
@@ -487,10 +497,10 @@ flowchart TB
 
 以下をすべて満たした時点で、Threadbear 日本語化計画の完了とする。
 
-- `desktop/`（GPUI 全画面＋macOS メニューバー＋`Info.plist`）、`web/`、`convex/`（Push 通知）、`ios/`、`android-native/` がすべて共通語彙（T3 Code 準拠＋Threadbear 固有辞書）で日本語表示できる。
+- `desktop/`（GPUI 全画面＋macOS メニューバー＋`Info.plist`）、`web/`、`convex/`（Push 通知）、`android-native/` がすべて共通語彙（T3 Code 準拠＋Threadbear 固有辞書）で日本語表示できる。
 - 言語設定は `システム` / `English` / `日本語`（自言語名表示）を切り替えられ、GPUI・Web ともに再起動なしで即時反映され、再起動後も維持される。
 - `third_party/t3code/manifest.json` と `docs/third-party/t3-code-MIT.txt` により、T3 Code からの流用ファイル・固定 SHA・MIT 表記・差分理由が完全に追跡可能である。
-- `scripts/i18n-check.ts` が `check.sh` に統合され、今後の機能追加や上流マージ時に未翻訳・キー欠落・プレースホルダ破損を自動検知できる。
+- `npm run i18n:check` と標準チェックにより、今後の機能追加や上流マージ時に未翻訳・キー欠落・プレースホルダ破損を自動検知できる。
 - 既存の `desktop/core/tests/golden.rs`、`tips_source.rs`、`features/*.feature`、`web/src/*.test.ts`、`runner/context-budget.test.ts` に一切の回帰がない。
 - 第 6 章の必須試験マトリクスと実機受け入れシナリオがすべて合格している。
 
@@ -504,7 +514,7 @@ flowchart TB
 
 1. **専用 worktree の確保**: `main` チェックアウトは直接編集しない。`/Users/ryryo/threadbear` で `./borrow-worktree.sh` を実行し、`slot-1`（ブラウザ）および `slot-2`（Bot）とは別の専用 worktree（例: `slot-3`）を借りて作業する。依存物を主チェックアウトや他 slot から symlink / hardlink しない。
 2. **段階的コミットと `tb land`**:
-   - P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 の順に進め、リリース可能な区切り（最低でも P0+P1、P2、P3、P4、P5、P6、P7、P8）ごとに `./check.sh` を通したうえで worktree から `tb land` で手元フォーク `main` へ反映する。
+   - P0 → P1 → P2 → P3 → P4 → P5 → P7 → P8 の順に進め、リリース可能な区切り（最低でも P0+P1、P2、P3、P4、P5、P7、P8）ごとに `./check.sh` を通したうえで worktree から `tb land` で手元フォーク `main` へ反映する。
    - 原典取り込み・シード生成コミットと、Threadbear 固有の接続・調整コミットを分けて履歴を追跡可能にする。
    - `slot-1` / `slot-2` が先に `main` へ land された場合は、その直後にリベースして新規 UI 文字列を P3 の抽出・翻訳へ取り込む。
 3. **実機反映確認**: アプリ変更を `tb land` した後は、自動で更新版が起動するのを `wait_for_app_restart` で待ち、実機 GPUI アプリで日本語表示・切替・回帰確認を行う。完了後に worktree は `./borrow-worktree.sh --give-back <dir>` で返却する。

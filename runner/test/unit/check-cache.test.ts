@@ -87,6 +87,10 @@ test("a step's key changes with what it reads, its command, the check and Node, 
   // own-folder.ts; the Swift app links to the iPhone kit's files.
   const web = (t: Map<string, string>) => stepKey(t, 'web tests', ['npm', 'run', 'web:test']);
   assert.notEqual(web(new Map([...tree, ['shared/cases/turns.json', 'x']])), web(tree));
+  const androidCatalog = 'android-native/app/src/main/res/values-ja/strings.xml';
+  assert.notEqual(web(new Map([...tree, [androidCatalog, 'x']])), web(tree));
+  assert.notEqual(web(new Map([...tree, ['scripts/i18n-check-web-android.ts', 'x']])), web(tree));
+  assert.equal(web(new Map([...tree, ['android-native/app/src/main/AndroidManifest.xml', 'x']])), web(tree));
   const features = (t: Map<string, string>) => stepKey(t, 'features typecheck', ['npm', 'run', 'typecheck']);
   assert.notEqual(features(new Map([...tree, ['desktop/scripts/own-folder.ts', 'x']])), features(tree));
   const app = (t: Map<string, string>) => stepKey(t, 'app build', ['swift', 'build']);

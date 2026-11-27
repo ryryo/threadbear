@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { catalog, glossary, readCatalog, slots, writeCatalog } from "./i18n-extract-rust.ts";
+import { androidCatalogPath, androidString, androidStrings } from "./i18n-check-web-android.ts";
 import manifest from "../third_party/t3code/manifest.json" with { type: "json" };
 
 const upstream = process.argv[2];
 const surface = process.argv[3] ?? "desktop";
-if (!upstream || (surface !== "desktop" && surface !== "web")) {
-  throw new Error("Usage: node scripts/i18n-seed-from-t3code.ts <pinned T3 Code directory> [desktop|web]");
+if (!upstream || !["desktop", "web", "android"].includes(surface)) {
+  throw new Error("Usage: node scripts/i18n-seed-from-t3code.ts <pinned T3 Code directory> [desktop|web|android]");
 }
 
 function readPinned(path: string): Record<string, unknown> {
@@ -39,23 +40,57 @@ for (const app of ["desktop", "web", "mobile"]) {
 if (!candidates.size) throw new Error("No pinned T3 Code message pairs found");
 
 const terms = glossary();
-const web = join(import.meta.dirname, "../web/src/i18n/translations");
-const english = surface === "desktop" ? catalog("en") : readCatalog(join(web, "en.json"));
-const japanese = surface === "desktop" ? catalog("ja") : readCatalog(join(web, "ja.json"));
-for (const [key, message] of Object.entries(english)) {
-  if (Object.hasOwn(japanese, key) && japanese[key].trim() && !(surface === "web" && japanese[key] === message)) continue;
-  if (Object.hasOwn(terms, surface === "web" ? message : key)) {
-    japanese[key] = terms[surface === "web" ? message : key];
+function seed(key: string, message: string): string | undefined {
+  if (Object.hasOwn(terms, key)) {
     console.log(`${JSON.stringify(key)}: glossary`);
-    continue;
+    return terms[key];
   }
   // An explicit context requires human review before reusing a bare label.
   const matches = candidates.get(message);
-  if ((surface === "desktop" && key !== message) || matches?.size !== 1) continue;
+  if (key !== message || matches?.size !== 1) return;
   for (const [translation, source] of matches) {
-    japanese[key] = translation;
     console.log(`${JSON.stringify(key)}: ${source}`);
+    return translation;
   }
 }
-if (surface === "desktop") writeCatalog("ja", japanese);
-else writeFileSync(join(web, "ja.json"), JSON.stringify(japanese, null, 2) + "\n");
+
+function seedAndroid(): void {
+  const source = androidStrings("values");
+  const path = androidCatalogPath("values-ja");
+  const xml = readFileSync(path, "utf8");
+  const japanese = androidStrings("values-ja");
+  const additions = Object.create(null) as Record<string, string>;
+  for (const [key, message] of Object.entries(source)) {
+    // Named T3 Code arguments do not map directly to Android positional ones.
+    if (japanese[key]?.trim() || message.includes("%") || message.includes("&") || message.includes("<")) continue;
+    const text = message.replaceAll("\\'", "'");
+    const translation = seed(text, text);
+    if (!translation) continue;
+    additions[key] = translation.replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll('"', '\\"')
+      .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  }
+  if (!Object.keys(additions).length) return;
+  const updated = xml.replace(androidString, (entry, key: string) => {
+    if (!Object.hasOwn(additions, key)) return entry;
+    const value = additions[key];
+    delete additions[key];
+    return `<string name="${key}">${value}</string>`;
+  });
+  const added = Object.entries(additions).map(([key, value]) => `    <string name="${key}">${value}</string>\n`).join("");
+  writeFileSync(path, updated.replace("</resources>", () => added + "</resources>"));
+}
+
+if (surface === "android") {
+  seedAndroid();
+} else {
+  const web = join(import.meta.dirname, "../web/src/i18n/translations");
+  const english = surface === "desktop" ? catalog("en") : readCatalog(join(web, "en.json"));
+  const japanese = surface === "desktop" ? catalog("ja") : readCatalog(join(web, "ja.json"));
+  for (const [key, message] of Object.entries(english)) {
+    if (Object.hasOwn(japanese, key) && japanese[key].trim() && !(surface === "web" && japanese[key] === message)) continue;
+    const translation = seed(surface === "web" ? message : key, message);
+    if (translation) japanese[key] = translation;
+  }
+  if (surface === "desktop") writeCatalog("ja", japanese);
+  else writeFileSync(join(web, "ja.json"), JSON.stringify(japanese, null, 2) + "\n");
+}

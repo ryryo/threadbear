@@ -151,6 +151,10 @@ const code = (f) => /\.(ts|mts|cts|tsx|js|mjs|cjs|jsx|json)$/.test(f) || rootCon
 const STEPS = [
   [/^runner typecheck$/, code],
   [/^app tools parse$/, under('app/Tools/', 'mock-runner/')],
+  // web:test also runs the Web and Android catalog check.
+  [/^web tests$/, (f) => rootConfig(f) || under('convex/', 'web/', 'shared/', 'vendor/',
+    'scripts/i18n-check-web-android.ts', 'scripts/i18n-extract-rust.ts')(f)
+    || /^android-native\/app\/src\/main\/res\/values(-ja)?\/strings\.xml$/.test(f)],
   // web's tests read shared/cases/; web and convex import nothing outside
   // these (the packages are the top's lockfile, and vendor/'s tarball).
   [/^(convex|web) /, (f) => rootConfig(f) || under('convex/', 'web/', 'shared/', 'vendor/', 'convex.json')(f)],
