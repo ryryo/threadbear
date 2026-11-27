@@ -590,7 +590,9 @@ thread's current card (off, a card of asks, a turn running, the first
 check still going). It's checked again, for a card that has one, after an
 action runs on the thread (Land), when a client subscribes to it (at most
 every 5 seconds), and when a thread it started completes a turn or is
-archived. Clients show an unknown `kind` as its `text`.
+archived. GPUI can localize the known automatic warnings from older runners
+using their kind and text. Clients show unknown kinds and wording as
+received.
 
 The Mac app lists them under "Still open" (a `thread` one links
 `thread:<id>`); `scheduled` ones alone go under "Coming back". With none

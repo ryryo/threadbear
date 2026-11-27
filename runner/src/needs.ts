@@ -543,7 +543,11 @@ function askFrom(item: string): Ask {
 // end_turn's description doubles as the instructions: a resumed Claude
 // session keeps the system prompt it started with, but sees every tool's
 // description afresh.
+const CARD_LANGUAGE =
+  'Use the user’s preferred language for the reply and card text, including questions, choices, links, headline and next suggestions. Follow the conversation when no preference is stated. ';
+
 const END_TURN_WHAT =
+  CARD_LANGUAGE +
   'Ends the turn: says what it did (summary) and whether the user has to do anything (asks), so Threadbear can put the thread in Needs you or leave it as done. ';
 
 // Mike, 29 Oct 2026, after Codex desktop: the least context to load when
@@ -594,7 +598,7 @@ const NEXT_ROW =
   'Each is a row on the done card that the user reads hours later, with this thread forgotten and nothing else to go on, and ticking it sends it to you as their own message. ' +
   'So write it in their voice, as an instruction: which app or thing it\'s about and what they\'d see change or get, in words they\'d use, with the reason in the same line if it isn\'t obvious. ' +
   'No names from the code or your working (a class, a file, a tool, a nickname for something); describe what it does instead. ' +
-  '8 to 15 words: "Stop the Threadbear transcript jumping when a long reply arrives", not "Fix the ScrollAnchor drift". ';
+  'Keep it brief in their language (8 to 15 words in English). ';
 
 // A queued remote job is still owned by this CLI. A saved continuation
 // preserves the next message, not the process (thread 879afc1e, 14 Nov).
@@ -937,6 +941,7 @@ const ONE_REPLY_FIELDS =
   'Sub-agents never call this; only the thread\'s own agent does.';
 
 const ONE_REPLY_WHAT =
+  CARD_LANGUAGE +
   'Ends the turn\'s work and sets up what the user sees under your reply: the card of asks, or the done card. ' +
   'Call it once, when the work is finished. ';
 

@@ -150,7 +150,7 @@ impl Composer {
                 .child(card_title(self.waiting_spinner(cx), 4., words, cx))
                 .tip(tip)
                 .into_any_element(),
-            None => card_title(tick, 2.5, "Done", cx).into_any_element(),
+            None => card_title(tick, 2.5, tr!("Done"), cx).into_any_element(),
         }
     }
 
@@ -868,10 +868,7 @@ impl Composer {
         if let Some(ends) = &card.loose_ends {
             if !ends.is_empty() {
                 let open = ends.iter().any(|e| !e.is_booked());
-                column = column.child(small_label(
-                    if open { "Still open" } else { "Coming back" },
-                    cx,
-                ));
+                column = column.child(small_label(loose_ends_heading(open), cx));
                 // Open ones first, then the check-ins (looseEndsText), each a
                 // body line 4 under the last, its mark where a row's circle goes.
                 for (n, end) in ends
@@ -944,14 +941,7 @@ impl Composer {
         cx: &mut Context<Self>,
     ) -> Div {
         let pick_one = card.next_pick_one();
-        column = column.child(small_label(
-            if pick_one {
-                "Or pick one"
-            } else {
-                "Or carry on"
-            },
-            cx,
-        ));
+        column = column.child(small_label(follow_ups_heading(pick_one), cx));
         for (index, follow_up) in card.next.iter().enumerate() {
             let (ticked, explained) = (
                 self.card.next_picks.contains(&(index as i64)),
@@ -986,9 +976,9 @@ impl Composer {
                     .cursor_pointer()
                     .hover(|s| s.bg(style::hover_fill(cx)))
                     .tip(if pick_one {
-                        "Pick this direction to send"
+                        tr!("Pick this direction to send")
                     } else {
-                        "Send this with your next message"
+                        tr!("Send this with your next message")
                     })
                     .on_click(move |_, window, cx| {
                         if let Some(this) = this2.upgrade() {
@@ -1092,11 +1082,11 @@ impl Composer {
         let page = self.card.page.min(card.asks.len().saturating_sub(1));
         let decisions = card.asks.iter().all(|a| !a.options.is_empty());
         let words = if !decisions {
-            "Needed from you"
+            tr!("Needed from you")
         } else if card.asks.len() == 1 {
-            "Decision needed"
+            tr!("Decision needed")
         } else {
-            "Decisions needed"
+            tr!("Decisions needed")
         };
         let this = cx.entity().downgrade();
         let collapse_this = this.clone();
@@ -1127,7 +1117,7 @@ impl Composer {
                 .child(pager_arrow(
                     "‹",
                     page > 0,
-                    "Previous ask",
+                    tr!("Previous ask"),
                     ("page-back", 0usize),
                     cx,
                     move |_, _, cx| {
@@ -1148,7 +1138,7 @@ impl Composer {
                 .child(pager_arrow(
                     "›",
                     page + 1 < card.asks.len(),
-                    "Next ask",
+                    tr!("Next ask"),
                     ("page-next", 0usize),
                     cx,
                     move |_, _, cx| {
@@ -1187,7 +1177,11 @@ impl Composer {
                     })
                     .with_size(px(17.)),
                 )
-                .tip(if collapsed { "Expand" } else { "Collapse" })
+                .tip(if collapsed {
+                    tr!("Expand")
+                } else {
+                    tr!("Collapse")
+                })
                 .on_click(move |_, window, cx| {
                     if let Some(this) = collapse_this.upgrade() {
                         this.update(cx, |this, cx| this.toggle_collapsed(window, cx));
@@ -1515,11 +1509,11 @@ pub(crate) trait AskHost: Sized + 'static {
                 let tip: &'static str = if key.is_some() {
                     ""
                 } else if target.starts_with("review:") {
-                    "Open the design options"
+                    tr!("Open the design options")
                 } else if target.starts_with("thread:") {
-                    "Open that thread"
+                    tr!("Open that thread")
                 } else {
-                    "Open this"
+                    tr!("Open this")
                 };
                 let shown = key
                     .as_ref()
@@ -1584,7 +1578,7 @@ pub(crate) trait AskHost: Sized + 'static {
                     Some(since) => picking_button(
                         ("answer", index * 100 + n),
                         &title,
-                        "Pick this answer",
+                        tr!("Pick this answer"),
                         since,
                         cx,
                     ),
@@ -1592,7 +1586,7 @@ pub(crate) trait AskHost: Sized + 'static {
                         ("answer", index * 100 + n),
                         &title,
                         look,
-                        "Pick this answer",
+                        tr!("Pick this answer"),
                         cx,
                     ),
                 };
@@ -1609,24 +1603,24 @@ pub(crate) trait AskHost: Sized + 'static {
             let own_button = match picking.filter(|_| own) {
                 Some(since) => picking_button(
                     ("answer-own", index),
-                    "✓ Something else",
-                    "Answer in your own words",
+                    tr!("✓ Something else"),
+                    tr!("Answer in your own words"),
                     since,
                     cx,
                 ),
                 None => card_button(
                     ("answer-own", index),
                     if own {
-                        "✓ Something else"
+                        tr!("✓ Something else")
                     } else {
-                        "Something else…"
+                        tr!("Something else…")
                     },
                     if own {
                         ButtonLook::Picked
                     } else {
                         ButtonLook::Plain
                     },
-                    "Answer in your own words",
+                    tr!("Answer in your own words"),
                     cx,
                 ),
             };
@@ -1771,7 +1765,7 @@ pub(crate) trait AskHost: Sized + 'static {
             let suggested = !own && ask.suggested == Some(n);
             let this = this.clone();
             let label = if own {
-                "Something else…".to_owned()
+                tr!("Something else…").to_owned()
             } else {
                 choices[n].clone()
             };
@@ -1802,9 +1796,9 @@ pub(crate) trait AskHost: Sized + 'static {
                     .cursor_pointer()
                     .hover(|s| s.bg(style::hover_fill(cx)))
                     .tip(if own {
-                        "Answer in your own words"
+                        tr!("Answer in your own words")
                     } else {
-                        "Pick this answer"
+                        tr!("Pick this answer")
                     })
                     .on_click(move |_, window, cx| {
                         if let Some(this) = this.upgrade() {
@@ -2450,8 +2444,18 @@ impl Composer {
                 lines.push(
                     self.waiting_on_work(cx)
                         .map(|(words, _)| words)
-                        .unwrap_or_else(|| "Done".to_owned()),
+                        .unwrap_or_else(|| tr!("Done").to_owned()),
                 );
+            }
+            if let Some(ends) = card.loose_ends.as_ref().filter(|ends| !ends.is_empty()) {
+                lines.push(loose_ends_heading(ends.iter().any(|end| !end.is_booked())).into());
+                lines.extend(
+                    ends.iter()
+                        .map(|end| end.line(&threadbear_core::chrono::Local)),
+                );
+            }
+            if !card.next.is_empty() {
+                lines.push(follow_ups_heading(card.next_pick_one()).into());
             }
             for (i, next) in card.next.iter().enumerate() {
                 let tick = if self.card.next_picks.contains(&(i as i64)) {
@@ -2548,7 +2552,7 @@ fn ask_paragraph(ask: &Ask) -> String {
             .chars()
             .rev()
             .find(|c| !"\"'”’)]*_`".contains(*c))
-            .is_some_and(|c| ".?!…:".contains(c));
+            .is_some_and(|c| ".?!…:。？！：".contains(c));
         format!("{action}{} {why}", if ends { "" } else { "." })
     };
     escape_block_start(&body)
@@ -3091,6 +3095,22 @@ fn radio_circle(picked: bool, cx: &App) -> impl IntoElement {
     }
 }
 
+fn loose_ends_heading(open: bool) -> &'static str {
+    if open {
+        tr!("Still open")
+    } else {
+        tr!("Coming back")
+    }
+}
+
+fn follow_ups_heading(pick_one: bool) -> &'static str {
+    if pick_one {
+        tr!("Or pick one")
+    } else {
+        tr!("Or carry on")
+    }
+}
+
 /// "Or carry on" and the like: small, secondary, on a 19 pt line 10 under
 /// what's above, in by the rows' inset.
 fn small_label(text: &'static str, cx: &App) -> impl IntoElement {
@@ -3107,9 +3127,9 @@ fn small_label(text: &'static str, cx: &App) -> impl IntoElement {
 /// already archived (its click toggles either way, `toggle_archive_of`).
 pub(crate) fn done_archive_words(archived: bool) -> (&'static str, &'static str) {
     if archived {
-        ("Back to Inbox", "Unarchive this thread")
+        (tr!("Back to Inbox"), tr!("Unarchive this thread"))
     } else {
-        ("Archive", "Archive this thread")
+        (tr!("Archive"), tr!("Archive this thread"))
     }
 }
 

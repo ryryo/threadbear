@@ -273,6 +273,13 @@ impl LooseEnd {
         match when {
             Some(at) => {
                 let at = at.with_timezone(tz);
+                if crate::i18n::active_locale() == crate::i18n::Locale::Japanese {
+                    return format!(
+                        "{}：{}",
+                        at.naive_local().format("%-m月%-d日 %H:%M"),
+                        self.text
+                    );
+                }
                 format!(
                     "{}: {}",
                     at.naive_local().format("%a %-d %b, ").to_string()
@@ -280,7 +287,132 @@ impl LooseEnd {
                     self.text
                 )
             }
-            None => self.text.clone(),
+            None => self
+                .translated_warning()
+                .unwrap_or_else(|| self.text.clone()),
+        }
+    }
+
+    // Old and remote runners send ready-made English lines. Match only their
+    // known templates, leaving unknown copy and user-supplied values intact.
+    fn translated_warning(&self) -> Option<String> {
+        use crate::trf;
+
+        if crate::i18n::active_locale() != crate::i18n::Locale::Japanese {
+            return None;
+        }
+        let text = self.text.as_str();
+        match self.kind.as_str() {
+            "unpushed" | "unlanded" | "uncommitted" => {
+                let (count, words) = text.split_once(' ')?;
+                let count = count.parse::<u64>().ok()?;
+                let end = if count == 1 { " isn't" } else { " aren't" };
+                match self.kind.as_str() {
+                    "unpushed" => {
+                        let repo = words
+                            .split_once(" it made in ")?
+                            .1
+                            .strip_suffix(&format!("{end} pushed"))?;
+                        Some(trf!(
+                            "{count} commits in {repo} to push",
+                            count = count,
+                            repo = repo
+                        ))
+                    }
+                    "unlanded" => {
+                        let (branch, target) = words.split_once(" on ")?.1.split_once(end)?;
+                        let target = target.strip_prefix(" on ")?;
+                        Some(trf!(
+                            "{count} commits on {branch} to land on {target}",
+                            count = count,
+                            branch = branch,
+                            target = target
+                        ))
+                    }
+                    _ => {
+                        let place = words.strip_suffix(&format!("{end} committed"))?;
+                        if let Some(repo) =
+                            place.split_once(" it changed in ").map(|(_, repo)| repo)
+                        {
+                            Some(trf!(
+                                "{count} files in {repo} to commit",
+                                count = count,
+                                repo = repo
+                            ))
+                        } else if place.ends_with(" in its worktree") {
+                            Some(trf!(
+                                "{count} files in this worktree to commit",
+                                count = count
+                            ))
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+            "running" => {
+                let command = text
+                    .strip_prefix("Still running (archiving stops it): ")
+                    .or_else(|| {
+                        text.strip_prefix("Still running: ")?
+                            .strip_suffix(" Archiving stops it.")
+                    })?;
+                if command == "a background job." {
+                    Some(crate::tr!("A job is running (archiving stops it)").into())
+                } else {
+                    Some(trf!(
+                        "Running (archiving stops it): {command}",
+                        command = command
+                    ))
+                }
+            }
+            "thread" => {
+                let (title, state) = text
+                    .strip_prefix('"')?
+                    .rsplit_once("\", a thread it started, is ")?;
+                match state {
+                    "still working" => {
+                        Some(trf!("Child thread {title} is still working", title = title))
+                    }
+                    "waiting for you" => Some(trf!(
+                        "Child thread {title} is waiting for you",
+                        title = title
+                    )),
+                    _ => None,
+                }
+            }
+            "unmerged" => {
+                if let Some(pr) = text.strip_prefix("PR #") {
+                    let (number, repo) = pr.split_once(" in ")?;
+                    let number = number.parse::<u64>().ok()?;
+                    if let Some(repo) = repo.strip_suffix(" is still a draft") {
+                        Some(trf!(
+                            "PR #{number} in {repo} is a draft",
+                            number = number,
+                            repo = repo
+                        ))
+                    } else {
+                        let repo = repo.strip_suffix(" isn't merged")?;
+                        Some(trf!(
+                            "PR #{number} in {repo} is unmerged",
+                            number = number,
+                            repo = repo
+                        ))
+                    }
+                } else {
+                    let (branch, target) = text
+                        .strip_prefix("Work it pushed to ")?
+                        .rsplit_once(" isn't on ")?;
+                    let (branch, repo) = branch.rsplit_once(" in ")?;
+                    Some(trf!(
+                        "Work on {branch} in {repo} is not on {target}",
+                        branch = branch,
+                        repo = repo,
+                        target = target
+                    ))
+                }
+            }
+            _ => None,
         }
     }
 

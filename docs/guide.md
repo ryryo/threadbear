@@ -1957,8 +1957,12 @@ In Settings > General > Language, choose System, English or 日本語.
 System follows the first supported language in your operating system's
 preferences. The choice takes effect while the app is open and is saved
 on this computer. Japanese covers the Settings tabs, the app's menus and the
-main controls for the inbox, search, new threads, messages and approvals.
-Your messages and the agent's replies keep their original language.
+main controls for the inbox, search, new threads, messages and cards.
+Agents use your preferred language for replies, questions, options and
+follow-up suggestions. They follow the conversation when you haven't
+stated a preference. To make Japanese your default across conversations,
+write `lang:ja` in your standing instructions in Settings > General.
+Existing messages and card suggestions keep their original text.
 The operating system supplies the language for its own menus and dialogs.
 
 ## Keyboard shortcuts

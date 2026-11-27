@@ -1094,7 +1094,7 @@ impl ThreadPane {
                                     .with_size(px(16.))
                                     .text_color(style::tick_green(cx)),
                             )
-                            .child(title("Done")),
+                            .child(title(threadbear_core::tr!("Done"))),
                     )
                     .child(
                         card_button(
@@ -1118,7 +1118,7 @@ impl ThreadPane {
                     .h(px(size::WORK_LINE))
                     .flex()
                     .items_center()
-                    .child(title("Needed you")),
+                    .child(title(threadbear_core::tr!("Needed you"))),
             );
             let numbered = asks.asks.len() > 1;
             for (n, ask) in asks.asks.iter().enumerate() {

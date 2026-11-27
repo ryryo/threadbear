@@ -92,3 +92,14 @@ Feature: Desktop language
     When I open the thread "Rename the Settings tabs"
     And I archive the open thread
     Then the "アーカイブ済み" section lists "Rename the Settings tabs"
+
+  @settings.language @swift-pending
+  Scenario: The done card shows its controls and runner warnings in Japanese
+    Given the runner found "4 commits it made in convex-native-v7 aren't pushed" still open on "Tidy the imports in the uploader"
+    When I choose Japanese as the desktop language
+    And I open the thread "Tidy the imports in the uploader"
+    Then the card in the composer says "完了"
+    And the localized done card includes "未完了の作業"
+    And the localized done card includes "convex-native-v7 のコミット4件が未プッシュです"
+    And the localized done card includes "次の作業候補"
+    And the card offers the follow-up "Turn on the lint rule that sorts imports"

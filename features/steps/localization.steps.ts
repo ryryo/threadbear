@@ -54,3 +54,7 @@ Then('the instructions field shows the hint {string}', async function (this: Thr
 When('I relaunch the localized desktop', async function (this: ThreadbearWorld) {
   await this.app.relaunch();
 });
+
+Then('the localized done card includes {string}', async function (this: ThreadbearWorld, line: string) {
+  await this.until(`localized done card line ${line}`, (dump) => dump.composer.card?.includes(line) === true);
+});

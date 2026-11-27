@@ -837,7 +837,7 @@ export function buildThreadbearTools(
       'show_options',
       'Shows the user design options (mockups, wireframes, screenshots, videos or HTML pages of variants) in a review window to choose between, instead of pinning them, listing them or reading every image into the transcript. Only for options whose look, sound or motion is the point: options that are words (names, plans, approaches, a shortlist) go in your reply, not on pages made for this. Give an option\u2019s other screens or states as its shots, never as options of their own. The window steps through every shot in order, then shows the options side by side; the user can pick any number or none, and reply. Returns a review ID promptly; finish your turn and the answer arrives later as a message. A reference option (today\u2019s version, say) can\u2019t be picked.',
       {
-        title: z.string().min(1).max(200).describe('What the user is reviewing.'),
+        title: z.string().min(1).max(200).describe('What the user is reviewing. Write the titles and notes in the user’s preferred language.'),
         note: z.string().max(4000).optional().describe('A short lead, markdown: **bold** what matters.'),
         recommended: z.string().max(200).optional().describe('Id of the option you would pick (why goes in its note).'),
         options: z.array(z.object({
@@ -871,7 +871,7 @@ export function buildThreadbearTools(
           'add_button',
           "Makes a button the user can press while reading your reply: it starts a new thread with your brief (start) or messages another thread (send), once, only when pressed, or opens a folder's patch panel beside this thread (panel). Put the [title](button:<id>) it returns on the line it belongs to. Only for a clear next job they'd otherwise type out.",
           {
-            title: z.string().min(1).max(60).describe('What the button says, a few words starting with a verb: "Fill in the form".'),
+            title: z.string().min(1).max(60).describe('A short action in the user’s preferred language, e.g. "Fill in the form".'),
             start: z.object({
               text: z.string().min(1).max(20000).describe('The brief: complete, since the new thread knows nothing else.'),
               title: z.string().optional().describe("The new thread's title. Default: the button's."),
