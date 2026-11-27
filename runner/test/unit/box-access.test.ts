@@ -11,6 +11,28 @@ import { BOX_RUNNER, boxBackend, OWNER, THREAD } from '../helpers/box-backend.ts
 const sync = load('sync');
 const relay = load('relay');
 const moves = load('moves');
+const workspaceMoves = load('botWorkspaceMoves');
+const workerGrants = load('botWorkerGrants');
+// The Bot API has short exports in its own Convex modules. Pair the auth
+// table's longer keys with those actual handlers so the same box test runs.
+const botHandlers: ReturnType<typeof load> = {
+  previewBotWorkspaceMove: workspaceMoves.destinationProjects,
+  beginBotWorkspaceMove: workspaceMoves.begin,
+  putBotWorkspacePart: workspaceMoves.putPart,
+  readBotWorkspacePart: workspaceMoves.part,
+  pendingBotWorkspaceMove: workspaceMoves.pending,
+  stateBotWorkspaceMove: workspaceMoves.state,
+  claimBotWorkspaceMove: workspaceMoves.claim,
+  cancelBotWorkspaceMove: workspaceMoves.cancel,
+  advertiseBotWorker: workerGrants.advertise,
+  getBotWorkerTarget: workerGrants.target,
+  listBotWorkerTargets: workerGrants.targets,
+  issueBotWorkerGrant: workerGrants.issue,
+  takeBotWorkerGrant: workerGrants.take,
+  completeBotWorkerGrant: workerGrants.complete,
+  readBotWorkerResult: workerGrants.result,
+  readBotWorkerHistory: workerGrants.history,
+};
 const boxes = load('boxes');
 const machinesModule = load('machines');
 const { ACCESS, BOX_CALLS } = load('runnerAccess') as { ACCESS: Record<string, string>; BOX_CALLS: Set<string> };
@@ -86,7 +108,7 @@ test("a box hears and takes its own thread's commands, never another thread's or
 
 test('every function a box key has no business with is refused, owner-only ones and all', async () => {
   const s = await setup();
-  const modules = [sync, relay, moves, boxes];
+  const modules = [sync, relay, moves, boxes, botHandlers];
   const refused: string[] = [];
   for (const fn of Object.keys(ACCESS).filter((f) => !BOX_CALLS.has(f))) {
     const mod = modules.find((m) => m[fn]);
