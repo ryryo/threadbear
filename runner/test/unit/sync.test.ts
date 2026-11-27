@@ -4682,6 +4682,7 @@ test('Bot note erasure waits for the previous projection and retries the exact i
         attempts++;
         if (attempts === 1) throw new Error('lost erasure reply');
         if (attempts === 2) return { done: false, waitingForLegacy: true };
+        if (attempts === 3) return { done: false, waitingForSources: true };
         return { done: true };
       }
       return null;
@@ -4702,10 +4703,12 @@ test('Bot note erasure waits for the previous projection and retries the exact i
     release();
     await pending;
     assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForLegacy: true });
+    assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: false, waitingForSources: true });
     assert.deepEqual(await sync.eraseBotWorkspaceNote(input), { done: true });
-    const [, first, retry, afterRetention] = mirror();
+    const [, first, retry, afterRetention, afterSources] = mirror();
     assert.deepEqual(first?.args, retry?.args);
     assert.deepEqual(retry?.args, afterRetention?.args);
+    assert.deepEqual(afterRetention?.args, afterSources?.args);
     assert.equal(first?.args.workspaceId, input.workspaceId);
     assert.equal(first?.args.epoch, input.epoch);
   } finally {

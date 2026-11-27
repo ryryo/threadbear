@@ -18,7 +18,8 @@ export const workspaceMoveReceipt = z.object({ moveId });
 export const workspaceMovePreviewInput = z.object({ runnerId: z.string().min(1).max(128).optional() });
 export type WorkspaceMoveCall = 'botWorkspaceMoves:begin' | 'botWorkspaceMoves:state' | 'botWorkspaceMoves:putPart' |
   'botWorkspaceMoves:pending' | 'botWorkspaceMoves:part' | 'botWorkspaceMoves:claim' | 'botWorkspaceMoves:cancel' |
-  'botWorkspaceMoves:destinationProjects' | 'botWorkspaceMoves:verifyBotWorkspaceNoteErasures';
+  'botWorkspaceMoves:destinationProjects' | 'botWorkspaceMoves:verifyBotWorkspaceNoteErasures' |
+  'botWorkspaceMoves:retiredNoteErasure' | 'botWorkspaceMoves:ackRetiredNoteErasure';
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const plan = z.object({
   workspaceId: z.string().min(1), moveId: z.string().min(1), sourceRunnerId: z.string().min(1), targetRunnerId: z.string().min(1),
@@ -38,12 +39,18 @@ const noteErasurePage = z.object({
   })).max(128),
   cursor: z.string().min(1).nullable(),
 });
+const retiredNoteErasure = z.union([
+  z.strictObject({ revision: z.int().positive() }),
+  z.strictObject({ revision: z.int().positive(),
+    scope: z.object({ kind: z.enum(['bot', 'group']), id: z.uuid() }), entryId: z.string().min(1).max(128) }),
+]).nullable();
 type NoteErasureProof = { revision: number; rows: RequiredNoteErasure[] };
 type MoveLocator = { workspaceId: string; moveId: string };
 
 type Ports = {
   runnerId: string;
   supportsNoteErasures?: () => boolean;
+  canScrubRetiredNoteErasures?: () => boolean;
   store: BotWorkspaceTransfer;
   key: (targetRunnerId: string) => Promise<string>;
   call: (kind: 'query' | 'mutation', method: WorkspaceMoveCall, args: Record<string, unknown>) => Promise<unknown>;
@@ -59,7 +66,22 @@ const transferInfo = (id: string) => sealInfo('bot-workspace:' + id);
 
 export class BotWorkspaceWire {
   private readonly ports: Ports;
+  private checkingRetiredNote = false;
   constructor(ports: Ports) { this.ports = ports; }
+
+  private async pollRetiredNote(locator: { workspaceId: string; moveId: string; epoch: number }): Promise<void> {
+    const { call, store, canScrubRetiredNoteErasures } = this.ports;
+    if (this.checkingRetiredNote || !canScrubRetiredNoteErasures?.()) return;
+    this.checkingRetiredNote = true;
+    try {
+      const item = retiredNoteErasure.parse(await call('query', 'botWorkspaceMoves:retiredNoteErasure', locator));
+      if (item === null || !canScrubRetiredNoteErasures()) return;
+      if ('scope' in item) store.eraseRetiredNote(locator, item);
+      await call('mutation', 'botWorkspaceMoves:ackRetiredNoteErasure', { ...locator, ...item });
+    } finally {
+      this.checkingRetiredNote = false;
+    }
+  }
 
   private async noteErasures(locator: { workspaceId: string; moveId?: string }, expected: Pick<BotWorkspaceIdentity, 'epoch' | 'ownerRunnerId'>): Promise<NoteErasureProof | undefined> {
     if (!this.ports.supportsNoteErasures?.()) return undefined;
@@ -180,7 +202,10 @@ export class BotWorkspaceWire {
       }
       return;
     }
-    if (current?.state === 'moved' || current?.state === 'preparing') return;
+    if (current?.state === 'moved') {
+      return this.pollRetiredNote({ workspaceId: current.identity.workspaceId, moveId: current.moveId, epoch: current.identity.epoch });
+    }
+    if (current?.state === 'preparing') return;
     const pending = plan.nullable().parse(await call('query', 'botWorkspaceMoves:pending', {}));
     if (!pending) return;
     if (pending.targetRunnerId !== this.ports.runnerId) throw new Error('The Bot workspace move names another Runner.');

@@ -276,10 +276,11 @@ export class PersonalMemory {
     this.publish('remove', lines, time, { before, transaction }, file.file);
   }
 
-  // Only the owning Runner may call this after authorizing the scope.
+  // The owning Runner authorizes its scope. A retired owner may apply a
+  // confirmed erasure to its frozen copy even if it predates that entry.
   // This removes the local Markdown and journal copies together. Device
   // replicas and review checkpoints have their own owners and lifecycles.
-  erase(id, operationId, expectedRevision, time, protect) {
+  erase(id, operationId, expectedRevision, time, protect, allowMissing = false) {
     const history = this.history();
     const hash = createHash('sha256').update(JSON.stringify({ op: 'erase', id })).digest('hex');
     const seen = history.find(row => row.transaction?.operationId === operationId);
@@ -296,7 +297,7 @@ export class PersonalMemory {
       names = [];
     }
     const files = [...new Set([MAIN, ...names])].map(file => this.load(file));
-    const { rows, steps } = eraseMemoryCopies(id, files, history);
+    const { rows, steps } = eraseMemoryCopies(id, files, history, allowMissing);
     if (steps.length === 0) {
       // Keep the original pending-record shape even for a note already
       // absent from live Markdown. The existing index is written unchanged.

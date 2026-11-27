@@ -524,6 +524,15 @@ most recent claim from an older backend is recorded before starting a
 new move. Claims already replaced by the older backend are outside this
 record; absence of earlier sources is not proof that old copies are gone.
 
+On backend API 109, a signed-in retiring Runner may fetch one erasure at a
+time for its own workspace, move ID and retiring epoch. It receives the
+scope and note ID only. It advances the saved scan only after the exact
+erasure was applied locally and the sealed transport parts are gone.
+Stale responses cannot acknowledge a
+different note. The current owner waits until the known retiring Runners
+acknowledge the applicable revision. A missing ownership generation also
+keeps the erasure pending.
+
 The backend drops the sealed transport parts in bounded batches after a
 claim or cancellation. An active offer keeps its parts for restart and
 retry. A new offer cannot reuse the ID of a recorded completed move.

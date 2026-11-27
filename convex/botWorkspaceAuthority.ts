@@ -1,3 +1,4 @@
+import { ConvexError } from 'convex/values';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { forbidden, ownerFenced } from './lib';
@@ -7,6 +8,37 @@ export type BotWorkspaceRead = Pick<QueryCtx, 'db'>;
 
 export function botWorkspaceOwner(ctx: BotWorkspaceRead, workspaceId: string) {
   return ctx.db.query('botWorkspaceOwners').withIndex('by_workspaceId', q => q.eq('workspaceId', workspaceId)).unique();
+}
+
+export function retiredBotSource(ctx: BotWorkspaceRead, workspaceId: string, epoch: number) {
+  return ctx.db.query('botWorkspaceRetiredSources').withIndex('by_workspace_epoch',
+    q => q.eq('workspaceId', workspaceId).eq('epoch', epoch)).unique();
+}
+
+type Authority = Doc<'botWorkspaceOwners'>;
+type RetiredMove = Pick<NonNullable<Authority['transfer']>, 'epoch' | 'moveId' | 'sourceRunnerId'>;
+
+export async function rememberRetiredBotSource(ctx: MutationCtx, owner: Authority, { epoch, moveId, sourceRunnerId }: RetiredMove) {
+  const { workspaceId } = owner;
+  const prior = await retiredBotSource(ctx, workspaceId, epoch);
+  if (prior && (prior.moveId !== moveId || prior.sourceRunnerId !== sourceRunnerId)) {
+    throw new ConvexError({ kind: 'conflict', message: 'The retiring Bot workspace owner does not match its recorded move.' });
+  }
+  if (!prior) await ctx.db.insert('botWorkspaceRetiredSources', { workspaceId, moveId, sourceRunnerId, epoch });
+  const covered = owner.retiredSourcesCovered ?? 0;
+  if (epoch !== covered + 1) return covered;
+  await ctx.db.patch('botWorkspaceOwners', owner._id, { retiredSourcesCovered: epoch });
+  return epoch;
+}
+
+export async function retiredBotSourcesErased(ctx: MutationCtx, owner: Authority, revision: number): Promise<boolean> {
+  if (owner.epoch === 1) return true;
+  const covered = owner.transfer?.state === 'claimed' ? await rememberRetiredBotSource(ctx, owner, owner.transfer) : owner.retiredSourcesCovered ?? 0;
+  if (covered !== owner.epoch - 1) return false;
+  const untouched = await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_erasure_revision',
+    q => q.eq('workspaceId', owner.workspaceId).eq('erasureRevision', undefined)).first();
+  return !untouched && !await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_erasure_revision',
+    q => q.eq('workspaceId', owner.workspaceId).lt('erasureRevision', revision)).first();
 }
 
 export function ownedWorkspace(ctx: BotWorkspaceRead, runnerId: string) {

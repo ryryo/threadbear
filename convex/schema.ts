@@ -833,6 +833,7 @@ export const appSchema = defineSchema({
   botWorkspaceOwners: defineTable({
     workspaceId: v.string(), ownerRunnerId: v.string(), epoch: v.number(),
     noteErasureRevision: v.optional(v.number()),
+    retiredSourcesCovered: v.optional(v.number()),
     transfer: v.optional(v.object({
       moveId: v.string(), sourceRunnerId: v.string(), targetRunnerId: v.string(), epoch: v.number(), checksum: v.string(),
       bytes: v.number(), parts: v.number(), sealedChecksum: v.string(), stored: v.number(),
@@ -853,7 +854,10 @@ export const appSchema = defineSchema({
 
   botWorkspaceRetiredSources: defineTable({
     workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), epoch: v.number(),
-  }).index('by_workspace_epoch', ['workspaceId', 'epoch']).index('by_move', ['workspaceId', 'moveId']),
+    erasureRevision: v.optional(v.number()),
+    erasureScan: v.optional(v.object({ revision: v.number(), cursor: v.string() })),
+  }).index('by_workspace_epoch', ['workspaceId', 'epoch']).index('by_move', ['workspaceId', 'moveId'])
+    .index('by_erasure_revision', ['workspaceId', 'erasureRevision']),
 
   botWorkspaces: defineTable({
     runnerId: v.string(),
@@ -864,6 +868,7 @@ export const appSchema = defineSchema({
   // and after its corresponding command receipts have aged out.
   botWorkspaceErasedNotes: defineTable({
     workspaceId: v.string(), kind: v.union(v.literal('bot'), v.literal('group')), scopeId: v.string(), entryId: v.string(),
+    revision: v.optional(v.number()),
     receiptCursor: v.optional(v.string()), receiptsDone: v.optional(v.literal(true)),
     legacyReceiptCursor: v.optional(v.string()), legacyReceiptsDone: v.optional(v.literal(true)),
   }).index('by_scope_entry', ['workspaceId', 'kind', 'scopeId', 'entryId']),

@@ -5,7 +5,7 @@
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
 import { botNoteScope, botWorkspaceProjection } from './botWorkspaceValues';
-import { botNoteCommand, botNoteErasure, botSchedulesFrozen, botWorkspaceOwner, erasedBotNoteCommand, requireBotRunnerProcess, requireBotWorkspaceWrite, safeBotNoteResult, withoutErasedBotNotes } from './botWorkspaceAuthority';
+import { botNoteCommand, botNoteErasure, botSchedulesFrozen, botWorkspaceOwner, erasedBotNoteCommand, requireBotRunnerProcess, requireBotWorkspaceWrite, retiredBotSourcesErased, safeBotNoteResult, withoutErasedBotNotes } from './botWorkspaceAuthority';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2332,7 +2332,7 @@ async function checkLegacyNoteReceipts(ctx: MutationCtx, erasure: NoteErasure): 
 
 export const eraseBotWorkspaceNote = mutation({
   args: { key: v.string(), runnerId: v.string(), startedAt: v.string(), workspaceId: v.string(), epoch: v.number(), scope: botNoteScope, entryId: v.string() },
-  returns: v.object({ done: v.boolean(), waitingForLegacy: v.optional(v.literal(true)) }),
+  returns: v.object({ done: v.boolean(), waitingForLegacy: v.optional(v.literal(true)), waitingForSources: v.optional(v.literal(true)) }),
   handler: async (ctx, { key, runnerId, startedAt, workspaceId, epoch, scope, entryId }) => {
     const caller = await runnerAuth(ctx, key, 'eraseBotWorkspaceNote');
     await requireBotRunnerProcess(ctx, caller, runnerId, startedAt);
@@ -2343,10 +2343,12 @@ export const eraseBotWorkspaceNote = mutation({
     if (!scope.id || scope.id.length > 128 || !entryId || entryId.length > 128) {
       throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot memory note identity.' });
     }
+    let revision = owner.noteErasureRevision ?? 0;
     let erasure = await botNoteErasure(ctx, workspaceId, scope, entryId);
     if (!erasure) {
-      const id = await ctx.db.insert('botWorkspaceErasedNotes', { workspaceId, kind: scope.kind, scopeId: scope.id, entryId });
-      await ctx.db.patch('botWorkspaceOwners', owner._id, { noteErasureRevision: (owner.noteErasureRevision ?? 0) + 1 });
+      revision++;
+      const id = await ctx.db.insert('botWorkspaceErasedNotes', { workspaceId, kind: scope.kind, scopeId: scope.id, entryId, revision });
+      await ctx.db.patch('botWorkspaceOwners', owner._id, { noteErasureRevision: revision });
       erasure = (await ctx.db.get('botWorkspaceErasedNotes', id))!;
       const row = await ctx.db.query('botWorkspaces').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
       if (row?.workspace.workspaceId === workspaceId && row.workspace.epoch === epoch) {
@@ -2356,11 +2358,17 @@ export const eraseBotWorkspaceNote = mutation({
         await ctx.db.patch('botWorkspaces', row._id, { workspace: { ...row.workspace, notes } });
       }
     }
-    if (erasure.legacyReceiptsDone) return { done: true };
-    if (erasure.receiptsDone) return checkLegacyNoteReceipts(ctx, erasure);
-    if (!await redactNoteReceipts(ctx, erasure) || await legacyBotDeviceReceipts(ctx).first()) return { done: false };
-    await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { legacyReceiptsDone: true });
-    return { done: true };
+    if (!erasure.legacyReceiptsDone) {
+      if (erasure.receiptsDone) {
+        const result = await checkLegacyNoteReceipts(ctx, erasure);
+        if (!result.done) return result;
+      } else {
+        if (!await redactNoteReceipts(ctx, erasure) || await legacyBotDeviceReceipts(ctx).first()) return { done: false };
+        await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { legacyReceiptsDone: true });
+      }
+    }
+    return await retiredBotSourcesErased(ctx, owner, erasure.revision ?? revision)
+      ? { done: true } : { done: false, waitingForSources: true as const };
   },
 });
 

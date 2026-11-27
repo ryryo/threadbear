@@ -1830,6 +1830,8 @@ async function main(): Promise<void> {
       },
       call: (...args) => sync.botWorkspaceMoveCall(...args),
       supportsNoteErasures: () => sync.botNoteErasuresAvailable(),
+      canScrubRetiredNoteErasures: () => bots.workspaceMovesAvailable() && sync.botRetiredNoteErasuresAvailable() &&
+        supervisorGuardsBotData(cfg.home, BOT_ERASE_FORMAT),
       open: (bytes, info) => runner.secrets.openBytes(bytes, info),
       validateTarget: () => { bots.workspaceMoveStore(); },
       adopted: () => bots.workspaceAdopted(),

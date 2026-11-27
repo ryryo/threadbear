@@ -10,6 +10,7 @@ import { readRequestJournal } from './request-state.ts';
 import { assertWorkspaceMemoryErased, type RequiredNoteErasure } from './memory-erasure.js';
 import { readGroupBook } from './group-store.ts';
 import { rehomeBotWorkspaceState, workspaceTransferConversations, type BotWorkspaceIdentity } from './repository.ts';
+import { scrubRetiredWorkspaceNote } from './retired-memory-erasure.ts';
 import { readTaskJournal } from './task-journal.ts';
 import { allowedWorkspaceProjectFile, workspaceProjectChoice, workspaceProjectFiles, type WorkspaceProjectChoice } from './workspace-projects.ts';
 import { workspaceThreadPlan } from './workspace-threads.ts';
@@ -374,6 +375,19 @@ export class BotWorkspaceTransfer {
     const state = claim.state === 'claimed' ? 'moved' : 'cancelled';
     if (current.state !== state) this.save({ ...current, state });
     this.removePacks(moveId);
+  }
+
+  eraseRetiredNote(expected: { workspaceId: string; moveId: string; epoch: number }, note: RequiredNoteErasure): void {
+    const current = this.progress();
+    if (current?.state !== 'moved' || current.moveId !== expected.moveId ||
+        current.identity.workspaceId !== expected.workspaceId || current.identity.epoch !== expected.epoch ||
+        current.identity.ownerRunnerId !== this.runnerId) throw new Error('The local retired Bot workspace identity does not match.');
+    scrubRetiredWorkspaceNote(this.home, current.identity, note, () => this.protect(BOT_ERASE_FORMAT));
+    // A previous settlement deliberately kept going if unlink failed. A
+    // verified erasure must still remove any old local transfer bundles.
+    const bundle = this.bundle(current.moveId);
+    rmSync(bundle, { force: true });
+    rmSync(bundle + '.sealed', { force: true });
   }
 
   async discardTarget(proof: WorkspaceMoveProof, moveId: string, discard: () => Promise<void>): Promise<void> {

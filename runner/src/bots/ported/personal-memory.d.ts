@@ -48,7 +48,7 @@ export class PersonalMemory {
   previewBackupNotes(sources: readonly BackupMemoryNote[]): { id: string; text: string }[];
   restoreBackupNote(source: BackupMemoryNote, operationId: string, expectedRevision: string, time: string,
     protect: () => void): { revision: string };
-  erase(id: string, operationId: string, expectedRevision: string, time: string, protect: () => void): { revision: string };
+  erase(id: string, operationId: string, expectedRevision: string, time: string, protect: () => void, allowMissing?: boolean): { revision: string };
   change(mutation: ScopeChange, operationId: string, expectedRevision: string, time: string, source?: BotNoteSource): { revision: string; note?: MemoryNote };
   tidyInput(today: string): TidyInput | undefined;
   tidy(input: TidyInput, reply: string, operationId: string, time: string): { revision: string; counts: TidyCounts };

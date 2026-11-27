@@ -504,4 +504,5 @@
 // 107: Bot workspace ownership, destination Project preview, staged Thread
 //    and schedule claim, and scoped worker grants.
 // 108: durable scoped note erasure in the mirror and retention of receipt provenance.
-export const API_VERSION = 108;
+// 109: retired Bot workspace sources must acknowledge local copies of note erasures.
+export const API_VERSION = 109;

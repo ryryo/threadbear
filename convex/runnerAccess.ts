@@ -207,6 +207,8 @@ export const ACCESS: Record<string, Access> = {
   eraseBotWorkspaceNote: 'own',
   previewBotWorkspaceMove: 'own',
   verifyBotWorkspaceNoteErasures: 'own',
+  retiredBotNoteErasure: 'own',
+  ackRetiredBotNoteErasure: 'own',
   beginBotWorkspaceMove: 'own',
   putBotWorkspacePart: 'own',
   readBotWorkspacePart: 'own',

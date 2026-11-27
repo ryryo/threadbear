@@ -8,7 +8,7 @@ import type { MutationCtx } from './_generated/server';
 import { botScheduleRevision } from './botScheduleValues';
 import { botNoteScope } from './botWorkspaceValues';
 import { forbidden, runnerAuth } from './lib';
-import { botRunner, botWorkspaceOwner, ownedWorkspace, requireBotRunnerProcess, workspaceStagedFor as stagedFor, type BotWorkspaceRead } from './botWorkspaceAuthority';
+import { botRunner, botWorkspaceOwner, ownedWorkspace, rememberRetiredBotSource, requireBotRunnerProcess, retiredBotSource, workspaceStagedFor as stagedFor, type BotWorkspaceRead } from './botWorkspaceAuthority';
 import { claimBotWorkspaceThread, checkBotWorkspaceThread } from './moves';
 import { isThreadId } from './runnerAccess';
 import { syncWake } from './wakes';
@@ -101,18 +101,6 @@ function cancelledReceipt(move: Omit<Doc<'botWorkspaceMoveCancellations'>, '_id'
     ownerRunnerId: move.sourceRunnerId, epoch: move.epoch };
 }
 
-async function rememberRetiredSource(ctx: MutationCtx, workspaceId: string, { epoch, moveId, sourceRunnerId }: Transfer) {
-  const prior = await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_workspace_epoch',
-    q => q.eq('workspaceId', workspaceId).eq('epoch', epoch)).unique();
-  if (prior) {
-    if (prior.moveId !== moveId || prior.sourceRunnerId !== sourceRunnerId) {
-      throw new ConvexError({ kind: 'conflict', message: 'The retiring Bot workspace owner does not match its recorded move.' });
-    }
-    return;
-  }
-  await ctx.db.insert('botWorkspaceRetiredSources', { workspaceId, moveId, sourceRunnerId, epoch });
-}
-
 function verifyNoteErasureRevision(row: Authority, revision: number | undefined): void {
   if ((row.noteErasureRevision ?? 0) !== (revision ?? 0)) {
     throw new ConvexError({ kind: 'conflict', message: 'The Bot workspace’s note erasures must be checked again before moving.' });
@@ -137,6 +125,57 @@ export const verifyBotWorkspaceNoteErasures = query({
     return { revision: owner.noteErasureRevision ?? 0, epoch: owner.epoch, ownerRunnerId: owner.ownerRunnerId,
       cursor: page.isDone ? null : page.continueCursor,
       rows: page.page.map(row => ({ scope: { kind: row.kind, id: row.scopeId }, entryId: row.entryId })) };
+  },
+});
+
+const retiredArgs = { ...runnerArgs, epoch: v.number() };
+const erasureItem = { revision: v.number(), scope: v.optional(botNoteScope), entryId: v.optional(v.string()) };
+
+async function retiredErasurePage(ctx: BotWorkspaceRead, { workspaceId, moveId, runnerId, epoch }: {
+  workspaceId: string; moveId: string; runnerId: string; epoch: number;
+}) {
+  const owner = await botWorkspaceOwner(ctx, workspaceId);
+  const source = await retiredBotSource(ctx, workspaceId, epoch);
+  if (!owner || owner.epoch <= epoch || owner.ownerRunnerId === runnerId ||
+      source?.sourceRunnerId !== runnerId || source.moveId !== moveId) {
+    throw forbidden('read this retired Bot workspace’s erasures');
+  }
+  const revision = owner.noteErasureRevision ?? 0;
+  if ((source.erasureRevision ?? 0) === revision) return null;
+  const cursor = source.erasureScan?.revision === revision ? source.erasureScan.cursor : null;
+  const page = await ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry', q => q.eq('workspaceId', workspaceId))
+    .paginate({ numItems: 1, cursor });
+  const row = page.page[0];
+  return { source, page, item: { revision, ...(row ? { scope: { kind: row.kind, id: row.scopeId }, entryId: row.entryId } : {}) } };
+}
+
+export const retiredNoteErasure = query({
+  args: retiredArgs,
+  returns: v.union(v.null(), v.object(erasureItem)),
+  handler: async (ctx, { key, startedAt, ...locator }) => {
+    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'retiredBotNoteErasure'), locator.runnerId, startedAt);
+    return (await retiredErasurePage(ctx, locator))?.item ?? null;
+  },
+});
+
+export const ackRetiredNoteErasure = mutation({
+  args: { ...retiredArgs, ...erasureItem },
+  returns: v.boolean(),
+  handler: async (ctx, { key, startedAt, revision, scope, entryId, ...locator }) => {
+    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'ackRetiredBotNoteErasure'), locator.runnerId, startedAt);
+    const current = await retiredErasurePage(ctx, locator);
+    if (!current || current.item.revision !== revision || current.item.entryId !== entryId ||
+        current.item.scope?.kind !== scope?.kind || current.item.scope?.id !== scope?.id) return false;
+    const sealed = await ctx.db.query('botWorkspaceParts').withIndex('by_part',
+      q => q.eq('workspaceId', locator.workspaceId).eq('moveId', locator.moveId)).first();
+    if (sealed) {
+      await queueDiscard(ctx, locator.workspaceId, locator.moveId);
+      return false;
+    }
+    await ctx.db.patch('botWorkspaceRetiredSources', current.source._id, current.page.isDone
+      ? { erasureRevision: revision, erasureScan: undefined }
+      : { erasureScan: { revision, cursor: current.page.continueCursor } });
+    return true;
   },
 });
 
@@ -191,7 +230,7 @@ export const begin = mutation({
     if (running || waiting) throw new ConvexError({ kind: 'busy', message: 'The Bot workspace still has worker requests.' });
     await scheduleRows(ctx, runnerId, revisions);
     if (prior) {
-      if (prior.state === 'claimed') await rememberRetiredSource(ctx, workspaceId, prior);
+      if (prior.state === 'claimed') await rememberRetiredBotSource(ctx, row, prior);
       await queueDiscard(ctx, workspaceId, prior.moveId);
     }
     await ctx.db.patch('botWorkspaceOwners', row._id, {
@@ -307,7 +346,7 @@ export const claim = mutation({
       throw forbidden('claim this Bot workspace');
     }
     if (move.state === 'claimed') {
-      await rememberRetiredSource(ctx, workspaceId, move);
+      await rememberRetiredBotSource(ctx, row, move);
       await queueDiscard(ctx, workspaceId, moveId);
       return receipt(row, moveId, 'claimed');
     }
@@ -327,7 +366,7 @@ export const claim = mutation({
       await syncWake(ctx, { ...schedule, runnerId });
     }
     const next = { ownerRunnerId: runnerId, epoch: row.epoch + 1 };
-    await rememberRetiredSource(ctx, workspaceId, move);
+    await rememberRetiredBotSource(ctx, row, move);
     await ctx.db.patch('botWorkspaceOwners', row._id, { ...next, transfer: { ...move, state: 'claimed' } });
     await queueDiscard(ctx, workspaceId, moveId);
     return receipt({ ...row, ...next }, moveId, 'claimed');
