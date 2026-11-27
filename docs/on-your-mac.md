@@ -885,8 +885,9 @@ the owning runner.
   the memory journal. The owning Runner writes the notes files. It can mirror
   public Bot profiles, visible notes and work status to paired devices
   through Convex. The old process forwards active Bot tool calls to the
-  primary during a handover. Recovery reads only staged files named
-  `<home>/bot-backups/<backup ID>.pack` and checks their workspace and deletion
+  primary during a handover. Creating a backup writes a private, local file
+  named `<home>/bot-backups/<backup ID>.pack` with the chosen scope's current
+  notes and erasure IDs. Recovery reads these packs and checks their workspace and deletion
   records through the existing sync connection before updating the note’s
   journal. Selecting an existing Thread to attach updates its saved Bot link.
   The primary records and applies the operations.

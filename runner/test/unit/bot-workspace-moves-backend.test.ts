@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { BotRepository } from '../../src/bots/repository.ts';
 import { BotWorkspaceWire, connectNativeWorkspaceRunner } from '../../src/bots/workspace-wire.ts';
-import { backupMemoryRestoreInput, listManagedMemoryBackups, readManagedMemoryBackup, scopedBackupNotes, selectBackupMemoryNote } from '../../src/bots/managed-memory-restore.ts';
+import { backupMemoryRestoreInput, listManagedMemoryBackups, readManagedMemoryBackup, scopedBackupNotes, selectBackupMemoryNote, captureManagedMemoryBackup, saveManagedMemoryBackup, openManagedMemoryBackup, scrubManagedMemoryBackups } from '../../src/bots/managed-memory-restore.ts';
 import { BotWorkspaceTransfer } from '../../src/bots/workspace-transfer.ts';
 import { BotConversations } from '../../src/bots/conversations.ts';
 import { PersonalMemory } from '../../src/bots/ported/personal-memory.js';
@@ -694,4 +694,70 @@ test('an owner restores one selected note only after the archive and current wor
   assert.deepEqual(memory.list('2026-11-27').map(note => note.text).sort(), ['バックアップの覚書', '現在の覚書']);
   assert.equal(outside.list('2026-11-27')[0]?.text, '別のBotの覚書');
   assert.deepEqual(readFileSync(path), pack);
+});
+
+test('scoped backup packs keep current notes, replay the creation, and discard only an erased note', async () => {
+  const home = tmpDir();
+  const repo = new BotRepository(join(home, 'bots'), SOURCE);
+  const bot = repo.create({ name: 'Editor', instructions: 'not a backed up prompt' });
+  const identity = repo.workspaceIdentity();
+  const scope = { kind: 'bot', id: bot.id } as const;
+  const time = '2026-11-27T00:00:00Z';
+  const memory = new PersonalMemory(join(home, 'bots', 'memory', scope.id));
+  const erased = memory.change({ op: 'add', text: '消す覚書' }, 'add-erased', 'empty', time);
+  const kept = memory.change({ op: 'add', text: '残す覚書' }, 'add-keep', erased.revision, time);
+  assert.ok(erased.note && kept.note);
+  const other = { kind: 'group', id: randomUUID() } as const;
+  const otherMemory = new PersonalMemory(join(home, 'bots', 'memory', 'group-' + other.id), { scope: 'group' });
+  const otherNote = otherMemory.restoreBackupNote({ entryId: erased.note.id, file: 'MEMORY.md', checksum: DIGEST,
+    line: memory.files()[0].lines.find(line => line.includes('消す覚書'))!.replace('消す覚書', '同じIDの別Scope') }, 'other', 'empty', time, () => {});
+  const input = { scope, expectedRevision: kept.revision, operationId: 'save-backup' };
+  const capture = captureManagedMemoryBackup(identity, input, memory);
+  const backupId = saveManagedMemoryBackup(home, capture);
+  assert.equal(saveManagedMemoryBackup(home, capture), backupId);
+  const otherId = saveManagedMemoryBackup(home, captureManagedMemoryBackup(identity,
+    { scope: other, expectedRevision: otherNote.revision, operationId: 'another-backup' }, otherMemory));
+  const copied = openManagedMemoryBackup(home, { backupId });
+  assert.doesNotMatch(Buffer.concat(copied.files.map(file => file.data)).toString('utf8'), /not a backed up prompt|add-erased/);
+  assert.deepEqual(scopedBackupNotes(copied.files, other, copied.checksum), []);
+  const untouched = openManagedMemoryBackup(home, { backupId: otherId });
+  const legacy = archive(readTree(join(home, 'bots'), 'bots'));
+
+  memory.erase(erased.note.id, 'erase', kept.revision, time, () => {});
+  const tombstone = memory.history().find(row => row.op === 'erase')!;
+  const required = { scope, entryId: erased.note.id };
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  const cleaned = openManagedMemoryBackup(home, { backupId });
+  assert.notEqual(cleaned.checksum, copied.checksum);
+  assert.doesNotMatch(Buffer.concat(cleaned.files.map(file => file.data)).toString('utf8'), /消す覚書/);
+  assert.deepEqual(scopedBackupNotes(cleaned.files, scope, cleaned.checksum).map(row => row.entryId), [kept.note.id]);
+  assert.equal(openManagedMemoryBackup(home, { backupId: otherId }).checksum, untouched.checksum);
+  assert.equal(scopedBackupNotes(untouched.files, other, untouched.checksum)[0]?.entryId, erased.note.id);
+  scrubManagedMemoryBackups(home, identity, required, tombstone);
+  assert.equal(openManagedMemoryBackup(home, { backupId }).checksum, cleaned.checksum);
+  assert.equal(saveManagedMemoryBackup(home, capture), backupId, 'a stale same-operation retry never rewrites the pack');
+  assert.equal(openManagedMemoryBackup(home, { backupId }).checksum, cleaned.checksum);
+
+  const backend = await fixture(identity.workspaceId);
+  await call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(SOURCE), runnerId: SOURCE, startedAt: RELEASE,
+    workspaceId: identity.workspaceId, epoch: identity.epoch, ...required });
+  const wire = new BotWorkspaceWire({
+    runnerId: SOURCE, store: new BotWorkspaceTransfer(home, SOURCE, () => {}), supportsNoteErasures: () => true,
+    key: async () => assert.fail('local backup uses no delivery keys'), call: (_kind, method, args) => backend.invoke(SOURCE, method, args),
+    open: () => assert.fail('local backup is not a move'), validateTarget: () => {}, adopted: () => {},
+  });
+  await assert.rejects(wire.verifyMemoryRestore(copied.files, identity), /required memory erasure/);
+  await wire.verifyMemoryRestore(cleaned.files, identity);
+  await wire.verifyMemoryRestore(untouched.files, identity);
+
+  const forgotten = memory.change({ op: 'remove', entryId: kept.note.id }, 'forget-saved', memory.revision(), time);
+  const restore = { backupId, scope, checksum: cleaned.checksum, entryId: kept.note.id, operationId: 'restore-saved', expectedRevision: forgotten.revision };
+  await wire.verifyMemoryRestore(cleaned.files, identity);
+  memory.restoreBackupNote(selectBackupMemoryNote(cleaned.files, restore), restore.operationId, restore.expectedRevision, time, () => {});
+  assert.deepEqual(memory.list('2026-11-27').map(note => note.text), ['残す覚書']);
+
+  const legacyPath = join(home, 'bot-backups', randomUUID() + '.pack');
+  writeFileSync(legacyPath, legacy);
+  assert.throws(() => scrubManagedMemoryBackups(home, identity, required, tombstone), /required memory erasure/);
+  assert.deepEqual(readFileSync(legacyPath), legacy, 'the pre-staged workspace archive requires explicit handling');
 });

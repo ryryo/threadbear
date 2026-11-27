@@ -418,6 +418,13 @@ a frozen candidate does not change the backup or install it.
 On an owning Runner with a compatible supervisor and backend,
 `bots.status` advertises `managedMemoryRestore`. The owner can list the
 Runner’s staged backup IDs and saved times with `bots.memory.backups`.
+`bots.memory.createBackup` takes a Bot or Group `scope`, its
+`expectedRevision`, and an `operationId`. It saves the scope's current
+notes to the Runner's `bot-backups` folder and returns the updated backup
+list. It copies neither note history nor conversation content. The same
+operation ID can recover the saved result after a lost reply. The backup
+is refused if the scope, its revision or the owning Runner changes while
+the current erasure records are checked.
 `bots.memory.backupNotes` takes `backupId` and `scope` and returns the
 verified `checksum`, the live scope `revision`, and `notes` containing
 only the ID and text of each restorable note in that scope. Listing the

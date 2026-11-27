@@ -22,6 +22,7 @@ type Options = {
   canWrite: () => boolean;
   eraseLocal: (intent: NoteErasureIntent, beforeWrite: () => void) => { revision: string };
   eraseLocalReviews?: (intent: NoteErasureIntent) => void;
+  eraseLocalBackups?: (intent: NoteErasureIntent) => void;
   eraseMirror: (input: BotNoteErasure) => Promise<BotNoteErasureReply>;
 };
 
@@ -93,10 +94,18 @@ export class BotNoteErasureQueue {
     // revision. A finished local write reuses the journal's operation receipt.
     this.options.eraseLocal(intent, () => {});
     this.options.eraseLocalReviews?.(intent);
+    // Scrub local packs even when sync is offline, and still send the
+    // tombstone to the mirror if a local archive needs attention.
+    const backups = Promise.resolve().then(() => {
+      if (this.sameOwnership(intent)) this.options.eraseLocalBackups?.(intent);
+    });
     const { workspaceId, epoch, scope, entryId } = intent;
-    const reply = await this.options.eraseMirror({ workspaceId, epoch, scope, entryId });
-    if (!reply.done) return reply;
+    const [remote, local] = await Promise.allSettled([this.options.eraseMirror({ workspaceId, epoch, scope, entryId }), backups]);
+    if (local.status === 'rejected') throw local.reason;
+    if (remote.status === 'rejected') throw remote.reason;
+    const reply = remote.value;
     if (!this.sameOwnership(intent)) return { done: false };
+    if (!reply.done) return reply;
     this.save(this.read().filter(row => row.operationId !== intent.operationId));
     return reply;
   }

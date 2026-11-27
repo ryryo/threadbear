@@ -77,27 +77,45 @@ impl Threadbear {
         let mut section = v_flex().gap(px(8.));
         if let Some((backup, preview)) = &state.preview {
             section = section.child(self.render_backup_notes(scope, backup, preview, cx));
-        } else if backups.is_empty() {
-            section = section.child(tr!("This Runner has no staged Bot backups."));
         } else {
-            section = section.child(tr!("Choose a backup to see which notes can be restored."));
-            for backup in backups {
-                let id = backup.id.clone();
-                let params = json!({ "backupId": id, "scope": scope.target() });
-                let short_id: String = id.chars().take(8).collect();
-                let label = format!("{} · {short_id}", backup.updated_at);
+            if let Some(revision) = &self.bots.memory_revision {
+                let params = json!({ "scope": scope.target(), "expectedRevision": revision });
                 section = section.child(
-                    bot_button(SharedString::from(format!("bot-backup-{id}")), label, busy)
+                    bot_button("bot-backup-create", tr!("Back up these notes"), busy)
+                        .loading(busy)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.bot_write(
-                                "bots.memory.backupNotes",
+                                "bots.memory.createBackup",
                                 params.clone(),
-                                After::BackupNotes(id.clone()),
+                                After::BackupIndex,
                                 window,
                                 cx,
                             );
                         })),
                 );
+            }
+            if backups.is_empty() {
+                section = section.child(tr!("This Runner has no staged Bot backups."));
+            } else {
+                section = section.child(tr!("Choose a backup to see which notes can be restored."));
+                for backup in backups {
+                    let id = backup.id.clone();
+                    let params = json!({ "backupId": id, "scope": scope.target() });
+                    let short_id: String = id.chars().take(8).collect();
+                    let label = format!("{} · {short_id}", backup.updated_at);
+                    section = section.child(
+                        bot_button(SharedString::from(format!("bot-backup-{id}")), label, busy)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.bot_write(
+                                    "bots.memory.backupNotes",
+                                    params.clone(),
+                                    After::BackupNotes(id.clone()),
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    );
+                }
             }
         }
         section

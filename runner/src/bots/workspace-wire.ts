@@ -4,6 +4,7 @@ import { sealBytes } from '../secrets.ts';
 import type { Runner } from '../runner.ts';
 import { workspaceTransferConversations, type BotWorkspaceIdentity } from './repository.ts';
 import { assertWorkspaceMemoryErased, type RequiredNoteErasure } from './memory-erasure.js';
+import { managedBackupScope } from './managed-memory-restore.ts';
 import { verifyTargetProjects, workspaceProjectChoice, type WorkspaceProjectChoice } from './workspace-projects.ts';
 import { adoptWorkspaceThread, packWorkspaceThread, placeWorkspaceThread, workspaceThreadFiles, workspaceThreadPacks } from './workspace-threads.ts';
 import { workspaceScheduleRevisions, type BotWorkspaceTransfer, type WorkspaceMoveProof, type WorkspaceScheduleRevision } from './workspace-transfer.ts';
@@ -98,7 +99,8 @@ export class BotWorkspaceWire {
     workspaceTransferConversations(state.data.toString('utf8'), identity);
     const noteProof = await this.noteErasures({ workspaceId: identity.workspaceId }, identity);
     if (!noteProof) throw new Error('A Bot backup needs updated sync to check its note erasures.');
-    assertWorkspaceMemoryErased(files, noteProof.rows);
+    const scope = managedBackupScope(files);
+    assertWorkspaceMemoryErased(files, scope ? noteProof.rows.filter(row => row.scope.kind === scope.kind && row.scope.id === scope.id) : noteProof.rows);
   }
 
   async cancel(moveId: string): Promise<void> {

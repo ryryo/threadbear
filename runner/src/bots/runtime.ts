@@ -35,7 +35,7 @@ import type { RememberInput } from './memory-tool.ts';
 import { activeBotInput } from './turn-proof.ts';
 
 import { BotWorkspaceTransfer } from './workspace-transfer.ts';
-import { listManagedMemoryBackups, openManagedMemoryBackup, scopedBackupNotes, selectBackupMemoryNote, type BackupMemoryPreviewInput, type BackupMemoryRestoreInput } from './managed-memory-restore.ts';
+import { captureManagedMemoryBackup, listManagedMemoryBackups, openManagedMemoryBackup, saveManagedMemoryBackup, savedManagedMemoryBackup, scopedBackupNotes, scrubManagedMemoryBackups, selectBackupMemoryNote, type BackupMemoryCreateInput, type BackupMemoryPreviewInput, type BackupMemoryRestoreInput } from './managed-memory-restore.ts';
 import type { PersonalMemory } from './ported/personal-memory.js';
 import type { PackEntry } from '../move-pack.ts';
 
@@ -406,6 +406,13 @@ export class BotRuntime {
         new ReviewCheckpoints(join(this.options.home, 'bots', 'reviews'))
           .eraseMemoryCopies(scope.id, repo.conversations(scope.id), memory.history());
       },
+      eraseLocalBackups: ({ scope, entryId, operationId }) => {
+        const { repo, conversations } = this.getWorkspace();
+        const memory = conversations.scopedMemory.open(scope, { kind: 'owner' }, 'read');
+        const receipt = memory.history().find(row => row.op === 'erase' && row.entryId === entryId && row.transaction?.operationId === operationId);
+        if (!receipt) throw new Error('The Bot note erasure receipt is missing.');
+        scrubManagedMemoryBackups(this.options.home, repo.workspaceIdentity(), { scope, entryId }, receipt);
+      },
       eraseMirror: async input => {
         const erase = this.options.eraseNoteFromMirror;
         if (!erase) throw new Error('Bot note erasure needs sync.');
@@ -436,6 +443,26 @@ export class BotRuntime {
   listMemoryBackups() {
     this.restoreWorkspace();
     return { backups: listManagedMemoryBackups(this.options.home) };
+  }
+
+  async createMemoryBackup(input: BackupMemoryCreateInput, verified: BackupPreflight<ReturnType<BotRuntime['listMemoryBackups']>>) {
+    const { repo, conversations } = this.restoreWorkspace();
+    const identity = repo.workspaceIdentity();
+    const memory = conversations.scopedMemory.open(input.scope, { kind: 'owner' }, 'write');
+    if (savedManagedMemoryBackup(this.options.home, identity, input)) return this.listMemoryBackups();
+    const capture = captureManagedMemoryBackup(identity, input, memory);
+    return verified(capture.files, identity, () => {
+      const current = this.restoreWorkspace();
+      const owner = current.repo.workspaceIdentity();
+      if (current.repo !== repo || owner.workspaceId !== identity.workspaceId || owner.epoch !== identity.epoch || owner.ownerRunnerId !== identity.ownerRunnerId) {
+        throw new RpcError(ErrorCode.busy, 'The Bot workspace owner changed while checking the backup.');
+      }
+      const live = current.conversations.scopedMemory.open(input.scope, { kind: 'owner' }, 'write');
+      if (live.revision() !== input.expectedRevision) throw new RpcError(ErrorCode.busy, 'These notes changed. Reload the current notes before backing them up.');
+      protectBotData(this.options.home, BOT_ERASE_FORMAT);
+      saveManagedMemoryBackup(this.options.home, capture);
+      return this.listMemoryBackups();
+    });
   }
 
   private checkedMemoryBackup<T>(input: BackupMemoryPreviewInput & { checksum?: string }, verified: BackupPreflight<T>,

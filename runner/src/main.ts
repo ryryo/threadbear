@@ -92,7 +92,7 @@ import { keptRemember, type RememberInput } from './bots/memory-tool.ts';
 import { method as botMethod } from './bots/rpc.ts';
 import { BotWorkers, requestBotWorker, workerResultParams } from './bots/worker.ts';
 import { connectNativeWorkspaceRunner, workspaceMoveInput, workspaceMovePreviewInput, workspaceMoveReceipt } from './bots/workspace-wire.ts';
-import { backupMemoryPreviewInput, backupMemoryRestoreInput } from './bots/managed-memory-restore.ts';
+import { backupMemoryCreateInput, backupMemoryPreviewInput, backupMemoryRestoreInput } from './bots/managed-memory-restore.ts';
 import { workspaceMemoryProjects } from './bots/workspace-projects.ts';
 import { botConversationSchedules, botScheduleMethods } from './bots/schedule-rpc.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
@@ -1842,6 +1842,8 @@ async function main(): Promise<void> {
   };
   Object.assign(methods, {
     'bots.memory.backups': () => bots.listMemoryBackups(),
+    'bots.memory.createBackup': botMethod(backupMemoryCreateInput, input =>
+      bots.createMemoryBackup(input, (...args) => workspaceMoves().recoverMemory(...args))),
     'bots.memory.backupNotes': botMethod(backupMemoryPreviewInput, input =>
       bots.previewMemoryBackup(input, (...args) => workspaceMoves().recoverMemory(...args))),
     'bots.memory.recoverFromBackup': botMethod(backupMemoryRestoreInput, input =>

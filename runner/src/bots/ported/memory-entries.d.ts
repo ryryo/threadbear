@@ -1,6 +1,8 @@
 export const MEMORY_LIMITS: { entry: number; bot: number; team: number; group: number };
+export const MAIN: 'MEMORY.md';
 export function cleanEntry(raw: unknown): string;
 export function cleanDay(raw: unknown): string | undefined;
+export function cleanTopic(raw: unknown): string | undefined;
 export function looksSecret(raw: string): boolean;
 export function parseReview(text: string): {
   changes: { op: 'add' | 'edit' | 'remove'; entry?: number; text?: string; until?: unknown; team?: unknown; topic?: unknown; for?: unknown; group?: unknown }[];

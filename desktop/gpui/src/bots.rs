@@ -2428,6 +2428,7 @@ impl Threadbear {
                         | "bots.tasks.retry"
                         | "bots.duplicate"
                         | "bots.conversations.attach"
+                        | "bots.memory.createBackup"
                         | "bots.memory.recoverFromBackup"
                 ))
         {

@@ -64,6 +64,13 @@ Feature: Bot workspace
     Then the Bot's notes show "復元する覚書"
     And the Bot's notes show "現在の覚書"
 
+  @bots.managed_restore @swift-pending
+  Scenario: The owner backs up the selected Bot's current notes
+    Given the app is connected to an isolated Bot Runner
+    When I open the note backups for the Bot
+    And I back up the current Bot notes
+    Then I can open the newly created backup
+
   @bots.scoped_notes @bots @swift-pending
   Scenario: A workspace note stays in the workspace's memory
     Given the app is connected to an isolated Bot Runner

@@ -294,13 +294,29 @@ Then('I see the existing Thread with its saved reply and new Bot link', async fu
   });
 });
 
+async function openBotBackups(world: BotWorld) {
+  await click(world, 'Bots: assistants with their own settings and notes');
+  await click(world, 'Editorial Bot');
+  await click(world, 'Memory');
+  await click(world, 'Bot: Editorial Bot');
+  await click(world, 'Open note backups');
+}
+
 When("I view the backup for the Bot's memory", async function (this: BotWorld) {
-  await click(this, 'Bots: assistants with their own settings and notes');
-  await click(this, 'Editorial Bot');
-  await click(this, 'Memory');
-  await click(this, 'Bot: Editorial Bot');
-  await click(this, 'Open note backups');
+  await openBotBackups(this);
   await click(this, '2026-11-27T10:00:00.000Z · 10000000');
+});
+
+When('I open the note backups for the Bot', async function (this: BotWorld) {
+  await openBotBackups(this);
+});
+
+When('I back up the current Bot notes', async function (this: BotWorld) {
+  await click(this, 'Back up these notes');
+});
+
+Then('I can open the newly created backup', async function (this: BotWorld) {
+  await click(this, '2026-11-27T11:00:00.000Z · 20000000');
 });
 
 When('I select the backed-up note {string}', async function (this: BotWorld, note: string) {

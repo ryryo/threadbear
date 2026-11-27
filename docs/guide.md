@@ -2141,8 +2141,9 @@ select a local idle Thread and confirm. The Thread keeps its transcript and
 CLI session. The Bot settings apply when it next runs. Private Bots require
 their own work folder and cannot use these two actions.
 
-To restore from a staged backup, open **Memory**, select the Bot or Group
-scope, and choose **Open note backups**. Choose a backup, select a note and
+In **Memory**, select a Bot or Group scope and choose **Open note backups**.
+Choose **Back up these notes** to save the current notes on this Runner.
+To restore from a backup, choose the backup, select a note and
 confirm **Restore this note**. The Runner checks the scope, current note
 revision and deletion records before bringing back that one note.
 

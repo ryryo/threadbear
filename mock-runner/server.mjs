@@ -381,6 +381,7 @@ let childWaitAbandoned = false;
 const workerBot = { id: 'editorial-bot', name: 'Editorial Bot', role: '', instructions: '', revision: 1 };
 let botWorkspaceMove = null;
 let restoredBotNote = false;
+let createdBotBackup;
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true, labReview: true, labReviewers: [{ provider: 'codex', model: 'gpt-6.1-sol' }, { provider: 'claude', effort: 'xhigh' }], labPanel: [], labPanelLines: 150, keepAwake: true, fullSync: false, spareWeek: true,
   models: {
@@ -1050,6 +1051,7 @@ async function dispatch(client, method, p) {
   if (process.env.TB_MOCK_BOT_RESTORE && method.startsWith('bots.')) {
     const scope = { kind: 'bot', id: workerBot.id };
     const backupId = '10000000-0000-4000-8000-000000000001';
+    const olderBackup = { id: backupId, updatedAt: '2026-11-27T10:00:00.000Z' };
     const checksum = 'a'.repeat(64);
     const note = { id: 'restored-note', text: '復元する覚書' };
     const revision = '10000000-0000-4000-8000-000000000002';
@@ -1065,8 +1067,13 @@ async function dispatch(client, method, p) {
         notes: [{ id: 'current-note', text: '現在の覚書', pinned: false }, ...(restoredBotNote ? [{ ...note, pinned: false }] : [])],
         revision: restoredBotNote ? nextRevision : revision,
       };
-      case 'bots.memory.backups': return { backups: [{ id: backupId, updatedAt: '2026-11-27T10:00:00.000Z' }] };
+      case 'bots.memory.backups': return { backups: createdBotBackup ? [createdBotBackup, olderBackup] : [olderBackup] };
+      case 'bots.memory.createBackup':
+        if (!correctScope || p.expectedRevision !== revision || !p.operationId) throw rpcError(-32602, 'Expected the chosen scope and revision.');
+        createdBotBackup = { id: '20000000-0000-4000-8000-000000000001', updatedAt: '2026-11-27T11:00:00.000Z' };
+        return { backups: [createdBotBackup, olderBackup] };
       case 'bots.memory.backupNotes':
+        if (correctScope && p.backupId === createdBotBackup?.id) return { checksum, revision, notes: [] };
         if (!correctScope || p.backupId !== backupId) throw rpcError(-32602, 'Expected the chosen backup scope.');
         return { checksum, revision, notes: restoredBotNote ? [] : [note] };
       case 'bots.memory.recoverFromBackup':

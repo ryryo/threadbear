@@ -98,6 +98,8 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     import { readFileSync } from 'node:fs';
     import { join } from 'node:path';
     import { BotRuntime } from ${modulePath('../../../src/bots/runtime.ts')};
+    import { openManagedMemoryBackup } from ${modulePath('../../../src/bots/managed-memory-restore.ts')};
+    import { PersonalMemory } from ${modulePath('../../../src/bots/ported/personal-memory.js')};
     import { makeHarness } from ${modulePath('../../helpers/fakes.ts')};
     const [home, mode] = process.argv.slice(2);
     const input = JSON.parse(process.env.TB_BOT_ERASE_TEST_INPUT);
@@ -115,12 +117,33 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     const savedQueue = () => JSON.parse(readFileSync(join(home, 'bot-note-erasures.json'), 'utf8'));
     if (mode === 'old') {
       assert.throws(() => runtime.beginNoteErasure(input), /current Bot workspace owner/);
+    } else if (mode === 'backup') {
+      const memory = new PersonalMemory(join(home, 'bots', 'memory', input.scope.id));
+      const create = { scope: input.scope, expectedRevision: input.expectedRevision, operationId: 'create-backup' };
+      const afterDrift = async (_files, _identity, apply) => {
+        memory.change({ op: 'edit', entryId: input.entryId, text: 'changed while verifying' }, 'newer', create.expectedRevision, input.time);
+        return apply();
+      };
+      await assert.rejects(runtime.createMemoryBackup(create, afterDrift), /notes changed/);
+      assert.deepEqual(runtime.listMemoryBackups().backups, []);
+      const edited = memory.revision();
+      const backup = { ...create, expectedRevision: edited };
+      const created = await runtime.createMemoryBackup(backup, async (_files, _identity, apply) => apply());
+      assert.equal(created.backups.length, 1);
+      assert.deepEqual(await runtime.createMemoryBackup(backup, async () => assert.fail('a retry must use the pack')), created);
+      memory.change({ op: 'edit', entryId: input.entryId, text: 'follow-up' }, 'more-recent', edited, input.time);
+      assert.deepEqual(await runtime.createMemoryBackup(backup, async () => assert.fail('a retry must use the pack')), created);
+      await assert.rejects(runtime.createMemoryBackup({ ...backup, expectedRevision: memory.revision() }, async () => assert.fail('operation conflict')), /different Bot backup/);
     } else if (mode === 'lost') {
+      input.expectedRevision = new PersonalMemory(join(home, 'bots', 'memory', input.scope.id)).revision();
       runtime.beginNoteErasure(input);
       assert.equal(runtime.workspaceIdleForMove(), false);
       await assert.rejects(runtime.resumeNoteErasures(), /interrupted after sync submission/);
       assert.equal(savedQueue().length, 1);
       assert.equal(readFileSync(join(home, 'bots-format.json'), 'utf8').trim(), '11');
+      const [pack] = await import('node:fs').then(fs => fs.readdirSync(join(home, 'bot-backups')));
+      const entries = openManagedMemoryBackup(home, { backupId: pack.replace(/\\.pack$/, '') }).files;
+      assert.doesNotMatch(Buffer.concat(entries.map(file => file.data)).toString('utf8'), /changed while verifying|follow-up/);
     } else {
       assert.equal(savedQueue().length, 1);
       await runtime.resumeNoteErasures();
@@ -128,7 +151,7 @@ test('a supervised Bot runtime resumes the saved erasure in a new process and ke
     }
     process.disconnect();
   `);
-  for (const [mode, guard] of [['old', '10'], ['lost', '11'], ['resume', '11']]) {
+  for (const [mode, guard] of [['old', '10'], ['backup', '11'], ['lost', '11'], ['resume', '11']]) {
     const child = fork(script, [f.home, mode!], {
       env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1',
         THREADBEAR_BOT_FORMAT_GUARD_VERSION: guard, THREADBEAR_BOT_FORMAT_HOME: f.home, TB_BOT_ERASE_TEST_INPUT: JSON.stringify(f.input) },

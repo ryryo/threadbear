@@ -2,6 +2,8 @@ export type MemoryNote = { id: string; text: string; pinned: boolean; until?: st
 export type MemoryChange = {
   id: string;
   time: string;
+  file: string;
+  scope: 'own' | 'team' | 'project' | 'group';
   op: 'add' | 'remove' | 'replace' | 'tidy' | 'erase';
   before?: string;
   after?: string;
@@ -12,6 +14,7 @@ export type MemoryChange = {
   sourceTurnId?: string;
   sourceSeq?: number;
   actor?: string;
+  transaction?: { operationId: string; hash: string; note?: MemoryNote };
   review?: ReviewReceipt;
 };
 
@@ -32,6 +35,8 @@ export class PersonalMemory {
   constructor(root: string, options?: { scope?: 'own' | 'team' | 'project' | 'group'; base?: string; redact?: (text: string) => string });
   list(today: string): MemoryNote[];
   search(query: string, today: string): MemoryNote[];
+  files(): (ReturnType<typeof import('./memory-entries.js').parseMemory> & { file: string; content: string })[];
+  refuseSecret(text: string): void;
   history(): MemoryChange[];
   historyPage(before?: string): { rows: MemoryChange[]; more: string | null };
   revision(): string;
