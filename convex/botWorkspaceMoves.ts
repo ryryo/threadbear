@@ -151,7 +151,7 @@ export const retiredNoteErasure = query({
   args: { ...retiredArgs, cursor: v.optional(v.string()) },
   returns: v.object({ items: v.array(v.object(erasureItem)), cursor: v.union(v.string(), v.null()) }),
   handler: async (ctx, { key, startedAt, cursor, ...locator }) => {
-    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'retiredBotNoteErasure'), locator.runnerId, startedAt);
+    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'retiredNoteErasure'), locator.runnerId, startedAt);
     await requireRetiredSource(ctx, locator);
     const page = await ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry', q => q.eq('workspaceId', locator.workspaceId))
       .paginate({ numItems: 16, cursor: cursor ?? null });
@@ -167,7 +167,7 @@ export const ackRetiredNoteErasure = mutation({
   args: { ...retiredArgs, ...erasureItem },
   returns: v.boolean(),
   handler: async (ctx, { key, startedAt, revision, scope, entryId, ...locator }) => {
-    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'ackRetiredBotNoteErasure'), locator.runnerId, startedAt);
+    await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'ackRetiredNoteErasure'), locator.runnerId, startedAt);
     await requireRetiredSource(ctx, locator);
     const erasure = await botNoteErasure(ctx, locator.workspaceId, scope, entryId);
     if (!erasure || (erasure.revision ?? 0) !== revision) return false;

@@ -18,8 +18,8 @@ const workerGrants = load('botWorkerGrants');
 const botHandlers: ReturnType<typeof load> = {
   previewBotWorkspaceMove: workspaceMoves.destinationProjects,
   verifyBotWorkspaceNoteErasures: workspaceMoves.verifyBotWorkspaceNoteErasures,
-  retiredBotNoteErasure: workspaceMoves.retiredNoteErasure,
-  ackRetiredBotNoteErasure: workspaceMoves.ackRetiredNoteErasure,
+  retiredNoteErasure: workspaceMoves.retiredNoteErasure,
+  ackRetiredNoteErasure: workspaceMoves.ackRetiredNoteErasure,
   beginBotWorkspaceMove: workspaceMoves.begin,
   putBotWorkspacePart: workspaceMoves.putPart,
   readBotWorkspacePart: workspaceMoves.part,
