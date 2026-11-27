@@ -22,7 +22,9 @@ export const botProfileEdit = v.object({
   settings: v.object({ name: v.optional(v.string()), role: v.optional(v.string()), instructions: v.optional(v.string()) }),
 });
 
-const botNoteScope = v.object({ kind: v.union(v.literal('bot'), v.literal('group')), id: v.string() });
+export const botNoteScope = v.object({ kind: v.union(v.literal('bot'), v.literal('group')), id: v.string() });
+export const botNoteReceipt = v.object({ workspaceId: v.string(), scope: botNoteScope, entryId: v.optional(v.string()) });
+export const botNoteTarget = v.object({ workspaceId: v.string(), scope: botNoteScope, entryId: v.string() });
 const noteChange = { scope: botNoteScope, expectedRevision: v.string() };
 
 export const botDeviceAction = v.object({

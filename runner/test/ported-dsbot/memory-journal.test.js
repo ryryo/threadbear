@@ -73,3 +73,61 @@ test('a pending change with a path outside the memory root stops before writing'
   assert.ok(existsSync(pendingPath(root)));
   assert.equal(existsSync(join(root, step.path)), false);
 });
+
+function erasureFixture(t) {
+  const root = fixture(t);
+  const journal = new MemoryJournal(root);
+  const previous = { id: 'old', scope, op: 'add', after: '選んだ合成覚書。' };
+  writeFileSync(journal.journal, JSON.stringify(previous) + '\n');
+  writeFileSync(join(root, 'MEMORY.md'), previous.after);
+  const erase = record({
+    id: 'erase-1', time: '2026-10-23T10:00:00.000Z', op: 'erase', scope,
+    steps: [{ action: 'write', path: 'MEMORY.md', text: '' }],
+    row: { scope, op: 'erase', file: 'MEMORY.md', entryId: 'note-a' },
+  });
+  const sanitized = [
+    { ...previous, after: undefined, erased: ['note-a'], transaction: { operationId: 'accepted', hash: 'a'.repeat(64) } },
+    erase.row,
+  ].map(row => JSON.stringify(row)).join('\n') + '\n';
+  return { root, journal, previous, erase, sanitized };
+}
+
+test('erasure is recovered before or after installing the sanitized journal', t => {
+  for (const installBeforeCrash of [false, true]) {
+    const f = erasureFixture(t);
+    const install = f.journal.installRewrite.bind(f.journal);
+    t.mock.method(f.journal, 'installRewrite', (...args) => {
+      if (installBeforeCrash) install(...args);
+      throw new Error('isolated interruption');
+    });
+    assert.throws(() => f.journal.erase(f.erase, f.sanitized), /isolated interruption/);
+    const pending = readFileSync(pendingPath(f.root), 'utf8');
+    assert.doesNotMatch(pending, /選んだ合成覚書/);
+    const next = new MemoryJournal(f.root);
+    next.recoverPending();
+    next.recoverPending();
+    assert.equal(readFileSync(next.journal, 'utf8'), f.sanitized);
+    assert.equal(readFileSync(join(f.root, 'MEMORY.md'), 'utf8'), '');
+    assert.equal(existsSync(pendingPath(f.root)), false);
+  }
+});
+
+test('erasure stops before publishing another step if the staged journal fails its checksum', t => {
+  const f = erasureFixture(t);
+  t.mock.method(f.journal, 'finish', () => { throw new Error('isolated interruption'); });
+  assert.throws(() => f.journal.erase(f.erase, f.sanitized), /isolated interruption/);
+  writeFileSync(join(f.root, 'journal-erasure.jsonl'), 'changed');
+  assert.throws(() => new MemoryJournal(f.root).recoverPending(), /erasure.*checksum/i);
+  assert.equal(readFileSync(join(f.root, 'MEMORY.md'), 'utf8'), f.previous.after);
+  assert.equal(existsSync(pendingPath(f.root)), true);
+});
+
+test('erasure keeps a replacement journal above the pending record limit out of the bounded pending record', t => {
+  const f = erasureFixture(t);
+  const retained = JSON.stringify({ id: 'unrelated', body: 'x'.repeat(1_100_000) }) + '\n';
+  t.mock.method(f.journal, 'finish', () => { throw new Error('isolated interruption'); });
+  assert.throws(() => f.journal.erase(f.erase, retained + f.sanitized), /isolated interruption/);
+  assert.ok(readFileSync(pendingPath(f.root), 'utf8').length < 1024);
+  new MemoryJournal(f.root).recoverPending();
+  assert.equal(readFileSync(f.journal.journal, 'utf8'), retained + f.sanitized);
+});

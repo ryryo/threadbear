@@ -72,6 +72,8 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
       return { bot, conversations: store.conversations(botId), capabilities: { scopedMemory: true, privacy: Boolean(makePrivate), reviews: Boolean(reviews), requests: requestsAvailable?.() === true } };
     }),
     'bots.create': method(settings, p => ({ bot: repo().create(p) })),
+    'bots.duplicate': method(identity.extend({ expectedRevision: z.int().positive(), operationId: botOperationId }),
+      async ({ botId, expectedRevision, operationId }) => ({ bot: await conversations().duplicate(botId, expectedRevision, operationId) })),
     'bots.update': method(settings.partial().extend({ botId, expectedRevision: z.int().positive() }), ({ botId, expectedRevision, ...p }) => ({ bot: repo().update(botId, expectedRevision, p) })),
     'bots.archive': method(identity.extend({ expectedRevision: z.int().positive() }), p => ({ bot: conversations().archive(p.botId, p.expectedRevision) })),
     'bots.settings.conversationModel': method(identity.extend({ expectedRevision: z.int().positive(), threadId: z.uuid().nullable() }), p => ({ bot: conversations().conversationModel(p.botId, p.expectedRevision, p.threadId) })),
@@ -79,6 +81,11 @@ export function botMethods(workspace: () => { repo: BotRepository; conversations
       const service = conversations();
       const conversation = service.create(p.botId, p.operationId);
       return { conversation, thread: service.summary(conversation.threadId) };
+    }),
+    'bots.conversations.attach': method(memoryTarget.extend({ expectedRevision: z.int().positive(), operationId: botOperationId }), p => {
+      const service = conversations();
+      const conversation = service.attach(p.botId, p.expectedRevision, p.threadId, p.operationId);
+      return { conversation, thread: service.summary(p.threadId) };
     }),
     'bots.memory.read': method(memoryTarget, p => ({ notes: conversations().notes(p.botId, p.threadId) })),
     'bots.memory.search': method(memoryTarget.extend({ query: z.string().trim().min(1).max(300) }), p => ({ notes: conversations().search(p.botId, p.threadId, p.query) })),

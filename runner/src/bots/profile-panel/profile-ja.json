@@ -1,0 +1,12 @@
+{
+  "Profile": "プロフィール",
+  "Name": "名前",
+  "Label": "ラベル",
+  "Optional. Shown under the name.": "任意。名前の下に表示されます。",
+  "Research, admin…": "リサーチ、管理…",
+  "Instructions": "指示",
+  "What this Bot does": "この Bot の役割",
+  "Its job on the team. Part of the Bot's system prompt.": "チーム内での役割です。Bot のシステムプロンプトに組み込まれます。",
+  "What this Bot is responsible for…": "この Bot の担当・役割…",
+  "Saving…": "保存中…"
+}

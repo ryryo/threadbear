@@ -1,4 +1,5 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import { forbidden, ownerFenced } from './lib';
 import { mayWrite, type Caller } from './runnerAccess';
 
@@ -41,4 +42,83 @@ export async function requireBotWorkspaceWrite(ctx: MutationCtx, workspaceId: st
   }
   if (epoch !== 1 || await ownedWorkspace(ctx, runnerId)) throw forbidden('register a different Bot workspace');
   await ctx.db.insert('botWorkspaceOwners', { workspaceId, ownerRunnerId: runnerId, epoch });
+}
+
+type NoteScope = { kind: 'bot' | 'group'; id: string };
+
+function erasuresInScope(ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope) {
+  return ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry',
+    q => q.eq('workspaceId', workspaceId).eq('kind', scope.kind).eq('scopeId', scope.id));
+}
+
+export function botNoteErasure(ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope, entryId: string) {
+  return ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry',
+    q => q.eq('workspaceId', workspaceId).eq('kind', scope.kind).eq('scopeId', scope.id).eq('entryId', entryId)).unique();
+}
+
+export async function botNoteErased(ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope, entryId: string): Promise<boolean> {
+  return (await botNoteErasure(ctx, workspaceId, scope, entryId)) !== null;
+}
+
+export async function withoutErasedBotNotes<Row extends { id: string }>(
+  ctx: BotWorkspaceRead, workspaceId: string, scope: NoteScope, rows: Row[],
+): Promise<Row[]> {
+  if (!rows.length) return rows;
+  // A frequently published scope may have a long history. Bound the scan
+  // by the current snapshot, then check exact keys if history is larger.
+  const seen = await erasuresInScope(ctx, workspaceId, scope).take(rows.length + 1);
+  if (seen.length <= rows.length) {
+    const erased = new Set(seen.map(row => row.entryId));
+    return rows.filter(row => !erased.has(row.id));
+  }
+  const erased = await Promise.all(rows.map(row => botNoteErased(ctx, workspaceId, scope, row.id)));
+  return rows.filter((_, index) => !erased[index]);
+}
+
+type NoteReceipt = NonNullable<Doc<'commands'>['botNote']>;
+type CommandWithNote = Pick<Doc<'commands'>, 'kind' | 'args' | 'botNote'>;
+
+export function botNoteCommand(args: unknown): NoteReceipt | undefined {
+  const input = args as { workspaceId?: unknown; action?: { kind?: unknown; entryId?: unknown; scope?: { kind?: unknown; id?: unknown } } } | undefined;
+  const action = input?.action;
+  const scope = action?.scope;
+  if (typeof input?.workspaceId !== 'string' || typeof scope?.id !== 'string' ||
+      (scope.kind !== 'bot' && scope.kind !== 'group')) return undefined;
+  const receipt = { workspaceId: input.workspaceId, scope: { kind: scope.kind, id: scope.id } } satisfies NoteReceipt;
+  if (action?.kind === 'note.add') return receipt;
+  if ((action?.kind === 'note.edit' || action?.kind === 'note.remove') && typeof action.entryId === 'string') {
+    return { ...receipt, entryId: action.entryId };
+  }
+  return undefined;
+}
+
+function noteReceipt(command: CommandWithNote): NoteReceipt | undefined {
+  return command.kind === 'botDeviceAction' ? command.botNote ?? botNoteCommand(command.args) : undefined;
+}
+
+export async function erasedBotNoteCommand(ctx: BotWorkspaceRead, command: CommandWithNote): Promise<boolean> {
+  const note = noteReceipt(command);
+  return note?.entryId !== undefined && await botNoteErased(ctx, note.workspaceId, note.scope, note.entryId);
+}
+
+export async function safeBotNoteResult(ctx: BotWorkspaceRead, command: CommandWithNote, result: string): Promise<string> {
+  const receipt = noteReceipt(command);
+  if (!receipt) return result;
+  const targeted = await erasedBotNoteCommand(ctx, command);
+  let body: { rows?: { id: string }[]; draft?: string; outcome?: string; revision?: string } | null;
+  try {
+    body = JSON.parse(result);
+  } catch {
+    return targeted ? '{}' : result;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return targeted ? '{}' : result;
+  const originalRows = Array.isArray(body.rows) && body.rows.every(row => typeof row?.id === 'string') ? body.rows : undefined;
+  const rows = originalRows && await withoutErasedBotNotes(ctx, receipt.workspaceId, receipt.scope, originalRows);
+  if (targeted) {
+    if (body.outcome !== 'saved' && body.outcome !== 'conflict') return '{}';
+    // Only return the known note result fields for the erased target.
+    const revision = typeof body.revision === 'string' ? body.revision : undefined;
+    return JSON.stringify({ outcome: body.outcome, revision, rows });
+  }
+  return rows?.length !== originalRows?.length ? JSON.stringify({ ...body, rows }) : result;
 }

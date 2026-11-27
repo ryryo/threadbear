@@ -1,6 +1,74 @@
 import Foundation
 
 public let botWorkspaceAPIVersion = 106
+public let botNoteErasureAPIVersion = 108
+
+public struct PhoneBotNoteTarget: Sendable, Hashable {
+    public let workspaceId: String
+    public let kind: String
+    public let scopeId: String
+    public let entryId: String
+
+    public init?(workspaceId: String, kind: String, scopeId: String, entryId: String) {
+        guard ["bot", "group"].contains(kind),
+              [workspaceId, scopeId, entryId].allSatisfy({ !$0.isEmpty && $0.utf16.count <= 128 }) else { return nil }
+        self.workspaceId = workspaceId
+        self.kind = kind
+        self.scopeId = scopeId
+        self.entryId = entryId
+    }
+
+    var arguments: JSONValue {
+        .object(["workspaceId": .string(workspaceId), "scope": .object(["kind": .string(kind), "id": .string(scopeId)]),
+                 "entryId": .string(entryId)])
+    }
+}
+
+public struct PhoneBotNoteDraft: Codable, Equatable {
+    public var text = ""
+    public var entryId: String?
+    public var removingEntryId: String?
+    public var revision: String
+    public var operationId = UUID().uuidString
+    public var commandId: String?
+
+    public init(text: String = "", entryId: String? = nil, removingEntryId: String? = nil, revision: String) {
+        self.text = text
+        self.entryId = entryId
+        self.removingEntryId = removingEntryId
+        self.revision = revision
+    }
+
+    public func target(workspaceId: String, kind: String, scopeId: String) -> PhoneBotNoteTarget? {
+        guard let noteId = entryId ?? removingEntryId else { return nil }
+        return PhoneBotNoteTarget(workspaceId: workspaceId, kind: kind, scopeId: scopeId, entryId: noteId)
+    }
+
+    public struct Stored: Hashable, Sendable {
+        public let key: String
+        public let target: PhoneBotNoteTarget
+    }
+
+    private static func stored(_ key: String, defaults: UserDefaults) -> Stored? {
+        let parts = key.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 6, parts[0] == "bot-note-draft", Int(parts[3]) != nil,
+              let data = defaults.data(forKey: key), let draft = try? JSONDecoder().decode(Self.self, from: data),
+              let target = draft.target(workspaceId: String(parts[2]), kind: String(parts[4]), scopeId: String(parts[5])) else { return nil }
+        return Stored(key: key, target: target)
+    }
+
+    public static func saved(in defaults: UserDefaults = .standard) -> [Stored] {
+        defaults.dictionaryRepresentation().keys.sorted().compactMap { stored($0, defaults: defaults) }
+    }
+
+    public static func clearErased(_ drafts: [Stored], confirmed: [Bool], in defaults: UserDefaults = .standard) {
+        guard drafts.count == confirmed.count else { return }
+        for (draft, erased) in zip(drafts, confirmed) where erased && stored(draft.key, defaults: defaults) == draft {
+            defaults.removeObject(forKey: draft.key)
+        }
+    }
+}
+
 
 public struct PhoneBotProfile: Codable, Sendable, Identifiable, Equatable {
     public let id: String

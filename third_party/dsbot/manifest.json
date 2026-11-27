@@ -13,7 +13,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/src/bots/repository.ts",
-      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation. Chief activation and replacement at L922–949 are extracted into runner/src/bots/chief-rules.ts and applied atomically to the native team row."
+      "changes": "Reuse the name validation rules and reserve the roster synchronously with Threadbear atomic writes. The Thread has a separate durable creation reservation. The unchanged freshName, duplicateBot and cleanAvatar bodies are extracted into runner/src/bots/ported/roster-copy.js with the source palette. Chief activation and replacement at L922–949 are extracted into runner/src/bots/chief-rules.ts and applied atomically to the native team row."
     },
     {
       "upstreamPath": "ds-bot/test/roster.test.js",
@@ -23,7 +23,7 @@
       "phase": 1,
       "portMode": "B",
       "portPath": "runner/test/unit/bots/repository.test.ts",
-      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction. L439–480 role replacement, primary order and last Chief protection are adapted in runner/test/unit/bots/chief-rules.test.ts."
+      "changes": "Adapt duplicate names and partial persistence cases to the native roster transaction. The concurrent copy case at L1017 is exercised through runner/test/unit/bots/conversations.test.ts. L439–480 role replacement, primary order and last Chief protection are adapted in runner/test/unit/bots/chief-rules.test.ts."
     },
     {
       "upstreamPath": "ds-bot/src/host/threads.js",
@@ -450,6 +450,36 @@
       "portMode": "B",
       "portPath": "runner/src/bots/ported/result-text.js",
       "changes": "Copy headOf verbatim. ThreadStore remains the source of full results."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/bot-settings.js",
+      "upstreamBlob": "c9cf9edb6fad779f5a7ef3b2dfb941b003925cd1",
+      "sha256": "afc97d4b623a9d3670d9b96ba982f02899d0b42d3990f82f6664abdfee1bfb31",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/bot-settings.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
+      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/styles.js",
+      "upstreamBlob": "748aa1387037762d67c6414dde733e9e4fa47f0d",
+      "sha256": "0a62d4a862c7b5779dacbf286e526d529ab0cb2f55a43601460fe0a4336edd33",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/styles.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-cards.css",
+      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/locales/ja.js",
+      "upstreamBlob": "5c675a05e477c6a2b6113f52551de3272056541d",
+      "sha256": "689f7645e919198f2e25164cdec237b345eee35f6fe1c45e42ec42d914b3cbae",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/locales/ja.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/profile-ja.json",
+      "changes": "Copy the original Japanese translations of the profile controls and their hints."
     }
   ]
 }

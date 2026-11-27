@@ -8,6 +8,7 @@ public extension Backend {
         throw TransportError.server("Bot actions are unavailable on this backend.")
     }
     func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error> { AsyncThrowingStream { $0.finish() } }
+    func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error> { AsyncThrowingStream { $0.finish() } }
     func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> { AsyncThrowingStream { $0.finish() } }
     func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error> { AsyncThrowingStream { $0.finish() } }
     func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String {
@@ -43,6 +44,7 @@ public extension Backend {
 public protocol Backend: Sendable {
     func actOnBotWorkspace(workspace: PhoneBotWorkspace, action: PhoneBotAction, operationId: String) async throws -> String
     func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error>
+    func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error>
     func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error>
     func botEditStatus(_ commandId: String) -> AsyncThrowingStream<PhoneBotEditStatus?, Error>
     func editBotProfile(workspace: PhoneBotWorkspace, profile: PhoneBotProfile, settings: [String: String], operationId: String) async throws -> String
@@ -233,6 +235,10 @@ public final class ConvexBackend: Backend, @unchecked Sendable {
 
     public func botWorkspaces() -> AsyncThrowingStream<[PhoneBotWorkspace], Error> {
         live("phone:botWorkspaces", [:], as: [PhoneBotWorkspace].self)
+    }
+
+    public func botNoteErasures(_ targets: [PhoneBotNoteTarget]) -> AsyncThrowingStream<[Bool], Error> {
+        live("phone:botNoteErasures", ["targets": .array(targets.map(\.arguments))], as: [Bool].self)
     }
 
     public func botWorkspaceAvailable() -> AsyncThrowingStream<Bool, Error> {

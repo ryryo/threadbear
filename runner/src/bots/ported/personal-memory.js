@@ -5,7 +5,7 @@
 // MEMORY.md. The caller supplies the Bot's scope directory and decides access.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   cleanDay, cleanEntry, cleanTopic, EMPTY_MAIN, entryId, formatEntry, insertEntry, isExpired, isPinned,
@@ -15,6 +15,7 @@ import { checkPath, MemoryJournal } from './memory-journal.js';
 import { record } from './memory-pending.js';
 import { rankEntries } from './memory-search.js';
 import { draftTidy, parseTidy } from './tidy-draft.js';
+import { eraseMemoryCopies } from '../memory-erasure.js';
 
 function read(root, path, empty) {
   checkPath(root, path);
@@ -42,6 +43,16 @@ function note(entry) {
 const exactLines = (file, line) => file.entries.filter(entry => file.lines[entry.line] === line);
 const entryLine = line => typeof line === 'string' && !/[\r\n]/.test(line) && /^\s*[-*]\s+\S/.test(line);
 const memoryFile = file => file === MAIN || (typeof file === 'string' && cleanTopic(file) !== undefined && file === `${cleanTopic(file)}.md`);
+
+function backupEntry(source) {
+  const saved = parseMemory(source.line);
+  const [entry] = saved.entries;
+  if (!memoryFile(source.file) || /[\r\n]/.test(source.line) || saved.entries.length !== 1 || entryId(entry) !== source.entryId) {
+    throw new Error('The backup does not contain the selected memory note');
+  }
+  entryText(entry.text);
+  return entry;
+}
 
 export class PersonalMemory {
   constructor(root, { scope = 'own', base = root, redact = value => value } = {}) {
@@ -83,6 +94,8 @@ export class PersonalMemory {
 
   revision() { return this.history()[0]?.id ?? 'empty'; }
 
+  lastErasure() { return this.history().find(row => row.op === 'erase')?.id; }
+
   change(mutation, operationId, expectedRevision, time, source) {
     // Steered input can add a later event to the same active turn. A replay
     // keeps the first saved source event for that operation.
@@ -93,6 +106,10 @@ export class PersonalMemory {
     if (seen) {
       if (seen.transaction.hash !== hash) throw new Error('The operation id already belongs to a different change');
       return { revision: seen.id, ...(seen.transaction.note ? { note: seen.transaction.note } : {}) };
+    }
+    if ((mutation.op === 'edit' || mutation.op === 'remove') &&
+        history.some(row => row.op === 'erase' && row.entryId === mutation.entryId)) {
+      throw Object.assign(new Error('This memory note was permanently erased'), { code: 'memory/erased' });
     }
     if ((history[0]?.id ?? 'empty') !== expectedRevision) throw new Error('These notes changed. Reload the current notes before saving.');
     const transaction = { operationId, hash };
@@ -142,8 +159,15 @@ export class PersonalMemory {
     }));
   }
 
+  nextEntryId(entries, history) {
+    const erased = history.filter(row => row.op === 'erase').map(row => ({ meta: { id: row.entryId } }));
+    // The original short IDs have a finite namespace. A longer ID stays
+    // addressable by the existing metadata parser once that space is full.
+    return entries.length + erased.length < 65_536 ? newEntryId([...entries, ...erased]) : randomUUID();
+  }
+
   add(raw, { until, sourceThreadId, sourceTurnId, sourceSeq, actor, pin = true }, time, transaction) {
-    this.history();
+    const history = this.history();
     const text = entryText(raw);
     this.refuseSecret(raw);
     this.refuseSecret(text);
@@ -158,7 +182,7 @@ export class PersonalMemory {
       if (transaction) throw new Error('This note already exists');
       return note(same);
     }
-    const meta = { id: newEntryId(siblings), pinned: pin ? 'yes' : undefined, added: time.slice(0, 10), until };
+    const meta = { id: this.nextEntryId(siblings, history), pinned: pin ? 'yes' : undefined, added: time.slice(0, 10), until };
     const line = formatEntry(text, meta);
     const result = note({ text, meta });
     this.publish('add', insertEntry(file.lines, line), time, {
@@ -175,6 +199,7 @@ export class PersonalMemory {
     const history = this.history();
     const recorded = history.find(row => row.review?.reportId === receipt.reportId && row.review.index === receipt.index)?.review;
     if (recorded) {
+      if (recorded.erased) throw new Error('This note was permanently erased');
       if (recorded.operationId !== receipt.operationId || recorded.acceptedText !== receipt.acceptedText) {
         throw new Error('This memory proposal was already applied');
       }
@@ -199,7 +224,7 @@ export class PersonalMemory {
     const before = previous && file.lines[previous.line];
     if (before && (looksSecret(before) || redact(before) !== before)) throw new Error('Memory history cannot keep a secret');
     const after = text === undefined ? undefined : formatEntry(text, previous?.meta ?? {
-      id: newEntryId(entries), added: time.slice(0, 10), until: change.until,
+      id: this.nextEntryId(entries, history), added: time.slice(0, 10), until: change.until,
     });
     if (before === after) throw new Error('This proposal leaves the note unchanged');
     const lines = previous === undefined ? insertEntry(file.lines, after) : [...file.lines];
@@ -249,6 +274,93 @@ export class PersonalMemory {
     this.refuseSecret(before);
     const lines = file.lines.filter((_line, index) => index !== old.line);
     this.publish('remove', lines, time, { before, transaction }, file.file);
+  }
+
+  // Only the owning Runner may call this after authorizing the scope.
+  // This removes the local Markdown and journal copies together. Device
+  // replicas and review checkpoints have their own owners and lifecycles.
+  erase(id, operationId, expectedRevision, time, protect) {
+    const history = this.history();
+    const hash = createHash('sha256').update(JSON.stringify({ op: 'erase', id })).digest('hex');
+    const seen = history.find(row => row.transaction?.operationId === operationId);
+    if (seen) {
+      if (seen.transaction.hash !== hash) throw new Error('The operation id already belongs to a different change');
+      return { revision: seen.id };
+    }
+    if ((history[0]?.id ?? 'empty') !== expectedRevision) throw new Error('These notes changed. Reload the current notes before erasing.');
+    if (history.some(row => row.op === 'erase' && row.entryId === id)) throw new Error('This note was already erased');
+    let names;
+    try { names = readdirSync(this.storage.root).filter(memoryFile); }
+    catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      names = [];
+    }
+    const files = [...new Set([MAIN, ...names])].map(file => this.load(file));
+    const { rows, steps } = eraseMemoryCopies(id, files, history);
+    if (steps.length === 0) {
+      // Keep the original pending-record shape even for a note already
+      // absent from live Markdown. The existing index is written unchanged.
+      steps.push({ action: 'write', path: MAIN, text: files[0].content });
+    }
+    const scope = this.scope;
+    const op = 'erase';
+    const receipt = record({
+      id: randomUUID(), time, op, scope, steps,
+      row: { op, scope, file: MAIN, actor: 'user', entryId: id, transaction: { operationId, hash } },
+    });
+    const replacement = [...rows.reverse(), receipt.row].map(row => JSON.stringify(row)).join('\n') + '\n';
+    protect();
+    this.storage.erase(receipt, replacement);
+    return { revision: receipt.id };
+  }
+
+  previewBackupNotes(sources) {
+    const erased = new Set(this.history().filter(row => row.op === 'erase').map(row => row.entryId));
+    const files = this.files();
+    const topics = new Set(files.map(file => file.file));
+    const live = this.allEntries(files);
+    const liveIds = new Set(live.map(entryId));
+    const liveText = new Set(live.map(row => squash(row.text)));
+    const counts = new Map();
+    for (const { entryId: id } of sources) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return sources.flatMap(source => {
+      const id = source.entryId;
+      if (counts.get(id) !== 1 || erased.has(id) || liveIds.has(id) || !topics.has(source.file)) return [];
+      try {
+        const { text } = backupEntry(source);
+        this.refuseSecret(source.line);
+        return liveText.has(squash(text)) ? [] : [{ id, text }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  restoreBackupNote(source, operationId, expectedRevision, time, protect) {
+    const rows = this.history();
+    const hash = createHash('sha256').update(JSON.stringify({
+      op: 'backup-restore', entryId: source.entryId, file: source.file, checksum: source.checksum,
+    })).digest('hex');
+    const previous = rows.find(row => row.transaction?.operationId === operationId);
+    if (previous) {
+      if (previous.transaction.hash !== hash) throw new Error('The operation id already belongs to another memory change');
+      return { revision: previous.id };
+    }
+    if ((rows[0]?.id ?? 'empty') !== expectedRevision) throw new Error('These notes changed. Reload the current notes before restoring.');
+    if (rows.some(row => row.op === 'erase' && row.entryId === source.entryId)) throw new Error('This memory note was permanently erased');
+    const entry = backupEntry(source);
+    this.refuseSecret(source.line);
+    const files = this.files();
+    const file = files.find(file => file.file === source.file);
+    if (!file) throw new Error('The backed-up note’s topic no longer exists');
+    if (this.allEntries(files).some(row => entryId(row) === source.entryId || squash(row.text) === squash(entry.text))) {
+      throw new Error('This note already exists in the current memory scope');
+    }
+    protect();
+    this.publish('add', insertEntry(file.lines, source.line), time, {
+      after: source.line, backupSource: source.checksum, transaction: { operationId, hash },
+    }, file.file);
+    return { revision: this.revision() };
   }
 
   tidyInput(today) {
@@ -333,6 +445,7 @@ export class PersonalMemory {
     const rows = this.history();
     const row = rows.find(change => change.id === id);
     if (!row || !['add', 'replace', 'remove', 'tidy'].includes(row.op)) throw new Error('This change is not in the memory history');
+    if (row.erasedEntryId) throw new Error('This memory change was permanently erased');
     if (rows.some(change => change.restored === id)) throw new Error('This change is already restored');
     if (row.op === 'tidy') return this.undoTidy(row, time, transaction);
     const file = this.load(row.file);

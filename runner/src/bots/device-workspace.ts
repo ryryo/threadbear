@@ -15,6 +15,14 @@ const profileEdit = z.object({
   }).refine(fields => Object.keys(fields).length > 0),
 });
 
+export type BotNoteErasure = {
+  workspaceId: string;
+  epoch: number;
+  scope: { kind: 'bot' | 'group'; id: string };
+  entryId: string;
+};
+export type BotNoteErasureReply = { done: boolean; waitingForLegacy?: true };
+
 type ExtraSnapshot = {
   notes: { scope: 'bot' | 'group'; scopeId: string; revision: string; rows: { id: string; text: string; pinned: boolean }[] }[];
   tasks: { botId: string; id: string; threadId: string; title: string; status: string; revision: number }[];

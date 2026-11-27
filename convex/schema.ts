@@ -6,7 +6,7 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { botScheduleRevision, botScheduleTarget } from './botScheduleValues';
-import { botWorkspaceProjection } from './botWorkspaceValues';
+import { botNoteReceipt, botWorkspaceProjection } from './botWorkspaceValues';
 import { botWorkerGrant, botWorkerResult } from './botWorkerValues';
 import { machineTimers } from '@convex-dev/state-machines';
 import { commandStateV } from './commandStates';
@@ -832,6 +832,7 @@ export const appSchema = defineSchema({
 
   botWorkspaceOwners: defineTable({
     workspaceId: v.string(), ownerRunnerId: v.string(), epoch: v.number(),
+    noteErasureRevision: v.optional(v.number()),
     transfer: v.optional(v.object({
       moveId: v.string(), sourceRunnerId: v.string(), targetRunnerId: v.string(), epoch: v.number(), checksum: v.string(),
       bytes: v.number(), parts: v.number(), sealedChecksum: v.string(), stored: v.number(),
@@ -854,6 +855,14 @@ export const appSchema = defineSchema({
     runnerId: v.string(),
     workspace: botWorkspaceProjection,
   }).index('by_runnerId', ['runnerId']),
+
+  // A note ID is local to its scope. Keep the erasure after a Runner move
+  // and after its corresponding command receipts have aged out.
+  botWorkspaceErasedNotes: defineTable({
+    workspaceId: v.string(), kind: v.union(v.literal('bot'), v.literal('group')), scopeId: v.string(), entryId: v.string(),
+    receiptCursor: v.optional(v.string()), receiptsDone: v.optional(v.literal(true)),
+    legacyReceiptCursor: v.optional(v.string()), legacyReceiptsDone: v.optional(v.literal(true)),
+  }).index('by_scope_entry', ['workspaceId', 'kind', 'scopeId', 'entryId']),
 
   commands: defineTable({
     runnerId: v.string(), // or "any"
@@ -881,6 +890,10 @@ export const appSchema = defineSchema({
     // it shows as failed, and its runner's late finish still says how it went.
     lapsedAt: v.optional(v.number()),
     resultThreadId: v.optional(v.string()), // for create, once it lands
+    // eslint-disable-next-line machines/no-optional-on-machine-tables -- Immutable Bot note identity is indexed across every command state and absent on other commands.
+    botNote: v.optional(botNoteReceipt),
+    // eslint-disable-next-line machines/no-optional-on-machine-tables -- The receipt format is fixed on admission and indexed after the command arguments have been discarded.
+    botDeviceReceiptVersion: v.optional(v.literal(1)),
     result: v.optional(v.string()), // a call's answer as JSON text (API 44), from an allow-listed method (relay.ts CALLS); a slashCommands list (API 62); a design review for the phone (API 86)
     // What it wakes of a sleeping box (boxHooks.ts wakeLevelOf): 1 an asleep
     // one, 2 an archived one too. None for a box's own save.
@@ -891,6 +904,8 @@ export const appSchema = defineSchema({
     .index('by_state', ['state'])
     // phone:waiting (API 57): a thread's messages its runner hasn't taken yet.
     .index('by_thread_state', ['threadId', 'state'])
+    .index('by_bot_note_scope', ['botNote.workspaceId', 'botNote.scope.kind', 'botNote.scope.id'])
+    .index('by_device_receipt_version', ['kind', 'botDeviceReceiptVersion'])
     // pruneOld: finished ones by when they finished.
     .index('by_state_done', ['state', 'doneAt'])
     // pruneOld: ones no runner took in COMMAND_KEEP_MS, by when they were made.

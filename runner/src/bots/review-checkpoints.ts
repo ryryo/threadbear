@@ -7,8 +7,8 @@ import { PROVIDERS } from '../protocol.ts';
 import type { ReviewChange } from './memory-review.ts';
 import { REVIEW_CHANGES_MAX } from './ported/memory-copy.js';
 import { MEMORY_LIMITS } from './ported/memory-entries.js';
-import type { ReviewReceipt } from './ported/personal-memory.js';
-import { botOperationId } from './repository.ts';
+import type { MemoryChange, ReviewReceipt } from './ported/personal-memory.js';
+import { botOperationId, type Conversation } from './repository.ts';
 
 const sequence = z.int().nonnegative();
 const evidence = z.object({
@@ -22,6 +22,7 @@ const change = z.discriminatedUnion('op', [
   z.object({ op: z.literal('add'), text: note, until: z.iso.date().optional(), ...decision }),
   z.object({ op: z.literal('edit'), id: z.string().min(1), before: note, text: note, ...decision }),
   z.object({ op: z.literal('remove'), id: z.string().min(1), before: note, ...decision }),
+  z.object({ op: z.literal('erased'), decision: z.literal('erased'), operationId: botOperationId.optional() }),
 ]);
 const usage = z.object({ inputTokens: sequence.optional(), outputTokens: sequence.optional(), notionalUsd: z.number().nonnegative().optional() });
 const report = z.object({
@@ -98,6 +99,7 @@ export class ReviewCheckpoints {
       if (completed.retry?.previous !== previous) throw new Error('The operation id already belongs to a different review');
       return completed;
     }
+    if (original.changes.some(item => item.op === 'erased')) throw new Error('This review includes a permanently erased memory proposal');
     return this.writeReport(checkpoint, source, result, { previous, operationId });
   }
 
@@ -128,20 +130,53 @@ export class ReviewCheckpoints {
 
   // A committed memory journal row is enough to finish the corresponding
   // UI decision if the Runner lost power before its second atomic write.
-  reconcile(conversationId: string, receipts: readonly ReviewReceipt[]): void {
+  eraseMemoryCopies(botId: string, links: readonly Conversation[], history: readonly MemoryChange[]): void {
+    const erasedNotes = new Set(history.flatMap(row => row.op === 'erase' && row.entryId ? [row.entryId] : []));
+    const receipts = history.flatMap(row => row.review?.erased ? [row.review] : []);
+    for (const link of links) this.reconcile(link.id, receipts, erasedNotes, { botId, threadId: link.threadId });
+  }
+
+  reconcile(conversationId: string, receipts: readonly ReviewReceipt[], erasedNotes: ReadonlySet<string> = new Set(),
+    owner?: { botId: string; threadId: string }): void {
     const saved = this.read(conversationId);
+    if (owner && saved.reports.some(row => row.source.botId !== owner.botId || row.source.threadId !== owner.threadId)) {
+      throw new Error('A linked review checkpoint does not match its Bot and Thread');
+    }
     let changed = false;
     for (const receipt of receipts) {
       if (receipt.conversationId !== conversationId) continue;
       const row = saved.reports.find(item => item.id === receipt.reportId);
       const current = row?.changes[receipt.index];
       if (!row || !current || row.source.threadId !== receipt.threadId) throw new Error('A review receipt does not match its proposal');
+      if (current.op === 'erased') {
+        if (current.operationId && current.operationId !== receipt.operationId) {
+          throw new Error('A review receipt conflicts with the recorded erasure');
+        }
+        continue;
+      }
+      if (receipt.erased) {
+        if (current.operationId && current.operationId !== receipt.operationId) {
+          throw new Error('A review erasure conflicts with the recorded decision');
+        }
+        row.changes[receipt.index] = { op: 'erased', decision: 'erased', operationId: receipt.operationId };
+        changed = true;
+        continue;
+      }
       if (current.decision === 'approved' && current.operationId === receipt.operationId && current.acceptedText === receipt.acceptedText) continue;
       if (current.decision !== 'pending') throw new Error('A review receipt conflicts with the recorded decision');
       current.decision = 'approved';
       current.operationId = receipt.operationId;
       if (receipt.acceptedText !== undefined) current.acceptedText = note.parse(receipt.acceptedText);
       changed = true;
+    }
+    if (erasedNotes.size > 0) {
+      for (const row of saved.reports) {
+        row.changes = row.changes.map(item => {
+          if ((item.op !== 'edit' && item.op !== 'remove') || !erasedNotes.has(item.id)) return item;
+          changed = true;
+          return { op: 'erased', decision: 'erased', operationId: item.operationId };
+        });
+      }
     }
     if (changed) this.save(saved);
   }

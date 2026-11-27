@@ -17,7 +17,7 @@ function runPorted(files: string[], count: number): void {
 }
 
 test('the ported DS-Bot memory format and recovery tests pass in the Runner', () => {
-  runPorted(['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'review-lines.test.js', 'tidy-draft.test.js'], 19);
+  runPorted(['memory-entries.test.js', 'memory-journal.test.js', 'personal-memory.test.js', 'memory-erasure.test.js', 'review-lines.test.js', 'tidy-draft.test.js'], 29);
 });
 
 test('the ported DS-Bot request and delivery tests pass in the Runner', () => {
@@ -44,4 +44,28 @@ test('the pinned DS-Bot baseline and direct ports match their recorded source', 
     const port = readFileSync(new URL(entry.portPath, root));
     assert.ok(port.subarray(port.indexOf('\n\n') + 2).equals(baseline), entry.portPath);
   }
+});
+
+test('the profile cards, CSS and Japanese labels come from the pinned client source', () => {
+  const root = new URL('../../../../', import.meta.url);
+  const upstream = new URL('third_party/dsbot/baseline/ds-bot/src/client/', root);
+  const port = new URL('runner/src/bots/profile-panel/', root);
+  const settings = readFileSync(new URL('bot-settings.js', upstream), 'utf8');
+  const shared = readFileSync(new URL('styles.js', upstream), 'utf8');
+  const cards = readFileSync(new URL('profile-cards.mjs', port), 'utf8');
+  const component = (source: string, name: 'Row' | 'Card') => source.match(new RegExp(`^export function ${name}\\(.*?^}\\n`, 'ms'))?.[0];
+  for (const name of ['Row', 'Card'] as const) {
+    const original = component(settings, name);
+    assert.ok(original);
+    assert.equal(component(cards, name), original);
+  }
+  for (const line of cards.split('\n').filter(line => line.startsWith('    h(Card,') || line.includes('h(Row,') && line.includes("t('"))) {
+    assert.ok(settings.includes(line), line);
+  }
+  const rules = readFileSync(new URL('profile-cards.css', port), 'utf8').split('\n').filter(line => line && !line.startsWith('/*'));
+  assert.ok(rules.length > 20);
+  for (const rule of rules) assert.ok(settings.includes(rule) || shared.includes(rule), rule);
+  const originals = readFileSync(new URL('locales/ja.js', upstream), 'utf8');
+  const labels = JSON.parse(readFileSync(new URL('profile-ja.json', port), 'utf8')) as Record<string, string>;
+  for (const [key, label] of Object.entries(labels)) assert.ok(originals.includes(`${JSON.stringify(key)}: ${JSON.stringify(label)}`), key);
 });

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { msg, T, useMessages } from 'gt-react';
-import { useMutation } from 'convex/react';
+import { useConvex, useMutation } from 'convex/react';
 import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useLiveQuery } from './live';
 import { go, threadPath } from './route';
 import { CommandNote, useCommand } from './command-state';
+import { clearErasedDrafts, matchesNoteTarget, noteDraftTarget, savedNoteDrafts } from './bot-note-drafts';
 
 type Settings = { name: string; role: string; instructions: string };
 type Profile = Settings & { id: string; revision: number };
@@ -145,7 +146,8 @@ function useWorkspaceAction(token: string, workspace: Workspace) {
 type ActionDraft = { operationId: string; action: Action; commandId?: Id<'commands'> };
 type ActionResult = { outcome: string; rows?: { id: string; text: string }[]; revision?: string; draft?: string };
 
-function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
+function useActionDraft(token: string, workspace: Workspace, scopeKey: string, checkErasure = false) {
+  const convex = useConvex();
   const key = `bot-action-draft:${workspace.ownerRunnerId}:${workspace.workspaceId}:${workspace.epoch}:${scopeKey}`;
   const translate = useMessages();
   const mutation = useMutation(api.phone.actOnBotWorkspace);
@@ -165,6 +167,28 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
 
   useEffect(() => { persist(key, draft); }, [key, draft]);
 
+  const target = noteDraftTarget(workspace.workspaceId, draft?.action);
+  const entryId = target?.entryId;
+  const kind = target?.scope.kind;
+  const scopeId = target?.scope.id;
+  useEffect(() => {
+    if (!checkErasure || !entryId || !kind || !scopeId) return;
+    const target = { workspaceId: workspace.workspaceId, scope: { kind, id: scopeId }, entryId };
+    const watch = convex.watchQuery(api.phone.botNoteErasures, { token, targets: [target] });
+    function check() {
+      try {
+        if (watch.localQueryResult()?.[0] !== true) return;
+        setDraft(current => matchesNoteTarget(noteDraftTarget(workspace.workspaceId, current?.action), target) ? null : current);
+        clearErasedDrafts(sessionStorage, [{ key, target }], [true]);
+      } catch {
+        // An unavailable backend provides no evidence that a draft was erased.
+      }
+    }
+    const stop = watch.onUpdate(check);
+    check();
+    return stop;
+  }, [checkErasure, convex, entryId, key, kind, scopeId, token, workspace.workspaceId]);
+
   function edit(action: Action | null) {
     setDraft(action ? { operationId: crypto.randomUUID(), action } : null);
     setProblem('');
@@ -183,7 +207,7 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
       const commandId = await mutation({ token, runnerId: workspace.ownerRunnerId,
         input: { workspaceId: workspace.workspaceId, epoch: workspace.epoch, operationId: next.operationId, action: next.action },
       });
-      setDraft({ ...next, commandId });
+      setDraft(current => current?.operationId === next.operationId ? { ...next, commandId } : current);
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
     } finally {
@@ -195,9 +219,11 @@ function useActionDraft(token: string, workspace: Workspace, scopeKey: string) {
     problem: problem || (reply?.state === 'failed' ? reply.note || translate(msg('The Runner refused the action.')) : '') };
 }
 
-function Notes({ token, workspace, scope }: { token: string; workspace: Workspace; scope: Workspace['notes'][number] }) {
+function Notes({ token, workspace, scope, checkErasure }: {
+  token: string; workspace: Workspace; scope: Workspace['notes'][number]; checkErasure: boolean;
+}) {
   const translate = useMessages();
-  const action = useActionDraft(token, workspace, `notes:${scope.scope}:${scope.scopeId}`);
+  const action = useActionDraft(token, workspace, `notes:${scope.scope}:${scope.scopeId}`, checkErasure);
   const initial = { scope: { kind: scope.scope, id: scope.scopeId }, expectedRevision: scope.revision };
   const draft = action.draft?.kind === 'note.edit' || action.draft?.kind === 'note.add' ? action.draft : undefined;
   const saved = action.result?.outcome === 'saved';
@@ -237,7 +263,9 @@ function Notes({ token, workspace, scope }: { token: string; workspace: Workspac
   </details>;
 }
 
-function GroupView({ token, workspace, group }: { token: string; workspace: Workspace; group: Workspace['groups'][number] }) {
+function GroupView({ token, workspace, group, checkErasure }: {
+  token: string; workspace: Workspace; group: Workspace['groups'][number]; checkErasure: boolean;
+}) {
   const translate = useMessages();
   const action = useActionDraft(token, workspace, `group:${group.id}`);
   const text = action.draft?.kind === 'group.post' ? action.draft.text : '';
@@ -247,7 +275,7 @@ function GroupView({ token, workspace, group }: { token: string; workspace: Work
     <summary>{group.title}</summary>
     <p>{group.status}{group.queued ? <> · {translate(msg('{count} queued'), { count: group.queued })}</> : null}</p>
     {group.events.map(row => <p key={row.id}>{row.text}</p>)}
-    {scope ? <Notes token={token} workspace={workspace} scope={scope} /> : null}
+    {scope ? <Notes token={token} workspace={workspace} scope={scope} checkErasure={checkErasure} /> : null}
     <form onSubmit={event => { event.preventDefault(); if (text.trim() && !saved) void action.submit(); }}>
       <label><T>Message the Group</T><textarea value={text} rows={3} maxLength={30_000} onChange={event => {
         action.edit({ kind: 'group.post', groupId: group.id, text: event.target.value });
@@ -272,13 +300,43 @@ function TaskView({ token, workspace, task }: { token: string; workspace: Worksp
   </div>;
 }
 
+function StoredNoteSweep({ token }: { token: string }) {
+  const convex = useConvex();
+  useEffect(() => {
+    const stops: (() => void)[] = [];
+    try {
+      const drafts = savedNoteDrafts(sessionStorage);
+      for (let offset = 0; offset < drafts.length; offset += 32) {
+        const batch = drafts.slice(offset, offset + 32);
+        const watch = convex.watchQuery(api.phone.botNoteErasures, { token, targets: batch.map(draft => draft.target) });
+        function check() {
+          try {
+            const answer = watch.localQueryResult();
+            if (answer) clearErasedDrafts(sessionStorage, batch, answer);
+          } catch {
+            // Keep drafts if storage or the backend is unavailable.
+          }
+        }
+        stops.push(watch.onUpdate(check));
+        check();
+      }
+    } catch {
+      // A tab with storage disabled has nothing to sweep.
+    }
+    return () => { for (const stop of stops) stop(); };
+  }, [convex, token]);
+  return null;
+}
+
 export default function BotsPage({ token }: { token: string }) {
   const me = useLiveQuery(api.phone.me, { token });
   const capable = (me?.apiVersion ?? 0) >= 106;
+  const checkErasure = (me?.apiVersion ?? 0) >= 108;
   const workspaces = useLiveQuery(api.phone.botWorkspaces, capable ? { token } : 'skip');
   return <main className="bot-device-page">
     <a href="/" onClick={e => { e.preventDefault(); go('/'); }}><T>Threads</T></a>
     <h1><T>Bots</T></h1>
+    {checkErasure ? <StoredNoteSweep token={token} /> : null}
     {me && !capable ? <p><T>This backend needs an update to show Bots.</T></p> : null}
     {capable && workspaces === undefined ? <p><T>Loading Bots…</T></p> : null}
     {workspaces?.length === 0 ? <p><T>No Bot workspace is available on this device.</T></p> : null}
@@ -286,9 +344,9 @@ export default function BotsPage({ token }: { token: string }) {
       {workspace.profiles.map(profile => <div key={`${workspace.epoch}:${profile.id}`}>
         <ProfileEditor token={token} workspaceId={workspace.workspaceId} runnerId={workspace.ownerRunnerId} epoch={workspace.epoch} profile={profile} />
         {workspace.notes.filter(scope => scope.scope === 'bot' && scope.scopeId === profile.id)
-          .map(scope => <Notes key={scope.scopeId} token={token} workspace={workspace} scope={scope} />)}
+          .map(scope => <Notes key={scope.scopeId} token={token} workspace={workspace} scope={scope} checkErasure={checkErasure} />)}
       </div>)}
-      {workspace.groups.map(group => <GroupView key={group.id} token={token} workspace={workspace} group={group} />)}
+      {workspace.groups.map(group => <GroupView key={`${workspace.ownerRunnerId}:${workspace.epoch}:${group.id}`} token={token} workspace={workspace} group={group} checkErasure={checkErasure} />)}
       {workspace.tasks.map(task => <TaskView key={task.id} token={token} workspace={workspace} task={task} />)}
       {workspace.requests.map(request => <p key={request.id}><a href={threadPath(request.targetThreadId)}><T>Bot request</T></a> · {request.status}</p>)}
     </section>)}

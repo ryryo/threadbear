@@ -86,8 +86,10 @@ export class BotReviews {
   }
 
   private reconcile(botId: string, conversationId: string): void {
-    const receipts = this.memory(botId).history().flatMap(row => row.review ?? []);
-    if (receipts.length > 0) this.checkpoints.reconcile(conversationId, receipts);
+    const history = this.memory(botId).history();
+    const receipts = history.flatMap(row => row.review ?? []);
+    const erasedNotes = new Set(history.flatMap(row => row.op === 'erase' && row.entryId ? [row.entryId] : []));
+    if (receipts.length || erasedNotes.size) this.checkpoints.reconcile(conversationId, receipts, erasedNotes);
   }
 
   unavailable(bot: Bot): string | undefined {
@@ -116,6 +118,7 @@ export class BotReviews {
   retry(botId: string, threadId: string, reportId: string, operationId: string): Promise<void> {
     return this.enqueue(async () => {
       const link = this.link(botId, threadId);
+      this.reconcile(botId, link.id);
       const rows = this.checkpoints.reports(link.id);
       const completed = rows.find(row => row.retry?.operationId === operationId);
       if (completed) {
@@ -124,6 +127,7 @@ export class BotReviews {
       }
       const previous = rows.find(row => row.id === reportId);
       if (!previous) throw new Error('Unknown memory review');
+      if (previous.changes.some(change => change.op === 'erased')) throw new Error('This review includes a permanently erased memory proposal');
       const { first, through } = previous.source;
       const next = await this.evaluate(threadId, false, first - 1, through);
       if (!next?.source || next.source.first !== first || next.source.through !== through) throw new Error('This review’s original event range is no longer available');
@@ -200,7 +204,9 @@ export class BotReviews {
       const line = reviewLineOf(event, link.id, redact);
       return line ?? [];
     });
-    const notes = this.memory(bot.id).list(runner.isoNow().slice(0, 10));
+    const memory = this.memory(bot.id);
+    const erasure = memory.lastErasure();
+    const notes = memory.list(runner.isoNow().slice(0, 10));
     const scopeRevision = createHash('sha256').update(JSON.stringify(notes)).digest('hex');
     let usage: { inputTokens?: number; outputTokens?: number; notionalUsd?: number } | undefined;
     const outcome = await reviewBatch({ bot, notes, lines, through, redact, ask: async (system, prompt) => {
@@ -214,7 +220,8 @@ export class BotReviews {
     // conversation or rewound log, or after this Runner gave up ownership.
     const now = runner.threads.get(threadId)?.rec;
     if (!enabled() || !now || now.status !== 'idle' || now.botLink?.conversationId !== link.id ||
-        JSON.stringify([now.rewinds, now.withheldSeqs]) !== cut || repo.get(bot.id).revision !== bot.revision) return;
+        JSON.stringify([now.rewinds, now.withheldSeqs]) !== cut || repo.get(bot.id).revision !== bot.revision ||
+        memory.lastErasure() !== erasure) return;
     const source = outcome.first === undefined ? undefined : {
       purpose: 'bot-memory-review' as const, threadId, botId: bot.id, conversationId: link.id, configRevision: bot.revision,
       scopeRevision, provider: binding.provider, model: binding.model, accountId: account.id,

@@ -885,7 +885,15 @@ the owning runner.
   the memory journal. The owning Runner writes the notes files. It can mirror
   public Bot profiles, visible notes and work status to paired devices
   through Convex. The old process forwards active Bot tool calls to the
-  primary during a handover. The primary records and applies the operations.
+  primary during a handover. Recovery reads only staged files named
+  `<home>/bot-backups/<backup ID>.pack` and checks their workspace and deletion
+  records through the existing sync connection before updating the note’s
+  journal. Selecting an existing Thread to attach updates its saved Bot link.
+  The primary records and applies the operations.
+  Opening the profile editor starts a Runner listener on a temporary
+  `127.0.0.1` port. The owning desktop connection grants that view short-lived
+  access to three profile fields on the selected Bot. The listener serves the
+  bundled DS-Bot view without contacting another service for its assets.
   Its request journal and receipt store under `<home>/bots/` keep the original
   and recipient conversation IDs and a reference to the result. The full
   result lives in the recipient's Thread events. The first request raises the

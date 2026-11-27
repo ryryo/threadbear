@@ -2130,6 +2130,22 @@ From a Bot conversation, choose **Run on another Runner** and give it a brief.
 The owning Runner keeps the Bot settings and memory. **Worker requests** shows
 the runs and opens their results from the original conversation.
 
+In a Bot's **Settings**, choose **Open profile editor** to edit its name,
+label or instructions. Name and label save on Enter or when you leave the
+field. Instructions can have multiple lines and save when you leave the
+field. Escape restores the saved text.
+
+Right-click a Bot in the list and choose **Duplicate** to start a separate Bot
+with the same profile. In **Conversations**, choose **Attach existing Thread**,
+select a local idle Thread and confirm. The Thread keeps its transcript and
+CLI session. The Bot settings apply when it next runs. Private Bots require
+their own work folder and cannot use these two actions.
+
+To restore from a staged backup, open **Memory**, select the Bot or Group
+scope, and choose **Open note backups**. Choose a backup, select a note and
+confirm **Restore this note**. The Runner checks the scope, current note
+revision and deletion records before bringing back that one note.
+
 Use **Move Bot workspace** to transfer ownership of the entire workspace.
 Choose the destination Runner and decide where each Project's Bot notes and
 conversation links should go. You can leave a Project on the original Runner.

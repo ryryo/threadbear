@@ -6,3 +6,7 @@ export function parseReview(text: string): {
   changes: { op: 'add' | 'edit' | 'remove'; entry?: number; text?: string; until?: unknown; team?: unknown; topic?: unknown; for?: unknown; group?: unknown }[];
   leftOut: unknown[];
 } | undefined;
+
+type MemoryEntry = { line: number; text: string; meta?: { id?: string } };
+export function parseMemory(content: unknown): { lines: string[]; entries: MemoryEntry[]; links: string[] };
+export function entryId(entry: Pick<MemoryEntry, 'meta' | 'text'>): string;

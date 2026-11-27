@@ -17,6 +17,9 @@ use threadbear_core::inbox::ThreadSummary;
 use threadbear_core::tr;
 
 mod groups;
+mod managed_restore;
+mod profile_panel;
+mod roster;
 mod schedules;
 mod tasks;
 mod teams;
@@ -306,6 +309,9 @@ pub(crate) struct BotsState {
     schedule_rows: Vec<Value>,
     groups: groups::GroupsState,
     workspace_move: workspace_move::WorkspaceMove,
+    roster: roster::RosterOperations,
+    restore: managed_restore::ManagedRestore,
+    profile_panel: profile_panel::ProfilePanel,
     teams: Vec<TeamCard>,
     selected_team: Option<String>,
     reason: Option<String>,
@@ -360,6 +366,11 @@ impl Threadbear {
                 this.bots.workspace_move.available =
                     value["workspaceMoves"].as_bool().unwrap_or(false);
                 this.bots.groups.available = value["groups"].as_bool().unwrap_or(false);
+                this.bots.roster.available = value["rosterOperations"].as_bool().unwrap_or(false);
+                this.bots.restore.available =
+                    value["managedMemoryRestore"].as_bool().unwrap_or(false);
+                this.bots.profile_panel.available =
+                    value["profilePanel"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
                     this.load_bot_list(cx);
@@ -414,6 +425,8 @@ impl Threadbear {
         self.bots.show_schedules = false;
         self.bots.groups.visible = false;
         self.bots.workspace_move.visible = false;
+        self.bots.roster.close_attachment();
+        self.dismiss_bot_profile(false, cx);
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
         self.bots.source = source;
@@ -449,6 +462,14 @@ impl Threadbear {
                 match result {
                     Ok(value) => match serde_json::from_value::<Details>(value) {
                         Ok(detail) => {
+                            if let Some(row) = this
+                                .bots
+                                .list
+                                .iter_mut()
+                                .find(|row| row.id == detail.bot.id)
+                            {
+                                *row = detail.bot.clone();
+                            }
                             if !detail
                                 .conversations
                                 .iter()
@@ -486,6 +507,9 @@ impl Threadbear {
     }
 
     fn load_bot_memory(&mut self, append: bool, cx: &mut Context<Self>) {
+        if !append {
+            self.bots.restore.close();
+        }
         let scoped = self.bots.scope.is_some();
         let catalog = !append
             && self
@@ -767,22 +791,37 @@ impl Threadbear {
             } else {
                 bot.name.clone()
             };
-            list = list.child(
-                bot_button(SharedString::from(format!("bot-{id}")), name, disabled)
-                    .when(selected, |button| button.primary())
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.select_bot(id.clone(), None, cx)),
-                    ),
-            );
+            let target = id.clone();
+            let row = bot_button(SharedString::from(format!("bot-{id}")), name, disabled)
+                .when(selected, |button| button.primary())
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.select_bot(target.clone(), None, cx)),
+                );
+            list = list.child(self.bot_roster_row(row, bot, disabled, cx));
         }
         list.into_any_element()
     }
 
     pub(crate) fn render_bots_page(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.bots.profile_panel.active() {
+            if self.bots.show_schedules
+                || self.bots.show_teams
+                || self.bots.groups.visible
+                || self.bots.workspace_move.visible
+                || self.bots.editor.is_some()
+                || !self.bots.available
+                || !self.bots.profile_panel.available
+                || self.bots.tab != Tab::Settings
+            {
+                self.dismiss_bot_profile(false, cx);
+            } else {
+                return self.render_original_profile(window, cx);
+            }
+        }
         let mut page = v_flex()
             .id("bots-page")
             .size_full()
@@ -868,6 +907,7 @@ impl Threadbear {
         let disabled = self.bots.busy || self.bots.editor.is_some();
         h_flex()
             .gap(px(8.))
+            .flex_wrap()
             .children(
                 [
                     (
@@ -1185,6 +1225,12 @@ impl Threadbear {
                 })),
             );
         }
+        if self.bots.roster.available
+            && detail.bot.archived_at.is_none()
+            && detail.bot.privacy.is_none()
+        {
+            list = list.child(self.render_attachment(&detail.bot, cx));
+        }
         for (index, row) in detail.conversations.iter().enumerate().rev() {
             let title = self.bot_conversation_title(index, &row.thread_id, &detail.bot.name);
             let thread = row.thread_id.clone();
@@ -1370,6 +1416,12 @@ impl Threadbear {
             ),
         ];
         let mut section = v_flex().gap(px(14.)).max_w(px(620.));
+        if self.bots.profile_panel.available && bot.archived_at.is_none() {
+            section = section.child(
+                bot_button("bot-open-profile", tr!("Open profile editor"), disabled)
+                    .on_click(cx.listener(|this, _, _, cx| this.open_original_profile(cx))),
+            );
+        }
         for (id, edit, text) in fields {
             let before = text.clone();
             let label = edit.label();
@@ -1580,6 +1632,13 @@ impl Threadbear {
                         }))
                     })),
             );
+        }
+        if let Some(scope) = scope.filter(|scope| {
+            self.bots.restore.available
+                && !scope.archived
+                && matches!(scope.kind.as_str(), "bot" | "group")
+        }) {
+            section = section.child(self.render_backup_restore(scope, cx));
         }
         let (target, caption) = if let Some(scope) = scope {
             (
@@ -2156,6 +2215,8 @@ enum After {
     Profile,
     Conversation,
     Memory,
+    BackupIndex,
+    BackupNotes(String),
     Reviews,
 }
 
@@ -2365,6 +2426,9 @@ impl Threadbear {
                         | "bots.workers.start"
                         | "bots.tasks.send"
                         | "bots.tasks.retry"
+                        | "bots.duplicate"
+                        | "bots.conversations.attach"
+                        | "bots.memory.recoverFromBackup"
                 ))
         {
             let operation = match &self.bots.pending_write {
@@ -2483,6 +2547,7 @@ impl Threadbear {
                     return;
                 };
                 self.bots.pending_conversation = None;
+                self.bots.roster.close_attachment();
                 let id = thread.id.clone();
                 self.store_reply_summary(thread);
                 if self.home_page() == Some(SidebarMode::Bots) {
@@ -2493,6 +2558,18 @@ impl Threadbear {
             After::Memory => {
                 self.bots.editor = None;
                 self.load_bot_memory(false, cx);
+            }
+            After::BackupIndex => {
+                if self.bots.restore.show_backups(value).is_err() {
+                    self.bots.error =
+                        Some(tr!("The Runner could not return the Bot backups.").into());
+                }
+            }
+            After::BackupNotes(backup_id) => {
+                if self.bots.restore.show_notes(backup_id, value).is_err() {
+                    self.bots.error =
+                        Some(tr!("The Runner could not preview this Bot backup.").into());
+                }
             }
             After::Teams => {
                 self.bots.editor = None;

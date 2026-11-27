@@ -6,11 +6,13 @@ import { test } from 'node:test';
 import { BOT_ABANDON_FORMAT } from '../../../src/bots/format.ts';
 import { RequestStateStore } from '../../../src/bots/request-state.ts';
 import { archive, sha256, unarchive } from '../../../src/move-pack.ts';
+import { PersonalMemory } from '../../../src/bots/ported/personal-memory.js';
 import { BotRepository } from '../../../src/bots/repository.ts';
 import { BotConversations } from '../../../src/bots/conversations.ts';
 import { atomicWriteFileSync } from '../../../src/fsutil.ts';
 import { TaskJournal } from '../../../src/bots/task-journal.ts';
 import { GroupStore } from '../../../src/bots/group-store.ts';
+import { ReviewCheckpoints } from '../../../src/bots/review-checkpoints.ts';
 import { packWorkspaceThread, workspaceThreadFiles } from '../../../src/bots/workspace-threads.ts';
 import { BotWorkspaceTransfer } from '../../../src/bots/workspace-transfer.ts';
 import { makeHarness, tmpDir } from '../../helpers/fakes.ts';
@@ -306,4 +308,113 @@ test('an abandoned request upgrades the transfer before claiming and cannot be d
   assert.equal(protections[0], BOT_ABANDON_FORMAT);
   receiver.accept({ moveId, workspaceId: identity.workspaceId, ownerRunnerId: target, epoch: identity.epoch + 1, state: 'claimed' }, moveId);
   assert.deepEqual(new RequestStateStore(join(dest, 'bots'), () => {}).get(child.id), requests.get(child.id));
+});
+
+test('an erased note travels with its retry marker and requires the newer supervisor before staging', () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const repo = new BotRepository(root, source);
+  const bot = repo.create({ name: 'Editor' });
+  const identity = repo.workspaceIdentity();
+  const scope = 'bot-' + bot.id;
+  const memory = new PersonalMemory(join(root, 'memory', scope));
+  const time = '2026-11-27T00:00:00Z';
+  const saved = memory.change({ op: 'add', text: '転送先に残してはいけない合成覚書' }, 'first-operation', 'empty', time);
+  assert.ok(saved.note);
+  memory.erase(saved.note.id, 'owner-erasure', saved.revision, time, () => {});
+  const pack = new BotWorkspaceTransfer(home, source, () => {}).freeze({
+    moveId, identity, target, idle: () => true, threadFiles: [],
+  });
+  const dest = tmpDir();
+  const old = new BotWorkspaceTransfer(dest, target, format => {
+    if (format === 11) throw new Error('This supervisor cannot stage erasure markers.');
+  });
+  assert.throws(() => old.stage({ moveId, ...pack }), /cannot stage erasure/);
+  assert.equal(old.progress(), undefined);
+  assert.equal(existsSync(join(dest, 'bots-transfer-' + moveId + '.pack')), false);
+  const [first, ...files] = unarchive(pack.packed);
+  assert.ok(files.every(file => !file.data.includes('転送先に残してはいけない合成覚書')));
+  const disguised = archive([{ ...first, data: Buffer.from(JSON.stringify({ ...JSON.parse(first.data.toString()), format: 2 })) }, ...files]);
+  const receiver = new BotWorkspaceTransfer(dest, target, () => {});
+  assert.throws(() => receiver.stage({ moveId, packed: disguised, checksum: sha256(disguised) }), /does not declare/);
+  assert.equal(receiver.stage({ moveId, ...pack }).format, 3);
+  receiver.accept({ moveId, workspaceId: identity.workspaceId, ownerRunnerId: target, epoch: identity.epoch + 1, state: 'claimed' }, moveId);
+  const moved = new PersonalMemory(join(dest, 'bots', 'memory', scope));
+  assert.deepEqual(moved.change({ op: 'add', text: '転送先に残してはいけない合成覚書' }, 'first-operation', 'empty', time), { revision: saved.revision });
+  assert.deepEqual(moved.list('2026-11-27'), []);
+});
+
+test('a workspace cannot pack an unfinished memory journal rewrite', () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const repo = new BotRepository(root, source);
+  const bot = repo.create({ name: 'Editor' });
+  const identity = repo.workspaceIdentity();
+  const scope = join(root, 'memory', 'bot-' + bot.id);
+  mkdirSync(scope, { recursive: true });
+  writeFileSync(join(scope, 'journal-erasure.jsonl'), '');
+  const transfer = new BotWorkspaceTransfer(home, source, () => {});
+  assert.throws(() => transfer.freeze({ moveId, identity, target, idle: () => true, threadFiles: [] }), /memory erasure/);
+  assert.equal(existsSync(join(home, 'bots-transfer-' + moveId + '.pack')), false);
+});
+
+test('validation rejects old backup files and mixed snapshots while preserving other scopes and old operation receipts', async () => {
+  const { assertWorkspaceMemoryErased } = await import('../../../src/bots/memory-erasure.js');
+  const { readTree } = await import('../../../src/move-pack.ts');
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  const repository = new BotRepository(root, source);
+  const bot = repository.create({ name: 'Editor' });
+  const scope = { kind: 'bot', id: bot.id };
+  const memory = new PersonalMemory(join(root, 'memory', bot.id));
+  const teammate = new PersonalMemory(join(root, 'memory', 'team-' + repository.workspaceIdentity().workspaceId), { scope: 'team' });
+  const time = '2026-11-27T00:00:00Z';
+  const input = { op: 'add' as const, text: '古いバックアップから復活させない覚書' };
+  const sent = memory.change(input, 'original-write', 'empty', time);
+  assert.ok(sent.note);
+  teammate.add(sent.note.text, {}, time);
+  const erased = [{ scope: { ...scope, kind: 'bot' as const }, entryId: sent.note.id }];
+  const reserved = repository.reserveConversation(bot.id, 'review-conversation');
+  const link = repository.confirmConversation('review-conversation', reserved.threadId);
+  const reviews = new ReviewCheckpoints(join(root, 'reviews'));
+  reviews.record({ purpose: 'bot-memory-review', botId: bot.id, conversationId: link.id, threadId: link.threadId,
+    configRevision: 1, scopeRevision: sent.revision, first: 1, through: 2, provider: 'claude', model: 'test', accountId: 'fixture' },
+    0, { rejected: 0, changes: [{ op: 'remove', id: sent.note.id, before: sent.note.text }] });
+  const old = readTree(root, 'bots');
+  memory.erase(sent.note.id, 'owner-erased', sent.revision, time, () => {});
+  reviews.eraseMemoryCopies(bot.id, repository.conversations(bot.id), memory.history());
+  const current = readTree(root, 'bots');
+  assert.throws(() => assertWorkspaceMemoryErased(old, erased), /required memory erasure/);
+  assert.doesNotThrow(() => assertWorkspaceMemoryErased(current, erased));
+  const name = 'bots/memory/' + bot.id + '/MEMORY.md';
+  const mixed = current.map(file => file.path === name ? old.find(item => item.path === name)! : file);
+  assert.throws(() => assertWorkspaceMemoryErased(mixed, erased), /copy of an erased memory note/);
+  const reviewName = 'bots/reviews/' + link.id + '.json';
+  const oldReview = current.map(file => file.path === reviewName ? old.find(item => item.path === reviewName)! : file);
+  assert.throws(() => assertWorkspaceMemoryErased(oldReview, erased), /copy of an erased memory review/);
+  const interrupted = [...current, { path: 'bots/memory/' + bot.id + '/pending.json', data: Buffer.from('{}') }];
+  assert.throws(() => assertWorkspaceMemoryErased(interrupted, erased), /Recover the memory journal/);
+  assert.deepEqual(memory.change(input, 'original-write', 'empty', time), { revision: sent.revision });
+  assert.equal(teammate.list('2026-11-27')[0]?.text, sent.note.text);
+});
+
+test('a workspace with a saved Bot copy requires format 11 on receiving even without memory erasures', async () => {
+  const h = makeHarness(tmpDir());
+  const root = join(h.home, 'bots');
+  const repo = new BotRepository(root, source);
+  const original = repo.create({ name: 'Writer' });
+  const copies = new BotConversations(h.runner, repo, root);
+  await copies.duplicate(original.id, original.revision, 'copy-for-move');
+  const identity = repo.workspaceIdentity();
+  const offer = new BotWorkspaceTransfer(h.home, source, () => {}).freeze({
+    moveId, target, identity, idle: () => true, threadFiles: [],
+  });
+  const destination = tmpDir();
+  const old = new BotWorkspaceTransfer(destination, target, format => {
+    if (format === 11) throw new Error('This supervisor cannot stage copy receipts.');
+  });
+  assert.throws(() => old.stage({ moveId, ...offer }), /cannot stage copy receipts/);
+  assert.equal(old.progress(), undefined);
+  const receiver = new BotWorkspaceTransfer(destination, target, () => {});
+  assert.equal(receiver.stage({ moveId, ...offer }).format, 3);
 });

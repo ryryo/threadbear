@@ -503,4 +503,5 @@
 // 106: owner-readable Bot workspace projection and commands.
 // 107: Bot workspace ownership, destination Project preview, staged Thread
 //    and schedule claim, and scoped worker grants.
-export const API_VERSION = 107;
+// 108: durable scoped note erasure in the mirror and retention of receipt provenance.
+export const API_VERSION = 108;

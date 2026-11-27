@@ -164,6 +164,10 @@ export type RpcServerOptions = {
   // runner.restart, from restart.ts), and notices for a client that has
   // just said hello beside the runner's.
   methods?: Record<string, (params: Record<string, unknown>) => unknown>;
+  botProfilePanel?: {
+    open: (params: Record<string, unknown>, connected: () => boolean) => Promise<{ id: string; url: string }>;
+    close: (params: Record<string, unknown>) => unknown;
+  };
   helloNotices?: () => { level: 'info' | 'warning' | 'error'; message: string }[];
   // E's CliUpdates, for clis.*. Without it they answer -32601, as an older
   // runner's would.
@@ -784,6 +788,16 @@ export class RpcServer {
       }
     }
     switch (method) {
+      case 'bots.profilePanel.open':
+      case 'bots.profilePanel.close': {
+        const panel = this.opts.botProfilePanel;
+        if (!panel) throw new RpcError(ErrorCode.methodNotFound, `Unknown method ${method}`);
+        const connected = () => conn.owner === true && conn.caller === undefined && conn.client === 'threadbear-desktop' &&
+          (conn.peer?.remoteAddress === '127.0.0.1' || conn.peer?.remoteAddress === '::1' || conn.peer?.remoteAddress === '::ffff:127.0.0.1') &&
+          !conn.dropped && conn.ws.readyState === WebSocket.OPEN && this.conns.has(conn);
+        if (!connected()) throw new RpcError(ErrorCode.notAllowed, 'Open this profile from the local Threadbear app.');
+        return method === 'bots.profilePanel.open' ? panel.open(p, connected) : panel.close(p);
+      }
       case 'auth':
         return {};
       case 'auth.whoami':

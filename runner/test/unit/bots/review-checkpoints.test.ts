@@ -54,3 +54,28 @@ test('a retried decision cannot overwrite an earlier, different one', t => {
   assert.throws(() => storage.reject(conversationId, saved.id, 0, randomUUID()), /already decided/);
   assert.deepEqual(new ReviewCheckpoints(home).reports(conversationId)[0].changes[0], { op: 'add', text: 'Keep this', decision: 'rejected', operationId: op });
 });
+
+test('recovery erases the approved proposal and pending edits to the same note without renumbering other proposals', t => {
+  const { home, conversationId, evidence } = fixture(t);
+  const storage = new ReviewCheckpoints(home);
+  const selected = '合成覚書。玄関の目印は青い箱。';
+  const report = storage.record(evidence, 0, { rejected: 0, changes: [
+    { op: 'add', text: selected },
+    { op: 'edit', id: 'selected-note', before: selected, text: '合成の編集案。' },
+    { op: 'add', text: '残す別の提案。' },
+  ] });
+  const receipt = { ...evidence, reportId: report.id, index: 0, operationId: randomUUID(), acceptedText: selected };
+  storage.reconcile(conversationId, [receipt]);
+  (new ReviewCheckpoints(home)).reconcile(conversationId, [{ ...receipt, acceptedText: undefined, erased: true }], new Set(['selected-note']));
+  const reopened = new ReviewCheckpoints(home);
+  const [updated] = reopened.reports(conversationId);
+  assert.deepEqual(updated.changes, [
+    { op: 'erased', decision: 'erased', operationId: receipt.operationId },
+    { op: 'erased', decision: 'erased' },
+    { op: 'add', text: '残す別の提案。', decision: 'pending' },
+  ]);
+  reopened.reconcile(conversationId, [receipt]);
+  assert.doesNotMatch(readFileSync(join(home, `${conversationId}.json`), 'utf8'), /青い箱|合成の編集案/);
+  assert.equal(reopened.cursor(conversationId), evidence.through);
+  assert.throws(() => reopened.retry(evidence, { rejected: 0, changes: [] }, report.id, randomUUID()), /permanently erased/);
+});

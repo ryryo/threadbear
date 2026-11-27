@@ -5,8 +5,9 @@ import { paths } from '../config.ts';
 import { atomicWriteFileSync } from '../fsutil.ts';
 import { archive, MAX_ENTRIES, MAX_SEALED_BYTES, MAX_UNPACKED_BYTES, safeEntryPath, sha256, unarchive, unpackedSize, type PackEntry } from '../move-pack.ts';
 import { isThreadIdShape } from '../thread-id.ts';
-import { BOT_ABANDON_FORMAT } from './format.ts';
+import { BOT_ABANDON_FORMAT, BOT_ERASE_FORMAT } from './format.ts';
 import { readRequestJournal } from './request-state.ts';
+import { assertWorkspaceMemoryErased, type RequiredNoteErasure } from './memory-erasure.js';
 import { readGroupBook } from './group-store.ts';
 import { rehomeBotWorkspaceState, workspaceTransferConversations, type BotWorkspaceIdentity } from './repository.ts';
 import { readTaskJournal } from './task-journal.ts';
@@ -21,7 +22,7 @@ export const workspaceScheduleRevisions = z.array(z.object({
 })).max(512);
 export type WorkspaceScheduleRevision = z.infer<typeof workspaceScheduleRevisions>[number];
 const manifest = z.object({
-  format: z.union([z.literal(1), z.literal(2)]), moveId: transferId, target: z.string().min(1), identity,
+  format: z.union([z.literal(1), z.literal(2), z.literal(3)]), moveId: transferId, target: z.string().min(1), identity,
   files: z.array(z.object({ path: z.string(), bytes: z.number().int().nonnegative(), checksum })),
   schedules: workspaceScheduleRevisions.default([]),
   projects: workspaceProjectChoice.default('detach'),
@@ -42,7 +43,27 @@ function readFile(file: string): Buffer | undefined {
   return readFileSync(file);
 }
 
-function transferFormat(entries: PackEntry[]): 1 | 2 {
+function transferFormat(entries: PackEntry[]): Manifest['format'] {
+  let erasedMemory = false;
+  for (const { path, data } of entries) {
+    const file = /^bots\/memory\/[^/]+\/(journal-erasure\.jsonl|pending\.json|journal\.jsonl)$/i.exec(path)?.[1]?.toLowerCase();
+    if (!file) continue;
+    const text = data.toString('utf8');
+    if (file === 'journal-erasure.jsonl' ||
+        (file === 'pending.json' && (JSON.parse(text) as { op?: string } | null)?.op === 'erase')) {
+      throw new Error('Finish recovering the memory erasure before moving this workspace.');
+    }
+    if (file === 'journal.jsonl') {
+      for (const line of text.split('\n')) {
+        if (line && (JSON.parse(line) as { op?: string } | null)?.op === 'erase') erasedMemory = true;
+      }
+    }
+  }
+  const book = entries.find(entry => entry.path === 'bots/state.json');
+  const roster = book && JSON.parse(book.data.toString('utf8')) as {
+    bots?: { copyOperation?: unknown }[]; conversations?: { attached?: true }[];
+  };
+  if (erasedMemory || roster?.bots?.some(row => row.copyOperation) || roster?.conversations?.some(row => row.attached)) return 3;
   const requests = entries.find(entry => entry.path === 'bots/requests.json');
   if (!requests) return 1;
   const rows = readRequestJournal(requests.data.toString('utf8'));
@@ -121,7 +142,7 @@ function decode(packed: Buffer, expected: string): { manifest: Manifest; entries
   const [first, ...entries] = unarchive(packed);
   if (first?.path !== 'manifest.json') throw new Error('The Bot workspace transfer is missing its manifest.');
   const description = manifest.parse(JSON.parse(first.data.toString('utf8')));
-  if (description.format !== transferFormat(entries)) throw new Error('The transfer does not declare its Bot request format.');
+  if (description.format !== transferFormat(entries)) throw new Error('The transfer does not declare its required Bot workspace format.');
   checkFiles(entries, description);
   if (JSON.stringify(filesOf(entries)) !== JSON.stringify(description.files)) throw new Error('The transfer files do not match its manifest.');
   return { manifest: description, entries };
@@ -207,7 +228,7 @@ export class BotWorkspaceTransfer {
     this.removePacks(moveId);
   }
 
-  freeze(input: { moveId: string; identity: BotWorkspaceIdentity; target: string; idle: () => boolean; threadFiles: PackEntry[]; schedules?: WorkspaceScheduleRevision[]; projects?: WorkspaceProjectChoice }) {
+  freeze(input: { moveId: string; identity: BotWorkspaceIdentity; target: string; idle: () => boolean; threadFiles: PackEntry[]; schedules?: WorkspaceScheduleRevision[]; projects?: WorkspaceProjectChoice; noteErasures?: RequiredNoteErasure[] }) {
     const { target, moveId } = input;
     const owner = input.identity;
     if (owner.ownerRunnerId !== this.runnerId || target === this.runnerId) throw new Error('This Runner does not own a move to that target.');
@@ -216,13 +237,15 @@ export class BotWorkspaceTransfer {
         current.identity.workspaceId === owner.workspaceId && current.identity.epoch === owner.epoch) {
       const packed = readFile(this.bundle(moveId));
       if (!packed) throw new Error('The frozen Bot workspace pack is missing.');
-      decode(packed, current.checksum);
+      const { entries } = decode(packed, current.checksum);
+      assertWorkspaceMemoryErased(entries, input.noteErasures ?? []);
       return { packed, checksum: current.checksum };
     }
     this.prepare(input);
     const projects = workspaceProjectChoice.parse(input.projects ?? 'detach');
     const entries = [...workspaceProjectFiles(join(this.home, 'bots'), projects), ...input.threadFiles];
     checkFiles(entries, { ...input, projects }, this.home);
+    assertWorkspaceMemoryErased(entries, input.noteErasures ?? []);
     const schedules = [...(input.schedules ?? [])].sort((a, b) => a.id.localeCompare(b.id));
     const description = manifest.parse({ format: transferFormat(entries), moveId, target, identity: owner, files: filesOf(entries), schedules, projects });
     const files = [{ path: 'manifest.json', data: Buffer.from(JSON.stringify(description)) }, ...entries];
@@ -236,8 +259,9 @@ export class BotWorkspaceTransfer {
     return { packed, checksum: digest };
   }
 
-  stage(input: { moveId: string; checksum: string; packed: Buffer; check?: (manifest: Manifest) => void }): Manifest {
+  stage(input: { moveId: string; checksum: string; packed: Buffer; noteErasures?: RequiredNoteErasure[]; check?: (manifest: Manifest) => void }): Manifest {
     const opened = decode(input.packed, input.checksum);
+    assertWorkspaceMemoryErased(opened.entries, input.noteErasures ?? []);
     const { target, moveId, identity: owner } = opened.manifest;
     if (target !== this.runnerId || moveId !== input.moveId || owner.ownerRunnerId === target) {
       throw new Error('The Bot workspace transfer names a different Runner or move.');
@@ -248,7 +272,8 @@ export class BotWorkspaceTransfer {
     if (this.blocked() || current?.moveId === moveId) throw new Error('This Runner already has a workspace transfer.');
     input.check?.(opened.manifest);
     this.preflight(this.destinationFiles(opened.entries, owner));
-    this.protect(opened.manifest.format === 2 ? BOT_ABANDON_FORMAT : undefined);
+    const format = { 1: undefined, 2: BOT_ABANDON_FORMAT, 3: BOT_ERASE_FORMAT }[opened.manifest.format];
+    this.protect(format);
     atomicWriteFileSync(this.bundle(moveId), input.packed, 0o600);
     this.save({ moveId, target, identity: owner, checksum: input.checksum, state: 'receiving' });
     return opened.manifest;

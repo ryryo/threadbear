@@ -1,0 +1,7 @@
+body {
+  background: var(--bt-main);
+  color: var(--bt-ink);
+  font: 13px var(--bt-font);
+  margin: 0;
+  padding: 16px;
+}

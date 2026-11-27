@@ -14,6 +14,7 @@ export const BOT_SCHEDULE_FORMAT = 7;
 export const BOT_DEVICE_FORMAT = 8;
 export const BOT_TRANSFER_FORMAT = 9;
 export const BOT_ABANDON_FORMAT = 10;
+export const BOT_ERASE_FORMAT = 11;
 
 // launch.mjs is installed on its own. Keep its reader in step with this one.
 function readFormatRequirement(home: string): number | undefined {

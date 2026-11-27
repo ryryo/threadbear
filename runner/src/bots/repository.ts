@@ -13,10 +13,13 @@ const revision = z.int().positive();
 export const botOperationId = z.string().min(1).max(128);
 const modelBinding = z.object({
   accountId: z.string().min(1), provider: z.enum(PROVIDERS), model: z.string().min(1), effort: z.enum(EFFORT_LEVELS).optional(),
+  useModelDefaultEffort: z.literal(true).optional(),
 });
 const bot = z.looseObject({
   id, name: z.string().min(1), role: z.string(), instructions: z.string(), revision,
   archivedAt: z.iso.datetime().optional(),
+  copyOf: id.optional(),
+  copyOperation: z.object({ id: botOperationId, sourceRevision: revision }).optional(),
   modelBinding: modelBinding.loose().optional(),
   workFolder: z.string().min(1).optional(),
   permissionCeiling: z.enum(PERMISSION_MODES).optional(),
@@ -30,8 +33,10 @@ export const deviceProfile = bot.pick({ id: true, name: true, role: true, instru
 const profileReceipt = z.object({ id: botOperationId, fingerprint: z.string(), bot: deviceProfile });
 const conversation = z.looseObject({
   id, botId: id, threadId: id, operationId: z.string().min(1).max(128), configRevision: revision,
+  attached: z.literal(true).optional(),
 });
-const pendingConversation = conversation.extend({ sessionId: id });
+const pendingConversation = conversation.extend({ sessionId: z.string().min(1).optional() })
+  .refine(link => link.attached || id.safeParse(link.sessionId).success);
 const state = z.looseObject({
   workspaceId: id, ownerRunnerId: z.string().min(1), ownerEpoch: revision, formatVersion: z.literal(1),
   bots: z.array(bot), conversations: z.array(conversation), pendingConversations: z.array(pendingConversation),
@@ -229,8 +234,12 @@ export class BotRepository {
       revision: current.revision + 1 }, { at, kind: 'grants', botId: chiefId });
   }
 
+  nameTaken(name: string, except?: string): boolean {
+    return this.current.bots.some(entry => entry.id !== except && normalize(entry.name) === normalize(name));
+  }
+
   private available(name: string, except?: string): void {
-    if (this.current.bots.some(entry => entry.id !== except && normalize(entry.name) === normalize(name))) {
+    if (this.nameTaken(name, except)) {
       throw new Error(`A Bot named ${name} already exists`);
     }
   }
@@ -245,6 +254,38 @@ export class BotRepository {
     // DS-Bot holds a name while its async session setup runs. This transaction
     // commits the roster synchronously. Thread setup has a separate reservation.
     const entry = this.buildBot(settings);
+    this.save({ ...this.current, bots: [...this.current.bots, entry] });
+    return structuredClone(entry);
+  }
+
+  copiedBot(copyOf: string, sourceRevision: number, operationId: string): Bot | undefined {
+    botOperationId.parse(operationId);
+    const prior = this.current.bots.find(item => item.copyOperation?.id === operationId);
+    if (!prior) return undefined;
+    if (prior.copyOf !== copyOf || prior.copyOperation?.sourceRevision !== sourceRevision) {
+      throw new Error('This operation already belongs to another Bot copy');
+    }
+    return structuredClone(prior);
+  }
+
+  duplicateBot(copyOf: string, sourceRevision: number, operationId: string, settings: BotSettings &
+    Pick<Bot, 'modelBinding' | 'workFolder'> & { color?: unknown; avatar?: unknown; sectionId?: unknown },
+    protect?: () => void): Bot {
+    const prior = this.copiedBot(copyOf, sourceRevision, operationId);
+    if (prior) return prior;
+    const source = this.get(copyOf);
+    if (source.privacy) throw new Error(`${source.name} is private, so it cannot be copied`);
+    this.editable(copyOf, sourceRevision);
+    const { modelBinding, workFolder, color, avatar, sectionId } = settings;
+    const entry: Bot = {
+      ...this.buildBot(settings), copyOf, copyOperation: { id: operationId, sourceRevision },
+      ...(modelBinding ? { modelBinding } : {}),
+      ...(workFolder ? { workFolder } : {}),
+      ...(typeof color === 'string' ? { color } : {}),
+      ...(avatar && typeof avatar === 'object' ? { avatar } : {}),
+      ...(typeof sectionId === 'string' ? { sectionId } : {}),
+    };
+    protect?.();
     this.save({ ...this.current, bots: [...this.current.bots, entry] });
     return structuredClone(entry);
   }
@@ -415,7 +456,7 @@ export class BotRepository {
     const previous = this.current.conversations.find(link => link.operationId === operationId) ??
       this.current.pendingConversations.find(link => link.operationId === operationId);
     if (previous) {
-      if (previous.botId !== botId) throw new Error('This operation already belongs to another Bot');
+      if (previous.botId !== botId || previous.attached) throw new Error('This operation already belongs to another Bot conversation');
       return structuredClone(previous);
     }
     const pending = pendingConversation.parse({
@@ -423,6 +464,38 @@ export class BotRepository {
     });
     this.save({ ...this.current, pendingConversations: [...this.current.pendingConversations, pending] });
     return structuredClone(pending);
+  }
+
+  attachment(operationId: string, botId: string, threadId: string): Conversation | PendingConversation | undefined {
+    botOperationId.parse(operationId);
+    const previous = this.current.conversations.find(link => link.operationId === operationId) ??
+      this.current.pendingConversations.find(link => link.operationId === operationId);
+    if (!previous) return undefined;
+    if (!previous.attached || previous.botId !== botId || previous.threadId !== threadId) {
+      throw new Error('This operation already belongs to another Bot conversation');
+    }
+    return structuredClone(previous);
+  }
+
+  reserveAttachment(botId: string, expectedRevision: number, threadId: string, sessionId: string | undefined, operationId: string,
+    protect?: () => void): PendingConversation {
+    const bot = this.editable(botId, expectedRevision);
+    if (bot.privacy) throw new Error('A Private Bot cannot attach an existing Thread');
+    if (this.current.conversations.some(link => link.threadId === threadId) ||
+        this.current.pendingConversations.some(link => link.threadId === threadId)) {
+      throw new Error('This Thread already belongs to a Bot conversation or has an unfinished attachment');
+    }
+    const pending = pendingConversation.parse({
+      id: randomUUID(), botId, threadId, sessionId, configRevision: bot.revision, operationId, attached: true,
+    });
+    protect?.();
+    this.save({ ...this.current, pendingConversations: [...this.current.pendingConversations, pending] });
+    return structuredClone(pending);
+  }
+
+  pendingAttachment(threadId: string): PendingConversation | undefined {
+    const reservation = this.current.pendingConversations.find(link => link.attached && link.threadId === threadId);
+    return reservation && structuredClone(reservation);
   }
 
   // The caller confirms only after the normal ThreadStore has written the link.

@@ -380,6 +380,7 @@ let botWorkerRequest;
 let childWaitAbandoned = false;
 const workerBot = { id: 'editorial-bot', name: 'Editorial Bot', role: '', instructions: '', revision: 1 };
 let botWorkspaceMove = null;
+let restoredBotNote = false;
 const settings = {
   defaultCwd: defaults.cwd, idleMinutes: 30, maxLiveCLIs: 6, followMain: true, bulletReplies: true, oneReply: true, labReview: true, labReviewers: [{ provider: 'codex', model: 'gpt-6.1-sol' }, { provider: 'claude', effort: 'xhigh' }], labPanel: [], labPanelLines: 150, keepAwake: true, fullSync: false, spareWeek: true,
   models: {
@@ -527,7 +528,7 @@ function mockExperiments() {
     // The Recipes view, with TB_MOCK_RECIPES (addRecipesDemo).
     ...(process.env.TB_MOCK_RECIPES ? ['recipes'] : []),
     ...(process.env.TB_MOCK_COORDINATORS ? ['coordinators'] : []),
-    ...(process.env.TB_MOCK_BOT_MOVE || process.env.TB_MOCK_BOT_WORKER || process.env.TB_MOCK_BOT_ABANDON ? ['nativeBots'] : []),
+    ...(process.env.TB_MOCK_BOT_MOVE || process.env.TB_MOCK_BOT_WORKER || process.env.TB_MOCK_BOT_ABANDON || process.env.TB_MOCK_BOT_RESTORE ? ['nativeBots'] : []),
     // Agent Archive in the sidebar's search, with TB_MOCK_ARCHIVE (ARCHIVE_SESSIONS).
     ...(process.env.TB_MOCK_ARCHIVE ? ['archive'] : []),
   ];
@@ -1044,6 +1045,36 @@ async function dispatch(client, method, p) {
         if (p.moveId !== botWorkspaceMove?.moveId) throw rpcError(-32602, 'Expected the pending move ID.');
         botWorkspaceMove = { ...botWorkspaceMove, state: 'cancelled' };
         return {};
+    }
+  }
+  if (process.env.TB_MOCK_BOT_RESTORE && method.startsWith('bots.')) {
+    const scope = { kind: 'bot', id: workerBot.id };
+    const backupId = '10000000-0000-4000-8000-000000000001';
+    const checksum = 'a'.repeat(64);
+    const note = { id: 'restored-note', text: '復元する覚書' };
+    const revision = '10000000-0000-4000-8000-000000000002';
+    const nextRevision = '10000000-0000-4000-8000-000000000003';
+    const correctScope = p.scope?.kind === scope.kind && p.scope?.id === scope.id;
+    switch (method) {
+      case 'bots.status': return { enabled: true, available: true, managedMemoryRestore: true };
+      case 'bots.list': return { bots: [workerBot] };
+      case 'bots.get': return { bot: workerBot, conversations: [], capabilities: { scopedMemory: true } };
+      case 'bots.memory.scopes': return { scopes: [{ ...scope, title: workerBot.name, archived: false }] };
+      case 'bots.memory.scope.history': return { rows: [] };
+      case 'bots.memory.scope.read': return {
+        notes: [{ id: 'current-note', text: '現在の覚書', pinned: false }, ...(restoredBotNote ? [{ ...note, pinned: false }] : [])],
+        revision: restoredBotNote ? nextRevision : revision,
+      };
+      case 'bots.memory.backups': return { backups: [{ id: backupId, updatedAt: '2026-11-27T10:00:00.000Z' }] };
+      case 'bots.memory.backupNotes':
+        if (!correctScope || p.backupId !== backupId) throw rpcError(-32602, 'Expected the chosen backup scope.');
+        return { checksum, revision, notes: restoredBotNote ? [] : [note] };
+      case 'bots.memory.recoverFromBackup':
+        if (!correctScope || p.backupId !== backupId || p.checksum !== checksum || p.expectedRevision !== revision || p.entryId !== note.id || !p.operationId) {
+          throw rpcError(-32602, 'Expected the selected note, verified backup and current revision.');
+        }
+        restoredBotNote = true;
+        return { revision: nextRevision };
     }
   }
   if (coordinatorRequest && (method.startsWith('coordinators.') || ['mock.coordinatorFinish', 'mock.coordinatorVerify', 'mock.coordinatorNotesChanged', 'mock.coordinatorAsk'].includes(method))) {

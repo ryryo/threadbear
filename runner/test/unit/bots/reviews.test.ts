@@ -134,3 +134,47 @@ test('automatic tidy uses the same selected login and only starts after a scope 
   assert.equal(memory.history()[0].op, 'tidy');
   assert.ok(memory.list('2026-11-27').some(note => note.pinned));
 });
+
+test('a model reply sent before memory erasure cannot produce a new review report', async () => {
+  const home = tmpDir();
+  const root = join(home, 'bots');
+  let conversations: BotConversations;
+  const h = makeHarness(home, {}, { botContext: rec => conversations.context(rec) });
+  const repo = new BotRepository(root, 'runner');
+  conversations = new BotConversations(h.runner, repo, root);
+  const bot = repo.create({ name: 'Reviewer' });
+  const link = conversations.create(bot.id, 'chat');
+  h.runner.update({ threadId: link.threadId, accountId: 'claude-3', model: 'claude-sonnet-4-6' });
+  const bound = conversations.conversationModel(bot.id, bot.revision, link.threadId);
+  repo.setAutomation(bot.id, bound.revision, 'reviewEnabled', true, randomUUID());
+  const memory = new PersonalMemory(join(root, 'memory', bot.id));
+  const text = '合成覚書の古い目印は青い箱。';
+  const note = memory.add(text, {}, h.runner.isoNow());
+  const entered = Promise.withResolvers<void>();
+  const returnAnswer = Promise.withResolvers<void>();
+  const service = new BotReviews({
+    root, repo, runner: h.runner, enabled: () => true, redact: String,
+    askers: { claude: async request => {
+      assert.match(request.prompt, /青い箱/);
+      entered.resolve();
+      await returnAnswer.promise;
+      return { ok: true, text: JSON.stringify({ changes: [{ op: 'add', text }] }) };
+    } },
+  });
+  h.runner.send(link.threadId, '日本語で見出しを短くする', [], { botSource: { kind: 'owner' } });
+  await tick();
+  h.adapter.last.init();
+  h.adapter.last.result('completed');
+  await tick();
+
+  const reviewing = service.review(link.threadId);
+  await Promise.race([
+    entered.promise,
+    reviewing.then(() => assert.fail('The isolated model was not called')),
+  ]);
+  memory.erase(note.id, 'fixture-erase', memory.revision(), h.runner.isoNow(), () => {});
+  returnAnswer.resolve();
+  await reviewing;
+  assert.deepEqual(service.reports(bot.id, link.threadId), []);
+  assert.deepEqual(memory.list(h.runner.isoNow().slice(0, 10)), []);
+});

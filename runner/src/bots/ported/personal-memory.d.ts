@@ -2,10 +2,12 @@ export type MemoryNote = { id: string; text: string; pinned: boolean; until?: st
 export type MemoryChange = {
   id: string;
   time: string;
-  op: 'add' | 'remove' | 'replace' | 'tidy';
+  op: 'add' | 'remove' | 'replace' | 'tidy' | 'erase';
   before?: string;
   after?: string;
   restored?: string;
+  entryId?: string;
+  erasedEntryId?: string;
   sourceThreadId?: string;
   sourceTurnId?: string;
   sourceSeq?: number;
@@ -14,7 +16,7 @@ export type MemoryChange = {
 };
 
 export type ReviewSource = { reportId: string; index: number; conversationId: string; threadId: string; first: number; through: number };
-export type ReviewReceipt = ReviewSource & { operationId: string; acceptedText?: string };
+export type ReviewReceipt = ReviewSource & { operationId: string; acceptedText?: string; erased?: true };
 export type ScopeChange = { op: 'add'; text: string; until?: string }
   | { op: 'edit'; entryId: string; text: string }
   | { op: 'remove'; entryId: string }
@@ -24,6 +26,8 @@ type TidyEntry = { text: string; file: { topic?: string }; meta: { added?: strin
 export type TidyCounts = { merged: number; moved: number; retired: number };
 type TidyInput = { revision: string; numbered: TidyEntry[]; ended: TidyEntry[] };
 
+export type BackupMemoryNote = { entryId: string; file: string; line: string; checksum: string };
+
 export class PersonalMemory {
   constructor(root: string, options?: { scope?: 'own' | 'team' | 'project' | 'group'; base?: string; redact?: (text: string) => string });
   list(today: string): MemoryNote[];
@@ -31,10 +35,15 @@ export class PersonalMemory {
   history(): MemoryChange[];
   historyPage(before?: string): { rows: MemoryChange[]; more: string | null };
   revision(): string;
+  lastErasure(): string | undefined;
   add(text: string, options: { until?: string; sourceThreadId?: string }, time: string): MemoryNote;
   replace(id: string, text: string, time: string): MemoryNote;
   remove(id: string, time: string): void;
   restore(id: string, time: string): void;
+  previewBackupNotes(sources: readonly BackupMemoryNote[]): { id: string; text: string }[];
+  restoreBackupNote(source: BackupMemoryNote, operationId: string, expectedRevision: string, time: string,
+    protect: () => void): { revision: string };
+  erase(id: string, operationId: string, expectedRevision: string, time: string, protect: () => void): { revision: string };
   change(mutation: ScopeChange, operationId: string, expectedRevision: string, time: string, source?: BotNoteSource): { revision: string; note?: MemoryNote };
   tidyInput(today: string): TidyInput | undefined;
   tidy(input: TidyInput, reply: string, operationId: string, time: string): { revision: string; counts: TidyCounts };

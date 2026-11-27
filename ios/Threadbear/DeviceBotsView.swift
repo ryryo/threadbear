@@ -47,6 +47,11 @@ struct DeviceBotsView: View {
             }
         }
         .navigationTitle("Bots")
+        .background {
+            if (model.apiVersion ?? 0) >= botNoteErasureAPIVersion {
+                StoredBotNoteSweep()
+            }
+        }
         .task {
             guard let backend = model.backend else { return }
             do {
@@ -189,13 +194,25 @@ private struct DeviceBotCommand {
     }
 }
 
-private struct DeviceBotNoteDraft: Codable, Equatable {
-    var text = ""
-    var entryId: String?
-    var removingEntryId: String?
-    var revision: String
-    var operationId = UUID().uuidString
-    var commandId: String?
+private struct StoredBotNoteSweep: View {
+    @Environment(AppModel.self) private var model
+    @State private var drafts = PhoneBotNoteDraft.saved()
+
+    var body: some View {
+        ForEach(Array(stride(from: 0, to: drafts.count, by: 32)), id: \.self) { start in
+            let batch = Array(drafts[start..<min(start + 32, drafts.count)])
+            Color.clear.task(id: batch) {
+                guard let backend = model.backend else { return }
+                do {
+                    for try await erased in backend.botNoteErasures(batch.map(\.target)) {
+                        PhoneBotNoteDraft.clearErased(batch, confirmed: erased)
+                    }
+                } catch {
+                    // An unavailable backend does not confirm an erasure.
+                }
+            }
+        }
+    }
 }
 
 private struct DeviceBotNotes: View {
@@ -203,7 +220,7 @@ private struct DeviceBotNotes: View {
     let workspace: PhoneBotWorkspace
     let scope: PhoneBotWorkspace.NoteScope
     @State private var conflictRows: [PhoneBotWorkspace.Note]?
-    @State private var draft: DeviceBotNoteDraft
+    @State private var draft: PhoneBotNoteDraft
     @State private var conflictRevision: String?
     @State private var waiting = false
     @State private var problem: String?
@@ -214,8 +231,20 @@ private struct DeviceBotNotes: View {
         self.scope = scope
         let key = "bot-note-draft:\(workspace.ownerRunnerId):\(workspace.id):\(workspace.epoch):\(scope.scope):\(scope.scopeId)"
         draftKey = key
-        let saved = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(DeviceBotNoteDraft.self, from: $0) }
-        _draft = State(initialValue: saved ?? DeviceBotNoteDraft(revision: scope.revision))
+        let saved = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(PhoneBotNoteDraft.self, from: $0) }
+        _draft = State(initialValue: saved ?? PhoneBotNoteDraft(revision: scope.revision))
+    }
+
+    private var erasureTarget: PhoneBotNoteTarget? {
+        guard (model.apiVersion ?? 0) >= botNoteErasureAPIVersion else { return nil }
+        return draft.target(workspaceId: workspace.id, kind: scope.scope, scopeId: scope.scopeId)
+    }
+
+    private var conflictTargets: [PhoneBotNoteTarget] {
+        guard (model.apiVersion ?? 0) >= botNoteErasureAPIVersion else { return [] }
+        return (conflictRows ?? []).compactMap {
+            PhoneBotNoteTarget(workspaceId: workspace.id, kind: scope.scope, scopeId: scope.scopeId, entryId: $0.id)
+        }
     }
 
     var body: some View {
@@ -225,10 +254,10 @@ private struct DeviceBotNotes: View {
                     Text(row.text)
                     if row.pinned != true {
                         HStack {
-                            Button("Edit") { draft = DeviceBotNoteDraft(text: row.text, entryId: row.id, revision: draft.revision) }
+                            Button("Edit") { draft = PhoneBotNoteDraft(text: row.text, entryId: row.id, revision: draft.revision) }
                             Button("Remove", role: .destructive) {
                                 if draft.removingEntryId != row.id {
-                                    draft = DeviceBotNoteDraft(removingEntryId: row.id, revision: scope.revision)
+                                    draft = PhoneBotNoteDraft(removingEntryId: row.id, revision: scope.revision)
                                 }
                                 Task { await submit(.removeNote(scope: scope.scope, scopeId: scope.scopeId, revision: draft.revision, entryId: row.id)) }
                             }
@@ -272,7 +301,7 @@ private struct DeviceBotNotes: View {
         if let revision = conflictRevision {
             Section("Notes changed on the Runner") {
                 Button("Use saved notes") {
-                    draft = DeviceBotNoteDraft(revision: revision)
+                    draft = PhoneBotNoteDraft(revision: revision)
                     conflictRevision = nil
                     conflictRows = nil
                 }
@@ -287,6 +316,24 @@ private struct DeviceBotNotes: View {
             }
         }
         Color.clear.frame(height: 0)
+            .background {
+                let targets = conflictTargets
+                ForEach(Array(stride(from: 0, to: targets.count, by: 32)), id: \.self) { start in
+                    let batch = Array(targets[start..<min(start + 32, targets.count)])
+                    Color.clear.task(id: batch) {
+                        guard let backend = model.backend else { return }
+                        do {
+                            for try await erased in backend.botNoteErasures(batch) {
+                                guard erased.count == batch.count, !Task.isCancelled else { continue }
+                                let ids = Set(zip(batch, erased).compactMap { $0.1 ? $0.0.entryId : nil })
+                                if !ids.isEmpty { conflictRows?.removeAll { ids.contains($0.id) } }
+                            }
+                        } catch {
+                            // Unconfirmed rows stay until the next authoritative result.
+                        }
+                    }
+                }
+            }
             .onChange(of: draft) { _, next in
                 if next.text.isEmpty && next.commandId == nil && next.removingEntryId == nil { UserDefaults.standard.removeObject(forKey: draftKey) }
                 else { UserDefaults.standard.set(try? JSONEncoder().encode(next), forKey: draftKey) }
@@ -295,18 +342,38 @@ private struct DeviceBotNotes: View {
                 guard !waiting && conflictRevision == nil else { return }
                 if draft.text.isEmpty && draft.removingEntryId == nil { draft.revision = revision }
             }
+            .task(id: erasureTarget) {
+                guard let target = erasureTarget, let backend = model.backend else { return }
+                do {
+                    for try await erased in backend.botNoteErasures([target]) {
+                        guard erased == [true], erasureTarget == target else { continue }
+                        UserDefaults.standard.removeObject(forKey: draftKey)
+                        discardDraft()
+                        conflictRows = nil
+                        conflictRevision = nil
+                        return
+                    }
+                } catch {
+                    // Keep drafts if the backend cannot check them.
+                }
+            }
             .task {
                 guard let id = draft.commandId, let backend = model.backend else { return }
+                let operationId = draft.operationId
                 waiting = true
                 defer { waiting = false }
-                do { show(try await DeviceBotCommand.result(id, backend: backend)) }
-                catch is CancellationError {}
-                catch { problem = error.localizedDescription }
+                do {
+                    let result = try await DeviceBotCommand.result(id, backend: backend)
+                    if operationId == draft.operationId { show(result) }
+                } catch is CancellationError {
+                } catch {
+                    if operationId == draft.operationId { problem = error.localizedDescription }
+                }
             }
     }
 
     private func discardDraft() {
-        draft = DeviceBotNoteDraft(revision: scope.revision)
+        draft = PhoneBotNoteDraft(revision: scope.revision)
         problem = nil
     }
 
@@ -315,13 +382,16 @@ private struct DeviceBotNotes: View {
         waiting = true
         problem = nil
         defer { waiting = false }
-        let command = DeviceBotCommand(operationId: draft.operationId, action: action)
+        let operationId = draft.operationId
+        let command = DeviceBotCommand(operationId: operationId, action: action)
         do {
-            let result = try await command.submit(workspace: workspace, backend: backend) { draft.commandId = $0 }
-            show(result)
+            let result = try await command.submit(workspace: workspace, backend: backend) { id in
+                if operationId == draft.operationId { draft.commandId = id }
+            }
+            if operationId == draft.operationId { show(result) }
         } catch is CancellationError {
         } catch {
-            problem = error.localizedDescription
+            if operationId == draft.operationId { problem = error.localizedDescription }
         }
     }
 
@@ -331,7 +401,7 @@ private struct DeviceBotNotes: View {
             conflictRevision = revision
             draft.commandId = nil
         } else if result.outcome == "saved" {
-            draft = DeviceBotNoteDraft(revision: result.revision ?? scope.revision)
+            draft = PhoneBotNoteDraft(revision: result.revision ?? scope.revision)
             problem = "Note saved."
         }
     }
@@ -341,7 +411,7 @@ private struct DeviceBotGroupView: View {
     @Environment(AppModel.self) private var model
     let workspace: PhoneBotWorkspace
     let group: PhoneBotWorkspace.Group
-    @State private var draft: DeviceBotNoteDraft
+    @State private var draft: PhoneBotNoteDraft
     @State private var waiting = false
     @State private var message: String?
     let draftKey: String
@@ -351,8 +421,8 @@ private struct DeviceBotGroupView: View {
         self.group = group
         let key = "bot-group-draft:\(workspace.ownerRunnerId):\(workspace.id):\(workspace.epoch):\(group.id)"
         draftKey = key
-        let saved = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(DeviceBotNoteDraft.self, from: $0) }
-        _draft = State(initialValue: saved ?? DeviceBotNoteDraft(revision: ""))
+        let saved = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(PhoneBotNoteDraft.self, from: $0) }
+        _draft = State(initialValue: saved ?? PhoneBotNoteDraft(revision: ""))
     }
 
     var body: some View {
@@ -409,7 +479,7 @@ private struct DeviceBotGroupView: View {
 
     private func show(_ result: PhoneBotEditStatus.Result) {
         if result.outcome == "saved" {
-            draft = DeviceBotNoteDraft(revision: "")
+            draft = PhoneBotNoteDraft(revision: "")
             message = "Message posted."
         }
     }

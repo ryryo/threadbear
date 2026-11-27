@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { BOT_ABANDON_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
+import { BOT_ABANDON_FORMAT, BOT_ERASE_FORMAT, BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TRANSFER_FORMAT, checkBotDataFormat, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData } from '../../../src/bots/format.ts';
 import { test, type TestContext } from 'node:test';
 
 const launch = await import(pathToFileURL(join(import.meta.dirname, '../../../launch.mjs')).href);
@@ -191,4 +191,37 @@ process.disconnect();
   assert.equal(checkBotDataFormat(home), true);
   assert.equal(launch.releaseCanUseBotData(dir, 'abandon'), true);
   assert.throws(() => launch.pointCurrent(dir, 'transfer'), /Bot data format/);
+});
+
+test('a supervisor that only knows abandonment cannot activate permanent erasure or start an older release after it', async t => {
+  const { home, dir, marker } = fixture(t);
+  for (const [id, last] of [['abandon', 10], ['erase', 11]] as const) {
+    const release = join(dir, 'releases', id, 'src', 'bots');
+    mkdirSync(release, { recursive: true });
+    writeFileSync(join(release, 'format.json'), '1\n');
+    writeFileSync(join(release, 'format-compatible.json'), JSON.stringify(Array.from({ length: last }, (_, index) => index + 1)));
+  }
+  writeFileSync(marker, '10\n');
+  const check = join(home, 'publish-erasure-format.mjs');
+  const formatModule = new URL('../../../src/bots/format.ts', import.meta.url);
+  writeFileSync(check, `import { BOT_ERASE_FORMAT, protectBotData } from ${JSON.stringify(formatModule.href)};
+protectBotData(process.argv[2], BOT_ERASE_FORMAT);
+process.disconnect();
+`);
+  const trySupervisor = (version: number) => {
+    const child = fork(check, [home], {
+      env: { ...process.env, THREADBEAR_SUPERVISED: '1', THREADBEAR_BOT_FORMAT_GUARD: '1',
+        THREADBEAR_BOT_FORMAT_GUARD_VERSION: String(version), THREADBEAR_BOT_FORMAT_HOME: home },
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+    child.stderr?.resume();
+    return once(child, 'close');
+  };
+  assert.equal((await trySupervisor(BOT_ABANDON_FORMAT))[0], 1);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '10');
+  assert.equal((await trySupervisor(BOT_ERASE_FORMAT))[0], 0);
+  assert.equal(readFileSync(marker, 'utf8').trim(), '11');
+  assert.equal(checkBotDataFormat(home), true);
+  assert.equal(launch.releaseCanUseBotData(dir, 'erase'), true);
+  assert.throws(() => launch.pointCurrent(dir, 'abandon'), /Bot data format/);
 });

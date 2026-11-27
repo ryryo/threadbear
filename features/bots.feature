@@ -15,6 +15,55 @@ Feature: Bot workspace
     When I open memory from the current Bot conversation
     Then the Bot's notes show "見出しは短くする"
 
+  @bots.roster_operations @bots @swift-pending
+  Scenario: A Bot copy starts with a separate profile and memory
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "編集者" from the Bots page
+    And I open the Bot's Memory tab
+    And I select "Bot: 編集者" in Bot memory
+    And I add a Bot memory note saying "元のBotだけの覚書"
+    And I duplicate the Bot from the menu of "編集者"
+    Then "編集者 copy" has no conversations or notes
+    And "編集者" still has the note "元のBotだけの覚書"
+
+  @bots.profile_panel @bots @web-runtime @web-runtime-fresh @swift-pending
+  Scenario: The original profile editor saves one Bot and its lease closes with the view
+    Given the app is connected to an isolated Bot Runner
+    And the web runtime is installed
+    When I create a Bot called "別のBot" from the Bots page
+    And I create a Bot called "編集者" from the Bots page
+    And I narrow the window beside Highlights
+    And I open the original Bot profile editor
+    Then the original profile cards show the Bot "編集者"
+    When I set the original profile label to "校正者"
+    Then the Bot "編集者" has the label "校正者"
+    And the Bot "別のBot" has the label ""
+    When I close the original Bot profile editor
+    Then the old profile view cannot read the Bot
+
+  @bots.roster_operations @bots @swift-pending
+  Scenario: The owner can attach an existing conversation without replacing its transcript
+    Given the app is connected to an isolated Bot Runner
+    And a normal Thread called "既存の編集会議" has a saved reply
+    When I create a Bot called "編集者" from the Bots page
+    And I choose the existing Thread "既存の編集会議" for the Bot
+    Then the ordinary Thread has no Bot yet
+    When I confirm the Bot attachment
+    Then I see the existing Thread with its saved reply and new Bot link
+    When the isolated Bot Runner restarts
+    Then the app is connected again
+    And I see the existing Thread with its saved reply and new Bot link
+
+  @bots.managed_restore @swift-pending
+  Scenario: A managed backup shows an eligible note and restores only the confirmed selection
+    Given the app is connected to an isolated Bot Runner
+    When I view the backup for the Bot's memory
+    And I select the backed-up note "復元する覚書"
+    Then the Bot's notes show "現在の覚書"
+    When I confirm restoration of the selected note
+    Then the Bot's notes show "復元する覚書"
+    And the Bot's notes show "現在の覚書"
+
   @bots.scoped_notes @bots @swift-pending
   Scenario: A workspace note stays in the workspace's memory
     Given the app is connected to an isolated Bot Runner

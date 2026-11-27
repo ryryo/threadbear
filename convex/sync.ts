@@ -4,8 +4,8 @@
 // row once when it's back.
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
-import { botWorkspaceProjection } from './botWorkspaceValues';
-import { botSchedulesFrozen, requireBotWorkspaceWrite } from './botWorkspaceAuthority';
+import { botNoteScope, botWorkspaceProjection } from './botWorkspaceValues';
+import { botNoteCommand, botNoteErasure, botSchedulesFrozen, botWorkspaceOwner, erasedBotNoteCommand, requireBotRunnerProcess, requireBotWorkspaceWrite, safeBotNoteResult, withoutErasedBotNotes } from './botWorkspaceAuthority';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2244,10 +2244,123 @@ export const setBotWorkspace = mutation({
     if (workspace.ownerRunnerId !== runnerId) throw forbidden('mirror a different Bot workspace');
     await requireBotWorkspaceWrite(ctx, workspace.workspaceId, runnerId, workspace.epoch);
     capDoc(caller, 'A Bot workspace projection', workspace, 400 * 1_024);
-    const safe = clean(workspace);
+    const notes = await Promise.all(workspace.notes.map(async note => ({
+      ...note, rows: await withoutErasedBotNotes(ctx, workspace.workspaceId, { kind: note.scope, id: note.scopeId }, note.rows),
+    })));
+    const safe = clean({ ...workspace, notes });
     if (row) await ctx.db.patch('botWorkspaces', row._id, { workspace: safe });
     else await ctx.db.insert('botWorkspaces', { runnerId, workspace: safe });
     return null;
+  },
+});
+
+const ERASED_BOT_NOTE = 'This Bot memory note was permanently erased.';
+
+type NoteErasure = Doc<'botWorkspaceErasedNotes'>;
+
+async function redactNoteReceipt(ctx: MutationCtx, erasure: NoteErasure, receipt: Doc<'commands'>): Promise<void> {
+  const targeted = receipt.botNote?.entryId === erasure.entryId;
+  if (targeted && receipt.state === 'pending') await command.send(ctx, receipt._id, { type: 'CANCEL' });
+  else if (targeted && (receipt.commandState.kind === 'taken' || receipt.commandState.kind === 'lapsed')) {
+    await command.send(ctx, receipt._id, { type: 'FINISH', ok: false });
+  }
+  const result = receipt.result === undefined ? undefined : await safeBotNoteResult(ctx, receipt, receipt.result);
+  const args = targeted ? finishedArgs(receipt.args) : undefined;
+  const note = targeted && (receipt.state !== 'done' || receipt.note !== undefined) ? ERASED_BOT_NOTE : undefined;
+  if (result !== receipt.result || args || note) {
+    await ctx.db.patch('commands', receipt._id, { result, ...(args ? { args } : {}), ...(note ? { note } : {}) });
+  }
+}
+
+async function redactNoteReceipts(ctx: MutationCtx, erasure: NoteErasure): Promise<boolean> {
+  // Results can be 256 KiB each. Keep each transaction comfortably below the
+  // read and write limits, and remember where it ended if the Runner restarts.
+  const page = await ctx.db.query('commands').withIndex('by_bot_note_scope',
+    q => q.eq('botNote.workspaceId', erasure.workspaceId).eq('botNote.scope.kind', erasure.kind).eq('botNote.scope.id', erasure.scopeId))
+    .paginate({ numItems: 12, cursor: erasure.receiptCursor ?? null });
+  for (const receipt of page.page) await redactNoteReceipt(ctx, erasure, receipt);
+  await ctx.db.patch('botWorkspaceErasedNotes', erasure._id,
+    page.isDone ? { receiptsDone: true, receiptCursor: undefined } : { receiptCursor: page.continueCursor });
+  return page.isDone;
+}
+
+function legacyBotDeviceReceipts(ctx: MutationCtx) {
+  return ctx.db.query('commands').withIndex('by_device_receipt_version',
+    q => q.eq('kind', 'botDeviceAction').eq('botDeviceReceiptVersion', undefined));
+}
+
+function mightContainErasedNote(receipt: Doc<'commands'>, entryId: string): boolean {
+  if (receipt.note) return true;
+  if (receipt.result === undefined) return false;
+  try {
+    const body = JSON.parse(receipt.result) as { outcome?: unknown; draft?: unknown; rows?: { id?: unknown }[] } | null;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return true;
+    if ('revision' in body && typeof body.revision !== 'string' ||
+        'eventId' in body && typeof body.eventId !== 'string') return true;
+    if (body.outcome === 'saved') {
+      return Object.keys(body).some(key => key !== 'outcome' && key !== 'revision' && key !== 'eventId');
+    }
+    if (body.outcome !== 'conflict' || body.draft !== undefined || !Array.isArray(body.rows) ||
+        Object.keys(body).some(key => key !== 'outcome' && key !== 'revision' && key !== 'rows')) return true;
+    return body.rows.some(row => typeof row?.id !== 'string' || row.id === entryId);
+  } catch {
+    return true;
+  }
+}
+
+async function checkLegacyNoteReceipts(ctx: MutationCtx, erasure: NoteErasure): Promise<{ done: boolean; waitingForLegacy?: true }> {
+  const page = await legacyBotDeviceReceipts(ctx).paginate({ numItems: 12, cursor: erasure.legacyReceiptCursor ?? null });
+  let waiting = false;
+  for (const receipt of page.page) {
+    const botNote = botNoteCommand(receipt.args);
+    if (botNote) {
+      // A legacy request that still has its args can be identified precisely.
+      // Mark it in the same transaction before any of those args are dropped.
+      await ctx.db.patch('commands', receipt._id, { botNote, botDeviceReceiptVersion: 1 });
+      if (botNote.workspaceId === erasure.workspaceId && botNote.scope.kind === erasure.kind && botNote.scope.id === erasure.scopeId) {
+        await redactNoteReceipt(ctx, erasure, { ...receipt, botNote });
+      }
+    } else if (mightContainErasedNote(receipt, erasure.entryId)) {
+      waiting = true;
+    }
+  }
+  if (waiting) return { done: false, waitingForLegacy: true };
+  await ctx.db.patch('botWorkspaceErasedNotes', erasure._id,
+    page.isDone ? { legacyReceiptsDone: true, legacyReceiptCursor: undefined } : { legacyReceiptCursor: page.continueCursor });
+  return { done: page.isDone };
+}
+
+export const eraseBotWorkspaceNote = mutation({
+  args: { key: v.string(), runnerId: v.string(), startedAt: v.string(), workspaceId: v.string(), epoch: v.number(), scope: botNoteScope, entryId: v.string() },
+  returns: v.object({ done: v.boolean(), waitingForLegacy: v.optional(v.literal(true)) }),
+  handler: async (ctx, { key, runnerId, startedAt, workspaceId, epoch, scope, entryId }) => {
+    const caller = await runnerAuth(ctx, key, 'eraseBotWorkspaceNote');
+    await requireBotRunnerProcess(ctx, caller, runnerId, startedAt);
+    const owner = await botWorkspaceOwner(ctx, workspaceId);
+    if (!owner || owner.ownerRunnerId !== runnerId || owner.epoch !== epoch || owner.transfer?.state === 'staged') {
+      throw forbidden('erase a note in a Bot workspace this Runner does not currently own');
+    }
+    if (!scope.id || scope.id.length > 128 || !entryId || entryId.length > 128) {
+      throw new ConvexError({ kind: 'badArgs', message: 'Invalid Bot memory note identity.' });
+    }
+    let erasure = await botNoteErasure(ctx, workspaceId, scope, entryId);
+    if (!erasure) {
+      const id = await ctx.db.insert('botWorkspaceErasedNotes', { workspaceId, kind: scope.kind, scopeId: scope.id, entryId });
+      await ctx.db.patch('botWorkspaceOwners', owner._id, { noteErasureRevision: (owner.noteErasureRevision ?? 0) + 1 });
+      erasure = (await ctx.db.get('botWorkspaceErasedNotes', id))!;
+      const row = await ctx.db.query('botWorkspaces').withIndex('by_runnerId', q => q.eq('runnerId', runnerId)).unique();
+      if (row?.workspace.workspaceId === workspaceId && row.workspace.epoch === epoch) {
+        const notes = row.workspace.notes.map(note =>
+          note.scope === scope.kind && note.scopeId === scope.id
+            ? { ...note, rows: note.rows.filter(item => item.id !== entryId) } : note);
+        await ctx.db.patch('botWorkspaces', row._id, { workspace: { ...row.workspace, notes } });
+      }
+    }
+    if (erasure.legacyReceiptsDone) return { done: true };
+    if (erasure.receiptsDone) return checkLegacyNoteReceipts(ctx, erasure);
+    if (!await redactNoteReceipts(ctx, erasure) || await legacyBotDeviceReceipts(ctx).first()) return { done: false };
+    await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { legacyReceiptsDone: true });
+    return { done: true };
   },
 });
 
@@ -3459,6 +3572,7 @@ export const pendingCommands = query({
       for await (const c of ctx.db.query('commands').withIndex('by_runner_state', (q) => q.eq('runnerId', target).eq('state', 'pending'))) {
         // A box hears of its own thread's only (runnerAccess.ts mayTake).
         if (caller.box && !mayTake(caller, c)) continue;
+        if (await erasedBotNoteCommand(ctx, c)) continue;
         out.push({ commandId: c._id, kind: c.kind, ...(c.threadId ? { threadId: c.threadId } : {}), args: c.args, createdAt: c.createdAt });
       }
     }
@@ -3490,10 +3604,18 @@ export const takeCommand = mutation({
     // sameAttempt guard says yes, and nothing changes.
     if (c.state === 'taken' && attempt !== undefined) {
       if (!(await mayConsume(ctx, caller, c))) throw forbidden("take that command: it isn't for its runner");
+      if (await erasedBotNoteCommand(ctx, c)) return false;
       return (await command.send(ctx, commandId, { type: 'TAKE', attempt })).status === 'done';
     }
     if (c.state !== 'pending') return false;
     if (!(await mayConsume(ctx, caller, c))) throw forbidden("take that command: it isn't for its runner");
+    if (await erasedBotNoteCommand(ctx, c)) {
+      await command.send(ctx, commandId, { type: 'CANCEL' });
+      const botNote = c.botNote ?? botNoteCommand(c.args);
+      await ctx.db.patch(commandId, { args: finishedArgs(c.args), note: ERASED_BOT_NOTE,
+        ...(botNote ? { botNote, botDeviceReceiptVersion: 1 } : {}) });
+      return false;
+    }
     // A thread's command is for the runner that has the thread now: one
     // queued before the thread moved to another runner (or went) isn't
     // applied by the runner that had it, which may keep a copy.
@@ -3539,6 +3661,12 @@ export const finishCommand = mutation({
     // already done or failed (finished before, cancelled, expired) stays as
     // it ended, and null is all a runner ever got back.
     if (c.commandState.kind !== 'taken' && c.commandState.kind !== 'lapsed') return null;
+    const erasedNote = await erasedBotNoteCommand(ctx, c);
+    if (erasedNote) {
+      ok = false;
+      result = undefined;
+      note = ERASED_BOT_NOTE;
+    }
     // A call's answer, a slashCommands list (API 62) or a design review (API 86).
     // And (API 77) a login or model change's: the login and model that
     // runner applied, which may not be the model asked for.
@@ -3549,6 +3677,7 @@ export const finishCommand = mutation({
     // userinfo (an ssh user that's a token), as moves:moveInfo stores it
     // (Daybreak 143, security review 17 Nov 2026).
     if (kept !== undefined && c.kind === 'call' && c.args?.method === 'moves.describe') kept = withoutOriginCredentials(kept);
+    if (kept !== undefined && c.kind === 'botDeviceAction') kept = await safeBotNoteResult(ctx, c, kept);
     // The thread a create made is the command's runner's (it writes the row
     // before finishing): never another runner's id, which the main Mac would
     // then open as this runner's new thread.
@@ -3566,7 +3695,8 @@ export const finishCommand = mutation({
     await ctx.db.patch(commandId, { note: said, ...(made ? { resultThreadId: made } : {}), ...(kept !== undefined ? { result: kept } : {}) });
     // Its words, and a secret's sealed answer (docs/protocol/threads.md, "Secrets"), have
     // done their job: see finishedArgs.
-    await ctx.db.patch(commandId, { args: finishedArgs(c.args) });
+    const botNote = c.kind === 'botDeviceAction' && !c.botDeviceReceiptVersion ? botNoteCommand(c.args) : undefined;
+    await ctx.db.patch(commandId, { args: finishedArgs(c.args), ...(botNote ? { botNote, botDeviceReceiptVersion: 1 } : {}) });
     // The runner has its copy of the phone's photos by now, and images are
     // meant to live on the Mac. A failed send keeps its photos on the phone,
     // which uploads them again.
@@ -3625,7 +3755,9 @@ export const commandEnded = internalMutation({
     if (!c) return null;
     if (why === 'lapsed' && c.commandState.kind !== 'lapsed') return null;
     const note = why === 'lapsed' ? LAPSED_NOTE : c.takenAt !== undefined ? 'Its runner never finished it.' : 'No runner took it in time.';
-    await ctx.db.patch(commandId, { args: why === 'lapsed' ? lapsedArgs(c.args) : finishedArgs(c.args), note });
+    const botNote = c.kind === 'botDeviceAction' && !c.botDeviceReceiptVersion ? botNoteCommand(c.args) : undefined;
+    await ctx.db.patch(commandId, { args: why === 'lapsed' ? lapsedArgs(c.args) : finishedArgs(c.args),
+      note, ...(botNote ? { botNote, botDeviceReceiptVersion: 1 } : {}) });
     await endCommandFiles(ctx, commandId);
     for (const image of Array.isArray(c.args?.images) ? c.args.images : []) await deleteIfUnused(ctx, image.storageId);
     return null;
