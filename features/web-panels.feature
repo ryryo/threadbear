@@ -109,6 +109,23 @@ Feature: Web pages in a thread's panels
     And the page's colored button was never activated
 
   @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: The comment follows the selected element without moving the page
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    And I remember the browser page viewport
+    When I press the browser control "Mark an element for this thread"
+    And I select the colored button after scrolling
+    Then the comment editor sits beside the selected element
+    And the browser page keeps its viewport
+    When I enter the page comment "このボタンを青に"
+    And I resize the window with a browser element selected
+    Then the comment editor sits beside the selected element
+    And the page comment still says "このボタンを青に"
+
+  @panel.web @web-runtime @swift-pending @browser.comment
   Scenario: Switching threads discards a comment awaiting review
     Given the web runtime is installed
     When I open the thread "Morning brief"
