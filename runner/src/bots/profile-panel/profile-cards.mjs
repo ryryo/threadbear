@@ -2,6 +2,7 @@
 // InlineText carries the edit-version check for late saves. Row and Card are copied unchanged.
 import { createElement as h, useEffect, useRef, useState } from 'react';
 import { useMemoryCount } from './memory-count.mjs';
+import { AvatarHeader } from './avatar-editor.mjs';
 
 export function InlineText({ label, value, placeholder, required = false, maxLength, multiline = false, className, autoFocus = false, onSave, onDone }) {
   const [draft, setDraft] = useState(null)
@@ -76,9 +77,10 @@ function MemoryCard({ bot, actions, t }) {
       h('span', { className: 'bt-mem-row-go' }, t('Manage'), h(ChevronRightIcon))))
 }
 
-export function BotProfileCards({ bot, actions, t }) {
+export function BotProfileCards({ bot, actions, appearance, t, run }) {
   const save = patch => actions.updateBot(bot.id, patch);
   return h('div', { className: 'bt-bs' },
+    appearance ? h(AvatarHeader, { bot, actions, run }) : null,
     h(Card, { title: t('Profile') },
       h(Row, { label: t('Name') }, h(InlineText, { label: t('Name'), value: bot.name, placeholder: 'Bob', required: true, maxLength: 40, onSave: name => save({ name }) })),
       h(Row, { label: t('Label'), hint: t('Optional. Shown under the name.') }, h(InlineText, { label: t('Label'), value: bot.role, placeholder: t('Research, admin…'), maxLength: 24, onSave: role => save({ role }) }))),

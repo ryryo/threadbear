@@ -2,13 +2,16 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
+import type { BotAppearancePatch } from './repository.ts';
+import { copyAppearance, MAX_AVATAR_IMAGE } from './ported/roster-copy.js';
 
-type Profile = { id: string; name: string; role: string; instructions: string; revision: number };
+type Profile = { id: string; name: string; role: string; instructions: string; revision: number; color?: unknown; avatar?: unknown };
 type Patch = Pick<Profile, 'name'> | Pick<Profile, 'role'> | Pick<Profile, 'instructions'>;
 type Ports = {
   read: (botId: string) => Profile | undefined;
   countMemory: (botId: string) => number;
   update: (botId: string, revision: number, patch: Patch) => Profile;
+  updateAppearance?: (botId: string, revision: number, patch: BotAppearancePatch) => Profile;
   now?: () => number;
 };
 export type ProfileMemoryRequest = { id: string; botId: string };
@@ -18,6 +21,7 @@ type Lease = ProfileMemoryRequest & {
 const loopback = '127.0.0.1';
 const lifetime = 30 * 60_000;
 const maxBody = 64 * 1024;
+const maxAppearanceBody = MAX_AVATAR_IMAGE + 1024;
 export const openProfilePanelInput = z.strictObject({ botId: z.uuid() });
 export const closeProfilePanelInput = z.strictObject({ id: z.string().regex(/^[a-f0-9]{64}$/) });
 const revision = z.int().positive();
@@ -26,9 +30,17 @@ const edit = z.union([
   z.strictObject({ expectedRevision: revision, role: z.string().max(24) }),
   z.strictObject({ expectedRevision: revision, instructions: z.string() }),
 ]);
+const appearance = z.strictObject({
+  expectedRevision: revision,
+  color: z.string().max(32).nullable().optional(),
+  avatar: z.strictObject({
+    shape: z.string().regex(/^[a-z][\w-]{0,31}$/).optional(),
+    image: z.string().max(MAX_AVATAR_IMAGE).optional(),
+  }).refine(avatar => avatar.shape !== undefined || avatar.image !== undefined).nullable().optional(),
+}).refine(patch => patch.color !== undefined || patch.avatar !== undefined);
 const source = new URL('./profile-panel/', import.meta.url);
-const html = '<!doctype html><meta charset="utf-8"><title>Bot profile</title><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/profile.css"><link rel="stylesheet" href="/layout.css"><div id="root"></div><script type="module" src="/profile.js"></script>';
-const csp = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+const html = '<!doctype html><meta charset="utf-8"><title>Bot profile</title><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/profile.css"><link rel="stylesheet" href="/avatar.css"><link rel="stylesheet" href="/layout.css"><div id="root"></div><script type="module" src="/profile.js"></script>';
+const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer) {
   res.writeHead(status, { 'Content-Type': type });
@@ -39,18 +51,23 @@ function json(res: ServerResponse, status: number, body: object) {
   send(res, status, 'application/json; charset=utf-8', JSON.stringify(body));
 }
 
-function publicProfile({ id, name, role, instructions, revision }: Profile): Profile {
-  return { id, name, role, instructions, revision };
+function publicProfile({ id, name, role, instructions, revision, color, avatar }: Profile): Profile {
+  const fields = { id, name, role, instructions, revision };
+  try {
+    return { ...fields, ...copyAppearance({ color, avatar }) };
+  } catch {
+    return { ...fields, ...copyAppearance({ color }) };
+  }
 }
 
-async function editBody(req: IncomingMessage) {
+async function jsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
   if (!/^application\/json(?:;\s*charset=utf-8)?$/i.test(req.headers['content-type'] ?? '')) return undefined;
   const size = Number(req.headers['content-length']);
-  if (!Number.isSafeInteger(size) || size < 2 || size > maxBody) return undefined;
+  if (!Number.isSafeInteger(size) || size < 2 || size > limit) return undefined;
   const chunks: Buffer[] = [];
   for await (const chunk of req as AsyncIterable<Buffer>) chunks.push(chunk);
   try {
-    return edit.safeParse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))).data;
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
   } catch {
     return undefined;
   }
@@ -150,6 +167,7 @@ export class ProfilePanelServer {
     if (req.method === 'GET') {
       if (req.url === '/' || /^\/\?lang=(?:en|ja)&theme=(?:light|dark)$/.test(req.url ?? '')) return send(res, 200, 'text/html; charset=utf-8', html);
       if (req.url === '/profile.css') return send(res, 200, 'text/css; charset=utf-8', readFileSync(new URL('profile-cards.css', source)));
+      if (req.url === '/avatar.css') return send(res, 200, 'text/css; charset=utf-8', readFileSync(new URL('avatar.css', source)));
       if (req.url === '/layout.css') return send(res, 200, 'text/css; charset=utf-8', readFileSync(new URL('profile-layout.css', source)));
       if (req.url === '/profile.js') {
         res.setHeader('Content-Encoding', 'gzip');
@@ -159,7 +177,8 @@ export class ProfilePanelServer {
     const count = req.method === 'GET' && req.url === '/api/memory-count';
     const navigate = req.method === 'POST' && req.url === '/api/open-memory';
     const profileRequest = req.url === '/api/profile' && (req.method === 'GET' || req.method === 'PATCH');
-    if (!profileRequest && !count && !navigate) {
+    const setAppearance = req.url === '/api/appearance' && req.method === 'PATCH' ? this.ports.updateAppearance : undefined;
+    if (!profileRequest && !count && !navigate && !setAppearance) {
       return json(res, 404, { error: 'There is no such Bot profile resource.' });
     }
     const lease = this.approved(req);
@@ -179,11 +198,18 @@ export class ProfilePanelServer {
       }
       return json(res, 200, {});
     }
-    const body = await editBody(req);
+    const raw = await jsonBody(req, setAppearance ? maxAppearanceBody : maxBody);
     if (this.approved(req) !== lease || !this.read(lease.botId)) return forbidden();
-    if (!body) return json(res, 400, { error: 'Choose one valid profile field to save.' });
-    const { expectedRevision, ...field } = body;
     try {
+      if (setAppearance) {
+        const fields = appearance.safeParse(raw).data;
+        if (!fields) return json(res, 400, { error: 'Choose a valid Bot character, photo, or color.' });
+        const { expectedRevision, ...patch } = fields;
+        return json(res, 200, { bot: publicProfile(setAppearance(lease.botId, expectedRevision, patch)) });
+      }
+      const body = edit.safeParse(raw).data;
+      if (!body) return json(res, 400, { error: 'Choose one valid profile field to save.' });
+      const { expectedRevision, ...field } = body;
       const saved = this.ports.update(lease.botId, expectedRevision, field);
       return json(res, 200, { bot: publicProfile(saved) });
     } catch (error) {

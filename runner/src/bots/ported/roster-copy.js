@@ -6,6 +6,7 @@ const COLORS = ['deepseek', 'blue', 'violet', 'orange', 'green', 'magenta', 'cya
 const EXTRA_COLORS = ['charcoal', 'graphite', 'rose', 'sky', 'tangerine', 'cobalt']
 const LEGACY_COLORS = { kimi: 'charcoal', zai: 'graphite', minimax: 'rose', stepfun: 'sky', mimo: 'tangerine', qwen: 'cobalt' }
 const MAX_AVATAR_IMAGE = 160_000
+export { MAX_AVATAR_IMAGE }
 const currentColor = color => (typeof color === 'string' && Object.hasOwn(LEGACY_COLORS, color) ? LEGACY_COLORS[color] : color)
 const isColor = color => typeof color === 'string' && (COLORS.includes(color) || EXTRA_COLORS.includes(color) || /^#[0-9a-f]{6}$/i.test(color))
 

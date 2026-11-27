@@ -48,7 +48,11 @@ card can read only the selected Bot's note count. Clicking **Manage**
 sends `bots.profilePanel.memory` with the capability `id` and `botId`
 only to the desktop connection that opened it. The desktop matches both
 against the open view before switching to that Bot's Memory tab. The panel
-link does not enter the Thread, Highlights or the project's patch summary.
+can also update that Bot's avatar or color using the same profile revision.
+It keeps the character's original defaults and lets the owner reset either
+appearance field with `null`. Uploaded photos are validated as bounded raster
+data. The panel link does not enter the Thread, Highlights or the project's
+patch summary.
 
 Bot RPCs require the owner's credential. A Thread key cannot use them at any
 permission level.

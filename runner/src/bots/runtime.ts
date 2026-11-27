@@ -119,6 +119,7 @@ export class BotRuntime {
           countMemory: id => this.getWorkspace().conversations.scopedMemory.open({ kind: 'bot', id }, { kind: 'owner' }, 'read')
             .list(this.options.runner().isoNow().slice(0, 10)).length,
           update: (id, revision, changes) => this.getWorkspace().repo.update(id, revision, changes),
+          updateAppearance: (id, revision, changes) => this.getWorkspace().repo.updateAppearance(id, revision, changes),
         });
         return this.profilePanel.open(input.data.botId, connected, openMemory);
       },

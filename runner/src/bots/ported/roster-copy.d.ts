@@ -12,3 +12,4 @@ export function rosterCopy(ports: {
 }): (id: string) => Promise<Bot>;
 
 export function copyAppearance(profile: Pick<Profile, 'color' | 'avatar' | 'sectionId'>): Pick<Profile, 'color' | 'avatar' | 'sectionId'>;
+export const MAX_AVATAR_IMAGE: number;

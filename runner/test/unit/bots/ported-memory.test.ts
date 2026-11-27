@@ -83,3 +83,38 @@ test('the profile cards, CSS and Japanese labels come from the pinned client sou
   assert.ok(icons.match(chevron));
   assert.equal(cards.match(chevron)?.[0], icons.match(chevron)?.[0]);
 });
+
+test('the native editor uses the pinned DS-Bot avatar controls, assets and raster checks', () => {
+  const root = new URL('../../../../', import.meta.url);
+  const upstream = new URL('third_party/dsbot/baseline/ds-bot/src/', root);
+  const port = new URL('runner/src/bots/profile-panel/', root);
+  const read = (parent: URL, name: string) => readFileSync(new URL(name, parent), 'utf8');
+  for (const name of ['characters', 'inks', 'motion']) {
+    const actual = read(port, `${name}.mjs`).replace(/^.*\n/, '').replace("from './inks.mjs'", "from './inks.js'");
+    assert.equal(actual, read(upstream, `client/${name}.js`));
+  }
+  const exact = (source: string, name: string) => source.match(new RegExp(`^${name}.*?^}\\n`, 'ms'))?.[0];
+  const settings = read(upstream, 'client/bot-settings.js');
+  const editor = read(port, 'avatar-editor.mjs');
+  const css = read(port, 'avatar-style.mjs');
+  const originalCss = read(upstream, 'client/styles.js');
+  for (const name of ['function ShapeRing', 'export function CharacterGrid']) {
+    const expected = exact(settings, name);
+    assert.ok(expected);
+    assert.equal(exact(editor, name), expected);
+  }
+  for (const rule of css.split('\n').filter(line => /^\.|^@/.test(line))) assert.ok(originalCss.includes(rule) || settings.includes(rule), rule);
+  const originalMark = exact(read(upstream, 'client/mark.js'), 'export function BotMark');
+  assert.ok(originalMark);
+  assert.equal(exact(read(port, 'avatar-mark.mjs'), 'export function BotMark'), originalMark);
+  const originalCrop = exact(read(upstream, 'client/avatar-library.js'), 'export async function avatarImage');
+  assert.ok(originalCrop);
+  assert.equal(exact(read(port, 'avatar-upload.mjs'), 'export async function avatarImage'), originalCrop);
+  const validator = read(new URL('runner/src/bots/ported/', root), 'avatar-image.js');
+  const upstreamValidator = read(upstream, 'host/avatar.js');
+  for (const name of ['function mimeOf', 'function readDataUrl', 'export function avatarBytes']) {
+    const expected = exact(upstreamValidator, name);
+    assert.ok(expected);
+    assert.equal(exact(validator, name), expected);
+  }
+});

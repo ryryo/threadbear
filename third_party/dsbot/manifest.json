@@ -459,7 +459,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
-      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab."
+      "changes": "Copy Row, Card, and the Profile and Instructions card expressions. InlineText keeps the original events with an edit revision check for late saves. Copy MemoryCard with an injected translation function; the selected Bot action is adapted to the native Memory tab. Copy CharacterGrid, ShapeRing and AvatarEditor character and upload tabs; attach the original hero markup to the native roster."
     },
     {
       "upstreamPath": "ds-bot/src/client/styles.js",
@@ -469,7 +469,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.css",
-      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js. Copy the memory action row icon and label layout."
+      "changes": "Copy the light and dark theme variables and the unchanged shared card rules. Further rules come from BOT_SETTINGS_CSS at the pinned bot-settings.js. Copy the memory action row icon and label layout. Copy the original avatar CSS and evaluate its original inks and spring values in the asset build."
     },
     {
       "upstreamPath": "ds-bot/src/client/locales/ja.js",
@@ -479,7 +479,7 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-ja.json",
-      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels."
+      "changes": "Copy the original Japanese translations of the profile controls and their hints. Copy the original memory card labels. Reuse available Japanese translations of avatar controls and colors."
     },
     {
       "upstreamPath": "ds-bot/src/client/memory-panel.js",
@@ -499,7 +499,67 @@
       "phase": 10,
       "portMode": "B",
       "portPath": "runner/src/bots/profile-panel/profile-cards.mjs",
-      "changes": "Copy the original ChevronRightIcon used by the Memory card."
+      "changes": "Copy the original ChevronRightIcon used by the Memory card. Use the original pencil icon and its lineIcon helper in the Avatar editor."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/avatar.js",
+      "upstreamBlob": "dab3dddc31a1c42c191c197b5ac3bebc454a80e2",
+      "sha256": "fb3090994cc98e42222996a5a9e519447a18932b856d061a1d4c34cc64f5e141",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/avatar.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/ported/avatar-image.js",
+      "changes": "Copy the byte limit, MIME signature checks and data URL normalization, using the MAX_AVATAR_IMAGE constant already copied from the roster."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/characters.js",
+      "upstreamBlob": "b9507288e4bdff62d46f8d9173f73fabe4bc1742",
+      "sha256": "d0c6ded534e8db5cc87bad32d2aca3872733a0b459bc76a643382b2eeeadf954",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/characters.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/characters.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/inks.js",
+      "upstreamBlob": "f46f0f05037276020ebb64241968498da864a98a",
+      "sha256": "f5c9d5a288a6eda1f24a3cd263346dd84e5b052fd90f92338f8b2af9492ba00b",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/inks.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/inks.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/motion.js",
+      "upstreamBlob": "2fe74e75dd9d2c7d8046dcbac30944ee60b32877",
+      "sha256": "bde599e925e88ad30082256dc886219c8db7e8182b8a82bfa6f955f7a9ef11b4",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/motion.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/motion.mjs",
+      "changes": "Copy the original definitions; local ESM extension where needed."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/mark.js",
+      "upstreamBlob": "2c11b4c570ec10f34a86690ab6e3421d5a2d392f",
+      "sha256": "6a830112fed908b40901b47078e5db613106a448794745e17fdc4f589b02a158",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/mark.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/avatar-mark.mjs",
+      "changes": "Copy BotMark and its original hooks and states."
+    },
+    {
+      "upstreamPath": "ds-bot/src/client/avatar-library.js",
+      "upstreamBlob": "209f8c69f90b684420ee00534ffae214c0243a8b",
+      "sha256": "2b9d5ca8d4cf75afe671ad6592dcbe10c6106686cbd99b8c83ced8e0566b2e3b",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/client/avatar-library.js",
+      "phase": 10,
+      "portMode": "B",
+      "portPath": "runner/src/bots/profile-panel/avatar-upload.mjs",
+      "changes": "Copy the original raster file validation, crop and encoding."
     }
   ]
 }

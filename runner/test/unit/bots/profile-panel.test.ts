@@ -8,6 +8,8 @@ import { threadKey } from '../../../src/rpc-auth.ts';
 import { CallerGate } from '../../../src/rpc-gate.ts';
 import { RpcServer } from '../../../src/rpc.ts';
 import { makeHarness, tmpDir } from '../../helpers/fakes.ts';
+import { BotRepository } from '../../../src/bots/repository.ts';
+import { join } from 'node:path';
 
 test('the profile panel can edit only its selected live Bot and only one profile field', async t => {
   let available = true;
@@ -160,4 +162,43 @@ test('closing a view rejects a save that has not finished sending its body', asy
   panel.close(lease.id);
   send.end(rest);
   assert.equal(await complete.promise, 403);
+});
+
+test('the selected Bot can persist its original color, shape, validated photo and reset independently', async t => {
+  const root = join(tmpDir(), 'bots');
+  const repo = new BotRepository(root, 'local');
+  const bot = repo.create({ name: 'Editor', role: 'Copy editor', instructions: 'Preserve this.' });
+  const other = repo.create({ name: 'Other' });
+  const panel = new ProfilePanelServer({
+    read: id => repo.get(id), countMemory: () => 0,
+    update: (id, rev, changes) => repo.update(id, rev, changes),
+    updateAppearance: (id, rev, changes) => repo.updateAppearance(id, rev, changes),
+  });
+  t.after(() => panel.dispose());
+  const lease = await panel.open(bot.id, () => true, () => {});
+  const url = new URL('/api/appearance', lease.url);
+  const change = (body: object, origin = url.origin) => fetch(url, {
+    method: 'PATCH', headers: { 'X-Threadbear-Profile': lease.id, Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await change({ expectedRevision: 1, avatar: { shape: 'star' }, botId: other.id })).status, 400);
+  assert.equal((await change({ expectedRevision: 1, color: 'fake-ink' })).status, 409);
+  assert.equal((await change({ expectedRevision: 1, color: 'aurora' }, 'https://not-the-editor.test')).status, 403);
+  assert.equal((await change({ expectedRevision: 1, avatar: { shape: 'star' } })).status, 200);
+  assert.equal((await change({ expectedRevision: 1, color: 'aurora' })).status, 409);
+  assert.equal((await change({ expectedRevision: 2, color: 'aurora' })).status, 200);
+  assert.equal((await change({ expectedRevision: 3, avatar: { image: 'data:image/png;base64,YWJjZA==' } })).status, 409);
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJhsAAAAASUVORK5CYII=';
+  assert.equal((await change({ expectedRevision: 3, avatar: { shape: 'star', image: png } })).status, 200);
+  const reopened = new BotRepository(root, 'local');
+  assert.deepEqual(reopened.get(bot.id).avatar, { shape: 'star', image: png });
+  assert.equal(reopened.get(bot.id).color, 'aurora');
+  assert.equal(reopened.get(bot.id).role, 'Copy editor');
+  assert.equal(reopened.get(bot.id).instructions, 'Preserve this.');
+  assert.deepEqual(reopened.get(other.id), other);
+  assert.equal((await change({ expectedRevision: 4, avatar: null, color: null })).status, 200);
+  assert.equal(repo.get(bot.id).avatar, undefined);
+  assert.equal(repo.get(bot.id).color, undefined);
+  panel.close(lease.id);
+  assert.equal((await change({ expectedRevision: 5, color: 'red' })).status, 403);
 });

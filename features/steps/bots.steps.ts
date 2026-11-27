@@ -198,6 +198,77 @@ When('I manage the memory from the original profile', async function (this: BotW
   okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-mem-row-go' }));
 });
 
+async function originalAvatarEditor(world: BotWorld) {
+  okValue(await world.app.do({ cmd: 'webPanel', do: 'click', key: world.profileUrl, selector: '.bt-avatar-trigger' }));
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (await profileValue(world, 'Boolean(document.querySelector(".bt-avedit .bt-shape"))')) return;
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  assert.fail('The original avatar editor did not open');
+}
+
+When("I choose the original avatar's Star and Aurora", async function (this: BotWorld) {
+  await originalAvatarEditor(this);
+  assert.equal(await profileValue(this, 'getComputedStyle(document.querySelector(".bt-avedit")).borderRadius'), '16px');
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star] svg path") !== null'), true);
+  await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star]").click(); document.querySelector(".bt-color[aria-label=Aurora]").click();');
+});
+
+async function avatarPersisted(world: BotWorld, name: string, shape?: string, color?: string) {
+  assert.ok(world.app instanceof GpuiDriver);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { bots } = await world.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { shape?: string }; color?: string }[] }>('bots.list', {}));
+    const bot = bots.find(item => item.name === name);
+    if (bot && bot.color === color && (shape ? bot.avatar?.shape === shape : bot.avatar === undefined)) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail('The Runner did not save the expected avatar for ' + name);
+}
+
+Then('the Bot {string} has the saved Star and Aurora avatar', async function (this: BotWorld, name: string) {
+  await avatarPersisted(this, name, 'star', 'aurora');
+});
+
+Then('the Bot {string} has its default avatar', async function (this: BotWorld, name: string) {
+  await avatarPersisted(this, name);
+});
+
+When('I reset the original avatar to its default', async function (this: BotWorld) {
+  await originalAvatarEditor(this);
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-shape[aria-label=Star]").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await profileValue(this, 'document.querySelector(".bt-color[aria-label=Aurora]").getAttribute("aria-pressed")'), 'true');
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-reset' }));
+});
+
+When('I upload a raster photo using the original Bot editor', async function (this: BotWorld) {
+  okValue(await this.app.do({ cmd: 'webPanel', do: 'click', key: this.profileUrl, selector: '.bt-avedit-tab:nth-of-type(2)' }));
+  await profileValue(this, `(() => {
+    const input = document.querySelector('.bt-dropzone input[type=file]');
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 22;
+    const brush = canvas.getContext('2d');
+    brush.fillStyle = '#006bea'; brush.fillRect(0, 0, 32, 22);
+    canvas.toBlob(blob => {
+      const files = new DataTransfer();
+      files.items.add(new File([blob], 'photo.png', { type: 'image/png' }));
+      input.files = files.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 'image/png');
+  })()`);
+});
+
+Then('the original Bot {string} shows its saved photo', async function (this: BotWorld, name: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { bots } = await this.app.withManagedRunner(client => client.call<{ bots: { name: string; avatar?: { image?: string } }[] }>('bots.list', {}));
+    const image = bots.find(bot => bot.name === name)?.avatar?.image;
+    if (image && /^data:image\/(?:webp|png);base64,/.test(image) &&
+        await profileValue(this, 'document.querySelector(".bt-avatar-trigger img")?.naturalWidth') === 160) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.fail('The original avatar crop did not render and save a 160-pixel photo');
+});
+
 When('I set the original profile label to {string}', async function (this: BotWorld, label: string) {
   const field = profileField('Label');
   await profileValue(this, field + '.focus();' + field + '.select()');

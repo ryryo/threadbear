@@ -1,15 +1,12 @@
 import { createElement as h } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ProfilePanel } from './profile-panel.mjs';
-import japanese from './profile-ja.json' with { type: 'json' };
+import { language, t } from './avatar-i18n.mjs';
 
 const code = window.location.hash.slice(1);
 const { pathname, search } = window.location;
 window.history.replaceState(null, '', pathname + search);
 const preferences = new URLSearchParams(search);
-const language = preferences.get('lang') === 'ja' ? 'ja' : 'en';
-const t = (text, fields = {}) => (language === 'ja' ? japanese[text] ?? text : text)
-  .replace(/\{(\w+)\}/g, (slot, field) => fields[field] ?? slot);
 document.documentElement.lang = language;
 document.body.toggleAttribute('data-ds-dark-theme', preferences.get('theme') === 'dark');
 const root = createRoot(document.getElementById('root'));
@@ -31,11 +28,12 @@ try {
     if (botId !== initial.id) throw new Error('Reopen this Bot profile in Threadbear.');
   };
   root.render(h(ProfilePanel, {
-    initial, t,
+    initial, t, appearance: true,
     async callOwner(method, params) {
-      if (method !== 'bots.update' || params.botId !== initial.id) throw new Error('This Bot profile cannot be saved here.');
+      if (!['bots.update', 'bots.updateAppearance'].includes(method)) throw new Error('This Bot profile cannot be saved here.');
+      selected(params.botId);
       const { botId: _id, ...patch } = params;
-      return request('/api/profile', 'PATCH', patch);
+      return request(method === 'bots.updateAppearance' ? '/api/appearance' : '/api/profile', 'PATCH', patch);
     },
     memory: {
       async memoryView(botId) {

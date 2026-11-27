@@ -7,6 +7,8 @@ import { EFFORT_LEVELS, PERMISSION_MODES, PROVIDERS } from '../protocol.ts';
 import { nameProblem } from './ported/mentions.js';
 import { setChief } from './chief-rules.ts';
 import { teamGrant, teamRecord, validateTeam, type Team, type TeamAudit, type TeamGrant } from './team-state.ts';
+import { avatarBytes } from './ported/avatar-image.js';
+import { copyAppearance } from './ported/roster-copy.js';
 
 const id = z.uuid();
 const revision = z.int().positive();
@@ -50,6 +52,7 @@ type PendingConversation = z.infer<typeof pendingConversation>;
 type State = z.infer<typeof state>;
 export type BotWorkspaceIdentity = { workspaceId: string; ownerRunnerId: string; epoch: number };
 type BotSettings = Pick<Bot, 'name' | 'role' | 'instructions'>;
+export type BotAppearancePatch = { avatar?: { shape?: string; image?: string } | null; color?: string | null };
 
 // Name handling from DS-Bot d104d9ca18d69a35460f14e15dff4d553181433a,
 // src/host/roster.js and src/host/text.js.
@@ -322,6 +325,23 @@ export class BotRepository {
 
   update(id: string, expectedRevision: number, settings: Partial<BotSettings>): Bot {
     return this.saveBot(this.editProfile(id, expectedRevision, settings));
+  }
+
+  updateAppearance(id: string, revision: number, changes: BotAppearancePatch): Bot {
+    const entry = this.editable(id, revision);
+    const avatar = changes.avatar;
+    const candidate = copyAppearance({ color: changes.color, avatar: avatar?.image === undefined ? avatar : { ...avatar, image: avatarBytes(avatar.image).url } });
+    if (changes.color === null) delete entry.color;
+    else if (changes.color !== undefined) {
+      if (candidate.color === undefined) throw new Error('Choose a valid Bot color.');
+      entry.color = candidate.color;
+    }
+    if (avatar === null) delete entry.avatar;
+    else if (avatar !== undefined) {
+      if (candidate.avatar === undefined) throw new Error('Choose a valid Bot character or photo.');
+      entry.avatar = candidate.avatar;
+    }
+    return this.saveBot(entry);
   }
 
   updateWithReceipt(

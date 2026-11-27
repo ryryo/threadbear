@@ -49,6 +49,19 @@ Feature: Bot workspace
     Then the Bot's notes show "編集担当の覚書"
     And the Bot's notes do not show "別の覚書"
     And the old profile view cannot read the Bot
+    When I open the original Bot profile editor
+    And I choose the original avatar's Star and Aurora
+    Then the Bot "編集者" has the saved Star and Aurora avatar
+    And the Bot "別のBot" has its default avatar
+    When I close the original Bot profile editor
+    And the isolated Bot Runner restarts
+    Then the app is connected again
+    And the Bot "編集者" has the saved Star and Aurora avatar
+    When I open the original Bot profile editor
+    And I reset the original avatar to its default
+    Then the Bot "編集者" has its default avatar
+    When I upload a raster photo using the original Bot editor
+    Then the original Bot "編集者" shows its saved photo
 
   @bots.roster_operations @bots @swift-pending
   Scenario: The owner can attach an existing conversation without replacing its transcript

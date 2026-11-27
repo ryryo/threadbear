@@ -2135,6 +2135,8 @@ label or instructions. Name and label save on Enter or when you leave the
 field. Instructions can have multiple lines and save when you leave the
 field. Escape restores the saved text. The **Memory** card shows how many
 notes this Bot has. Choose **Manage** to open the Bot's Memory tab.
+Select the Bot's picture to choose a character and color, upload a photo,
+or reset its appearance.
 
 Right-click a Bot in the list and choose **Duplicate** to start a separate Bot
 with the same profile. In **Conversations**, choose **Attach existing Thread**,
