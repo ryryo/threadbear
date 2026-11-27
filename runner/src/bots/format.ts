@@ -10,6 +10,7 @@ export const BOT_REQUEST_FORMAT = 3;
 export const BOT_TASK_FORMAT = 4;
 export const BOT_TEAM_FORMAT = 5;
 export const BOT_GROUP_FORMAT = 6;
+export const BOT_SCHEDULE_FORMAT = 7;
 
 // launch.mjs is installed on its own. Keep its reader in step with this one.
 function readFormatRequirement(home: string): number | undefined {

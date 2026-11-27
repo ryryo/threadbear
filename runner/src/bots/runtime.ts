@@ -7,7 +7,7 @@ import { PermissionChanges } from './permission-changes.ts';
 import type { Runner } from '../runner.ts';
 import type { ThreadRecord } from '../store.ts';
 import { BotConversations } from './conversations.ts';
-import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
+import { BOT_GROUP_FORMAT, BOT_REQUEST_FORMAT, BOT_SCHEDULE_FORMAT, BOT_TASK_FORMAT, BOT_TEAM_FORMAT, hasPrivateBotData, PRIVATE_BOT_FORMAT, protectBotData, supervisorGuardsBotData } from './format.ts';
 import { ReviewQueue } from './memory-review.ts';
 import { foldersOverlap } from './privacy-folders.ts';
 import { BotRepository } from './repository.ts';
@@ -24,6 +24,8 @@ import type { BotInputRef } from '../protocol.ts';
 import { GroupStore } from './group-store.ts';
 import { BotGroups } from './groups.ts';
 import { groupMethods } from './group-rpc.ts';
+import type { BotScheduleScope } from './schedule-rpc.ts';
+import { BotScheduleTargets } from './schedule-target.ts';
 
 export const BOT_EXPERIMENT = 'nativeBots';
 
@@ -52,6 +54,7 @@ export class BotRuntime {
   private taskService?: BotTaskThreads;
   private teamService?: BotTeams;
   private groupService?: BotGroups;
+  private scheduleTargets?: BotScheduleTargets;
   private groupWake = false;
   private permissionChanges?: PermissionChanges;
   private readonly taskWake = new Set<string>();
@@ -68,7 +71,7 @@ export class BotRuntime {
     })), groupMethods(() => this.groups(), (groupId, seq, operationId, text) => this.approveGroupNote(groupId, seq, operationId, text)), {
     'bots.status': (_params: Record<string, unknown>) => {
       const reason = this.unavailable();
-      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), groups: this.groupsAvailable(), reason };
+      return { enabled: this.options.enabled() && this.options.owns(), available: reason === undefined, requests: this.requestsAvailable(), tasks: this.tasksAvailable(), teams: this.teamsAvailable(), groups: this.groupsAvailable(), schedules: this.botSchedulesAvailable(), reason };
     },
   });
 
@@ -189,6 +192,35 @@ export class BotRuntime {
         if (!result.saved) throw new Error('The task stopped but the Runner could not save that stop.');
       },
     });
+  }
+
+  botSchedulesAvailable(): boolean {
+    return this.unavailable() === undefined && supervisorGuardsBotData(this.options.home, BOT_SCHEDULE_FORMAT);
+  }
+
+  botScheduleScope(threadId: string): BotScheduleScope {
+    const runtime = this.options.runner();
+    const state = runtime.threads.get(threadId);
+    const link = state?.rec.botLink;
+    if (!link || link.groupId || link.taskId) throw new RpcError(ErrorCode.notAllowed, 'Use the regular Bot conversation to schedule this work.');
+    const target = { kind: 'conversation' as const, botId: link.botId, conversationId: link.conversationId, threadId };
+    this.scheduledTargets().verify(target);
+    return { target, ceiling: runtime.authoritySaved(threadId).mode };
+  }
+
+  scheduledTargets(): BotScheduleTargets {
+    if (!this.botSchedulesAvailable()) throw new RpcError(ErrorCode.notAllowed, 'Bot schedules need an updated Runner supervisor.');
+    const { repo, conversations } = this.getWorkspace();
+    return this.scheduleTargets ??= new BotScheduleTargets({
+      repo, conversations, groups: () => this.groups(), runner: this.options.runner(),
+    });
+  }
+
+  protectScheduleData(): void {
+    if (!this.botSchedulesAvailable() || !this.options.canChangePrivacy?.()) {
+      throw new RpcError(ErrorCode.busy, 'Wait for the Runner to finish handing over.');
+    }
+    protectBotData(this.options.home, BOT_SCHEDULE_FORMAT);
   }
 
   groupsAvailable(): boolean {

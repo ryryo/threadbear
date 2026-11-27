@@ -85,6 +85,7 @@ import { realClock } from './clock.ts';
 import { acquireLock } from './lock.ts';
 import { checkBotDataFormat, supervisorGuardsBotData } from './bots/format.ts';
 import { BOT_EXPERIMENT, BotRuntime } from './bots/runtime.ts';
+import { botConversationSchedules, botScheduleMethods } from './bots/schedule-rpc.ts';
 import { isDirectory, removeTempFiles } from './fsutil.ts';
 import { Models } from './models/index.ts';
 import { SettingsService, modelMethods, settingsMethods } from './settings.ts';
@@ -358,7 +359,9 @@ async function main(): Promise<void> {
   let updaterReady = false;
   // Set once this runner has handed over and is finishing its kept turns.
   let draining = false;
-  const scheduleControl = () => scheduleRouter(scheduler, () => primaryLink);
+  const scheduleControl = (threadId: string) => runner.threads.get(threadId)?.rec.botLink
+    ? botConversationSchedules(scheduler, () => bots.botScheduleScope(threadId))
+    : scheduleRouter(scheduler, () => primaryLink);
   // Projects belong to the primary: a draining runner's agent tools change
   // them there rather than write projects.json beside it, and a kept thread
   // joins or leaves one here (docs/protocol/updates.md, "Handovers").
@@ -473,7 +476,7 @@ async function main(): Promise<void> {
     log,
     mcpServersFor: (threadId) => ({
       [SERVER_NAME]: threadbearMcpServer(agentRouter(threadId), threadId,
-        privateAgent(threadId) ? undefined : scheduleControl(), privateAgent(threadId) ? undefined : projectControl(), appRestarts,
+        privateAgent(threadId) ? undefined : scheduleControl(threadId), privateAgent(threadId) ? undefined : projectControl(), appRestarts,
         () => cfg.bulletReplies, () => privateAgent(threadId) ? undefined : pocketControl(), () => cfg.oneReply,
         () => privateAgent(threadId) ? undefined : cfg.connectorsUrl, privateAgent(threadId) ? undefined : gatewayHealth,
         () => privateAgent(threadId) ? undefined : remoteControl(), () => experimentOn(cfg.home, 'livePages'),
@@ -490,7 +493,7 @@ async function main(): Promise<void> {
   const richGuidance = () => (experimentOn(cfg.home, 'livePages') ? `${RICH_BLOCKS_LINE} ${LIVE_PAGES_LINE}` : RICH_BLOCKS_LINE);
   const codexStyleTools = (threadId: string) => {
     const localOnly = privateAgent(threadId);
-    return buildThreadbearTools(agentRouter(threadId), threadId, Date.now, localOnly ? undefined : scheduleControl(), localOnly ? undefined : projectControl(), appRestarts, {
+    return buildThreadbearTools(agentRouter(threadId), threadId, Date.now, localOnly ? undefined : scheduleControl(threadId), localOnly ? undefined : projectControl(), appRestarts, {
       provider: 'codex', bulletReplies: () => cfg.bulletReplies, oneReply: () => cfg.oneReply,
       pocket: () => localOnly ? undefined : pocketControl(), gateway: () => localOnly ? undefined : cfg.connectorsUrl,
       gatewayHealth: localOnly ? undefined : gatewayHealth, remote: () => localOnly ? undefined : remoteControl(),
@@ -704,6 +707,7 @@ async function main(): Promise<void> {
   bootStep('machine');
   scheduler = new Scheduler({
     runner,
+    botSchedules: { targets: () => bots.scheduledTargets(), protect: () => bots.protectScheduleData() },
     home: cfg.home,
     clock: realClock,
     log,
@@ -1426,7 +1430,7 @@ async function main(): Promise<void> {
     else if (n.method === 'thread.deleted') updates.threadChanged(n.params.threadId);
   });
   const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...coordinatorMethods(coordinators), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...recipeMethods(recipes), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }), ...archiveMethods(agentArchive) };
-  Object.assign(methods, bots.methods);
+  Object.assign(methods, bots.methods, botScheduleMethods(scheduler, () => bots.botSchedulesAvailable(), () => bots.scheduledTargets()));
   const updateSettings = methods['settings.update'];
   methods['settings.update'] = p => {
     if ((p.experiments as Record<string, unknown> | undefined)?.[ARCHIVE_EXPERIMENT] === true && bots.hasPrivateBots()) {

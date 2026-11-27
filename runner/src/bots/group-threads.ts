@@ -69,7 +69,8 @@ export class GroupThreads {
     // A draining Runner can still own a kept Thread. Never recreate its
     // record, nor read absence from this process as proof of no delivery.
     if (runner.store.load(link.threadId)) return undefined;
-    const defaults = botThreadOptions(runner, bot, book.group.ceiling);
+    const ceiling = lowerMode(book.group.ceiling, book.round?.schedule?.ceiling ?? 'full');
+    const defaults = botThreadOptions(runner, bot, ceiling);
     const rec = runner.makeThread({ ...defaults, text: '', title: `${book.group.title} · ${bot.name}`, worktree: false }, {
       id: link.threadId, sessionId: link.sessionId,
       botLink: { botId: bot.id, groupId: book.group.id, conversationId: link.id },
@@ -83,7 +84,9 @@ export class GroupThreads {
     if (!rec) return false;
     const bot = this.groups.member(book.group, slot.id);
     if (!bot) return false;
-    const ceiling = ceilingMode(lowerMode(book.group.ceiling, bot.permissionCeiling ?? 'full'));
+    const scheduled = book.round?.schedule;
+    const savedLimit = lowerMode(book.group.ceiling, scheduled?.ceiling ?? 'full');
+    const ceiling = ceilingMode(lowerMode(savedLimit, bot.permissionCeiling ?? 'full'));
     // As in DS-Bot's unseenLines, the member already has its own messages.
     const others = book.events.filter(row => row.roundId === roundId && row.memberId !== bot.id &&
       ['result', 'task-result'].includes(row.kind) && typeof row.text === 'string').slice(-12);
@@ -95,7 +98,7 @@ export class GroupThreads {
       text, '', 'Updates from the current Group call:', ...nearby,
     ].join('\n') : text;
     this.runner.send(rec.id, body, [], {
-      origin: 'runner', queue: true, messageId: this.messageId(slot.callId), ceiling,
+      origin: scheduled ? 'schedule' : 'runner', scheduleId: scheduled?.id, queue: true, messageId: this.messageId(slot.callId), ceiling,
       botSource: { kind: 'runner' }, botGroup: { groupId: book.group.id, roundId, callId: slot.callId },
     });
     return true;

@@ -27,9 +27,7 @@ use threadbear_core::tr;
 // The zoom-aware px (style.rs), in place of GPUI's.
 use crate::style::px;
 use crate::tips::Tip as _;
-use serde_json::json;
-#[cfg(feature = "automation")]
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,6 +55,9 @@ const WEEKDAYS: [(u32, &str); 7] = [
 pub(crate) struct EditorState {
     /// The schedule being edited; None for a new one.
     pub(crate) schedule_id: Option<String>,
+    pub(crate) bot_target: Option<Value>,
+    pub(crate) bot_label: Option<String>,
+    pub(crate) bot_revision: Option<String>,
     pub(crate) text: String,
     pub(crate) title: String,
     pub(crate) once: bool,
@@ -158,6 +159,34 @@ fn choice(
 }
 
 impl Threadbear {
+    pub(crate) fn edit_bot_schedule(
+        &mut self,
+        target: Value,
+        label: String,
+        saved: Option<&Value>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let field = |key: &str| saved.and_then(|row| row[key].as_str());
+        let state = EditorState {
+            schedule_id: field("id").map(str::to_owned),
+            bot_target: Some(target),
+            bot_label: Some(label),
+            bot_revision: field("updatedAt").map(str::to_owned),
+            text: field("text").unwrap_or_default().to_owned(),
+            title: field("title").unwrap_or_default().to_owned(),
+            once: saved.is_none() || field("at").is_some(),
+            at_ms: field("at")
+                .and_then(parse_ms)
+                .unwrap_or_else(|| rules::default_once_ms(now_ms())),
+            repeat: field("cron")
+                .map(RepeatChoice::from_cron)
+                .unwrap_or_default(),
+            ..EditorState::default()
+        };
+        self.open_schedule_editor(state, window, cx);
+    }
+
     /// A new schedule from the Scheduled view (`newSchedule(from: nil)`):
     /// it starts a new thread each time, in the runner's default folder, on
     /// the new-thread box's login and model. `from` is a thread whose
@@ -726,7 +755,16 @@ impl ScheduleEditor {
         if !title.is_empty() {
             params["title"] = json!(title);
         }
-        let method = if let Some(id) = &s.schedule_id {
+        let method = if let Some(target) = &s.bot_target {
+            if let Some(id) = &s.schedule_id {
+                params["scheduleId"] = json!(id);
+                params["expectedUpdatedAt"] = json!(s.bot_revision);
+                "bots.schedules.update"
+            } else {
+                params["botTarget"] = target.clone();
+                "bots.schedules.create"
+            }
+        } else if let Some(id) = &s.schedule_id {
             params["scheduleId"] = json!(id);
             if s.thread_id.is_none() {
                 if let Some(cwd) = s.update_cwd(&away_folder) {
@@ -802,7 +840,9 @@ impl ScheduleEditor {
                         if let Some(app) = this.app.upgrade() {
                             let is_new = this.state.is_new();
                             app.update(cx, |app, cx| {
-                                if is_new {
+                                if this.state.bot_target.is_some() {
+                                    app.load_bot_schedules(cx);
+                                } else if is_new {
                                     app.schedule_created(&reply);
                                 } else {
                                     app.schedule_reply(&reply);
@@ -1045,6 +1085,9 @@ impl ScheduleEditor {
     }
 
     fn target_text(&self, cx: &App) -> String {
+        if let Some(label) = &self.state.bot_label {
+            return label.clone();
+        }
         match &self.state.thread_id {
             Some(id) => self
                 .app_read(cx)
@@ -1313,10 +1356,10 @@ impl Render for ScheduleEditor {
                 .into_any_element(),
             );
         }
-        if state.thread_id.is_none() {
+        if state.thread_id.is_none() && state.bot_target.is_none() {
             rows.push(form_row("", self.star_toggle(cx), cx).into_any_element());
         }
-        if state.thread_id.is_none() {
+        if state.thread_id.is_none() && state.bot_target.is_none() {
             // What's needed from the app, read before the menus are built
             // (they need the context to themselves).
             let home = std::env::var("HOME").unwrap_or_default();

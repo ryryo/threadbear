@@ -88,3 +88,11 @@ Feature: Bot workspace
     And the Group memory has one approved note from the reply
     When I stop the Group's work
     Then the Group can be resumed
+
+  @bots.schedules @bots @swift-pending
+  Scenario: Run a saved schedule in a new conversation with the same Bot
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Editor" from the Bots page
+    And I schedule a new Bot conversation saying "見出し案を送る"
+    And I run the saved Bot schedule now
+    Then the scheduled message ran in a new conversation with "Editor"

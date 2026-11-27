@@ -380,6 +380,26 @@
       "portMode": "B",
       "portPath": "runner/test/unit/bots/group-ledger.test.ts",
       "changes": "Port safe names, sequence range, and handing a partial last line to the caller."
+    },
+    {
+      "upstreamPath": "ds-bot/src/host/schedules.js",
+      "upstreamBlob": "dc0ed227cb978797673ae7a1d6ee0cf2153cf7c8",
+      "sha256": "353a08f8cacd3109fbae810e95b4cebbced946e757d1ccb57bff28314d95e961",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/src/host/schedules.js",
+      "phase": 7,
+      "portMode": "B",
+      "portPath": "runner/src/bots/schedule-target.ts",
+      "changes": "Adapt ownerOf and currentSessionOf to the saved Bot, conversation and Group IDs. Scheduler owns timing, claim, revision checks and the retry receipt."
+    },
+    {
+      "upstreamPath": "ds-bot/test/schedules.test.js",
+      "upstreamBlob": "5b2f6a8004c4e3a45dc0b5e99eb686380f355d68",
+      "sha256": "4aefca89a481420163f7cd24da11192f86c8e383b9f8cfe4d113444b3ca4be59",
+      "baselinePath": "third_party/dsbot/baseline/ds-bot/test/schedules.test.js",
+      "phase": 7,
+      "portMode": "B",
+      "portPath": "runner/test/unit/bots/schedule-native.test.ts",
+      "changes": "Adapt owner lookup, dispatch identity, CAS pause and pending Group withdrawal fixtures to the native Scheduler."
     }
   ]
 }

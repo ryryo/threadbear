@@ -2085,7 +2085,7 @@ export class Runner {
             if (message) return finish();
           }
           if (e.type === 'user.message' && e.origin === origin) {
-            message = { seq: e.seq, started, text: e.text, images: e.images };
+            message = { seq: e.seq, started, text: e.text, images: e.images, scheduledRevision: e.botInput?.scheduledRevision };
             return finish();
           }
         }
@@ -2095,15 +2095,20 @@ export class Runner {
     return finish();
   }
 
-  findScheduledSend(threadId: string, scheduleId: string, run?: string, since = 0, origin: MessageOrigin = 'schedule'): { turnId: string } | undefined {
+  findScheduledSend(threadId: string, scheduleId: string, run?: string, since = 0, origin: MessageOrigin = 'schedule'): { turnId: string; scheduledRevision?: number } | undefined {
     if (!run) return undefined;
     const st = this.mustGet(threadId);
     const turnId = scheduledMessageId(threadId, scheduleId, run);
-    if (st.rec.queue.some((q) => q.turnId === turnId) || this.scheduledDelivery(st, turnId, since, origin)?.started) return { turnId };
+    const queued = st.rec.queue.find(q => q.turnId === turnId);
+    const saved = queued ? undefined : this.scheduledDelivery(st, turnId, since, origin);
+    if (queued || saved?.started) {
+      const revision = queued?.botInput?.scheduledRevision ?? (saved && 'seq' in saved ? saved.scheduledRevision : undefined);
+      return { turnId, ...(revision !== undefined && { scheduledRevision: revision }) };
+    }
     return undefined;
   }
 
-  sendScheduled(threadId: string, text: string, scheduleId: string, run?: string, since = 0, preserve?: boolean, ceiling?: PermissionMode): { turnId: string } {
+  sendScheduled(threadId: string, text: string, scheduleId: string, run?: string, since = 0, preserve?: boolean, ceiling?: PermissionMode, scheduledRevision?: number): { turnId: string; scheduledRevision?: number } {
     const prior = this.findScheduledSend(threadId, scheduleId, run, since);
     if (prior) return prior;
     const messageId = run ? scheduledMessageId(threadId, scheduleId, run) : undefined;
@@ -2113,7 +2118,12 @@ export class Runner {
     const logged = messageId ? this.scheduledMessage(this.mustGet(threadId), messageId, since) : undefined;
     // A partial start retries the original logged input, including its check
     // output, so the model reads exactly what the transcript shows.
-    return this.send(threadId, logged?.text ?? text, logged?.images ?? [], { origin: 'schedule', scheduleId, queue: true, ...(preserve !== undefined ? { preserveSchedule: preserve } : {}), ...(messageId ? { messageId, scheduledSince: since } : {}), ...(ceiling !== undefined ? { ceiling } : {}) });
+    const revision = logged?.scheduledRevision ?? scheduledRevision;
+    const asked = this.send(threadId, logged?.text ?? text, logged?.images ?? [], { origin: 'schedule', scheduleId, queue: true,
+      ...(preserve !== undefined ? { preserveSchedule: preserve } : {}), ...(messageId ? { messageId, scheduledSince: since } : {}),
+      ...(ceiling !== undefined ? { ceiling } : {}), ...(revision !== undefined && { scheduledRevision: revision }),
+    });
+    return { ...asked, ...(revision !== undefined && { scheduledRevision: revision }) };
   }
 
   send(threadId: string, text: string, images: ImageRef[] = [], opts: SendOptions = {}): { turnId: string; held?: true } {
@@ -2248,6 +2258,7 @@ export class Runner {
       ...(opts.botRequest ? { request: opts.botRequest } : {}),
       ...(taskInput ? { task: taskInput } : {}),
       ...(opts.botGroup ? { group: opts.botGroup } : {}),
+      ...(opts.scheduledRevision !== undefined && { scheduledRevision: opts.scheduledRevision }),
     };
     if (opts.origin) msg.origin = opts.origin;
     if (opts.wakeReason && opts.origin === 'runner') msg.wakeReason = opts.wakeReason;
@@ -5788,9 +5799,9 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; agentSignal?: AbortSignal };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; scheduledRevision?: number; agentSignal?: AbortSignal };
 
-type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; superseded?: false } | { superseded: true; started: true };
+type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; scheduledRevision?: number; superseded?: false } | { superseded: true; started: true };
 
 const DELETED_REMINDER = 'Dropped a queued reminder because its schedule was deleted.';
 const SUPERSEDED_REMINDER = 'Skipped an older queued reminder because a newer reminder from the same schedule is waiting.';

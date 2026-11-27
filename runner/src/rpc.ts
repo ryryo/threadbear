@@ -567,7 +567,7 @@ export class RpcServer {
     const row = result as Record<string, unknown>;
     const allowed = (id: unknown) => typeof id !== 'string' || this.opts.gate?.canReadThread(caller, id) === true;
     if (method === 'schedules.list' && Array.isArray(row.schedules)) {
-      return { ...row, schedules: row.schedules.filter(schedule => allowed(schedule?.threadId) && allowed(schedule?.lastRun?.threadId)) };
+      return { ...row, schedules: row.schedules.filter(schedule => !schedule?.botTarget && allowed(schedule?.threadId) && allowed(schedule?.lastRun?.threadId)) };
     }
     if (method !== 'runner.status') return result;
     const filtered = { ...row };

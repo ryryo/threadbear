@@ -17,6 +17,7 @@ use threadbear_core::inbox::ThreadSummary;
 use threadbear_core::tr;
 
 mod groups;
+mod schedules;
 mod tasks;
 mod teams;
 use tasks::TaskCard;
@@ -58,6 +59,7 @@ struct ModelBinding {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Conversation {
+    id: Option<String>,
     thread_id: String,
 }
 
@@ -256,6 +258,9 @@ pub(crate) struct BotsState {
     tasks_available: bool,
     teams_available: bool,
     show_teams: bool,
+    schedules_available: bool,
+    show_schedules: bool,
+    schedule_rows: Vec<Value>,
     groups: groups::GroupsState,
     teams: Vec<TeamCard>,
     selected_team: Option<String>,
@@ -304,6 +309,7 @@ impl Threadbear {
                 this.bots.requests_available = value["requests"].as_bool().unwrap_or(false);
                 this.bots.tasks_available = value["tasks"].as_bool().unwrap_or(false);
                 this.bots.teams_available = value["teams"].as_bool().unwrap_or(false);
+                this.bots.schedules_available = value["schedules"].as_bool().unwrap_or(false);
                 this.bots.groups.available = value["groups"].as_bool().unwrap_or(false);
                 this.bots.reason = value["reason"].as_str().map(str::to_owned);
                 if this.bots.available && this.home_page() == Some(SidebarMode::Bots) {
@@ -356,6 +362,7 @@ impl Threadbear {
             return;
         }
         self.bots.show_teams = false;
+        self.bots.show_schedules = false;
         self.bots.groups.visible = false;
         self.bots.selected = Some(id.clone());
         self.bots.detail = None;
@@ -667,6 +674,7 @@ impl Threadbear {
                     .primary()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.bots.show_teams = false;
+                        this.bots.show_schedules = false;
                         this.bots.groups.visible = false;
                         this.edit_bot(Edit::New, String::new(), window, cx);
                     })),
@@ -684,6 +692,13 @@ impl Threadbear {
                 bot_button("bot-groups", "Groups", disabled)
                     .when(self.bots.groups.visible, |button| button.primary())
                     .on_click(cx.listener(|this, _, window, cx| this.open_bot_groups(window, cx))),
+            );
+        }
+        if self.bots.schedules_available {
+            list = list.child(
+                bot_button("bot-schedules", "Bot schedules", disabled)
+                    .when(self.bots.show_schedules, |button| button.primary())
+                    .on_click(cx.listener(|this, _, _, cx| this.open_bot_schedules(cx))),
             );
         }
         for bot in &self.bots.list {
@@ -732,6 +747,9 @@ impl Threadbear {
                     tr!("Checking whether Bots are available on this Runner…").into()
                 }))
                 .into_any_element();
+        }
+        if self.bots.show_schedules && self.bots.schedules_available {
+            return page.child(self.render_bot_schedules(cx)).into_any_element();
         }
         if self.bots.groups.visible && self.bots.groups.available {
             return page.child(self.render_bot_groups(cx)).into_any_element();
@@ -1054,7 +1072,22 @@ impl Threadbear {
     fn render_bot_conversations(&self, detail: &Details, cx: &mut Context<Self>) -> AnyElement {
         let bot_id = detail.bot.id.clone();
         let mut list = v_flex().gap(px(10.)).max_w(px(640.));
+        if detail.bot.archived_at.is_none() && self.bots.schedules_available {
+            let target = json!({ "kind": "newConversation", "botId": bot_id });
+            let label = format!("New conversation with {}", detail.bot.name);
+            list = list.child(
+                bot_button(
+                    "schedule-new-bot-conversation",
+                    "Schedule a new conversation",
+                    self.bots.busy,
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.edit_bot_schedule(target.clone(), label.clone(), None, window, cx)
+                })),
+            );
+        }
         if detail.bot.archived_at.is_none() {
+            let create_bot_id = bot_id.clone();
             list = list.child(
                 bot_button(
                     "bot-new-conversation",
@@ -1063,7 +1096,7 @@ impl Threadbear {
                 )
                 .primary()
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.new_bot_conversation(bot_id.clone(), window, cx)
+                    this.new_bot_conversation(create_bot_id.clone(), window, cx)
                 })),
             );
         }
@@ -1072,6 +1105,9 @@ impl Threadbear {
             let thread = row.thread_id.clone();
             let source = thread.clone();
             let missing = !self.threads.contains_key(&thread);
+            let scheduled = row.id.as_ref().filter(|_| !missing && self.bots.schedules_available && detail.bot.archived_at.is_none())
+                .map(|conversation| json!({ "kind": "conversation", "botId": bot_id, "conversationId": conversation, "threadId": thread }));
+            let schedule_title = title.clone();
             list = list.child(
                 h_flex()
                     .gap(px(8.))
@@ -1099,7 +1135,25 @@ impl Threadbear {
                             this.bots.scope = None;
                             this.load_bot_memory(false, cx);
                         })),
-                    ),
+                    )
+                    .children(scheduled.map(|target| {
+                        bot_button(
+                            SharedString::from(format!("schedule-bot-conversation-{index}")),
+                            "Schedule this conversation",
+                            self.bots.busy,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.edit_bot_schedule(
+                                    target.clone(),
+                                    schedule_title.clone(),
+                                    None,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ))
+                    })),
             );
         }
         list.into_any_element()

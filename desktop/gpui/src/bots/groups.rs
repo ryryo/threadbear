@@ -107,6 +107,17 @@ pub(super) struct GroupsState {
 }
 
 impl Threadbear {
+    pub(super) fn group_title(&self, id: &str) -> Option<&str> {
+        self.bots
+            .groups
+            .roster
+            .as_ref()?
+            .groups
+            .iter()
+            .find(|group| group.id == id)
+            .map(|group| group.title.as_str())
+    }
+
     pub(super) fn open_group_from_thread(
         &mut self,
         id: String,
@@ -121,6 +132,7 @@ impl Threadbear {
 
     pub(super) fn open_bot_groups(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.bots.show_teams = false;
+        self.bots.show_schedules = false;
         self.bots.groups.visible = true;
         self.bots.error = None;
         if self.bots.groups.fields.is_none() {
@@ -725,6 +737,8 @@ impl Threadbear {
                 "bots.groups.stop"
             };
             let params = json!({ "groupId": group.id });
+            let scheduled = json!({"kind": "group", "groupId": group.id });
+            let schedule_title = group.title.clone();
             let archive = json!({ "groupId": group.id, "expectedRevision": group.revision });
             page = page.child(
                 h_flex()
@@ -749,6 +763,21 @@ impl Threadbear {
                             },
                         )),
                     )
+                    .when(self.bots.schedules_available, |row| {
+                        row.child(
+                            bot_button("group-schedule", "Schedule a Group post", busy).on_click(
+                                cx.listener(move |this, _, window, cx| {
+                                    this.edit_bot_schedule(
+                                        scheduled.clone(),
+                                        schedule_title.clone(),
+                                        None,
+                                        window,
+                                        cx,
+                                    )
+                                }),
+                            ),
+                        )
+                    })
                     .child(bot_button("group-archive", "Archive group", busy).on_click(
                         cx.listener(move |this, _, window, cx| {
                             this.group_action("bots.groups.archive", archive.clone(), window, cx)

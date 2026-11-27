@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import type { Runner } from './runner.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
-import type { EffortLevel, PermissionMode, Provider, Schedule } from './protocol.ts';
+import type { BotScheduleTarget, EffortLevel, PermissionMode, Provider, Schedule } from './protocol.ts';
 import { EFFORT_LEVELS, ErrorCode, PROVIDERS, RpcError, isEffortLevel, isPermissionMode, isProvider } from './protocol.ts';
 import { atomicWriteFileSync, isDirectory, readJsonSync } from './fsutil.ts';
 import { expandHome } from './config.ts';
@@ -29,6 +29,7 @@ import { CronError, checkZone, describeAt, describeCron, localZone, nextRun, nex
 import { cutSafely, firstLineSafely } from './safe-cut.ts';
 import { CEILING_REFUSED, ceilingMode, lowerMode } from './runner/ceiling.ts';
 import { raises } from './threadbear-mcp.ts';
+import type { BotScheduleTargets } from './bots/schedule-target.ts';
 
 // What a check printed, carried by a run: kept (when it was kept) and the
 // command, so a sent run drops that command's kept file.
@@ -75,9 +76,10 @@ class HeldLocal extends Error {
 
 export type ScheduleBackend = {
   // The whole table now and whenever it changes. Returns the unsubscribe.
+  supportsBotTargets?: boolean;
   subscribe(onRows: (rows: StoredSchedule[]) => void, onError: (e: Error) => void): () => void;
-  save(s: StoredSchedule): Promise<void>;
-  remove(scheduleId: string): Promise<void>;
+  save(s: StoredSchedule, expectedUpdatedAt?: string): Promise<void>;
+  remove(scheduleId: string, expectedUpdatedAt?: string): Promise<void>;
   // This runner's schedules.json, moved up once. `held`: ones a runner key
   // couldn't bring up (convex/sync.ts adoptSchedules), when nothing moved.
   adopt(rows: StoredSchedule[]): Promise<void | { held?: { id: string; why: string }[] }>;
@@ -132,6 +134,7 @@ export type CreateScheduleParams = {
   checkCard?: CheckCard;
   text: string;
   title?: string;
+  botTarget?: BotScheduleTarget;
   at?: string;
   cron?: string;
   timezone?: string;
@@ -164,6 +167,7 @@ export type CreateScheduleParams = {
 
 export type UpdateScheduleParams = {
   scheduleId: string;
+  botEdit?: { expectedUpdatedAt: string };
   // The check it must still have, compared as it saves (update_schedule
   // carrying a check to a new folder, whose card showed this one). Not
   // from a client.
@@ -296,6 +300,7 @@ export class Scheduler {
   // One file a run, so two runner processes in a handover never write over
   // each other's (a list in one file would need a lock).
   private runsDir: string;
+  private readonly botSchedules?: { targets: () => BotScheduleTargets; protect: () => void };
 
   constructor(deps: {
     runner: ScheduleRunner;
@@ -313,6 +318,7 @@ export class Scheduler {
     savedModeElsewhere?: (threadId: string) => PermissionMode | undefined;
     self?: SelfRunner;
     syncOn?: boolean;
+    botSchedules?: Scheduler['botSchedules'];
     runCheck?: (p: { command: string; cwd: string; home: string; scheduleId: string; timeoutMs?: number }) => Promise<CheckResult>;
     // Box mode (box-mode.ts): this runner keeps no schedules at all. Every
     // way in that would make, change or run one throws this, and nothing
@@ -320,6 +326,7 @@ export class Scheduler {
     refuse?: string;
   }) {
     this.refuse = deps.refuse;
+    this.botSchedules = deps.botSchedules;
     this.runner = deps.runner;
     this.home = deps.home;
     this.check = deps.runCheck ?? runCheck;
@@ -340,6 +347,11 @@ export class Scheduler {
   }
 
   private readonly refuse?: string;
+
+  private botTargets(): BotScheduleTargets {
+    if (!this.botSchedules) throw bad('Bot schedules require an updated Runner.');
+    return this.botSchedules.targets();
+  }
 
   // ------------------------------------------------------------ ceilings
   //
@@ -702,6 +714,8 @@ export class Scheduler {
     // after that is left alone.
     const now = this.clock.now();
     for (const was of before.values()) {
+      const current = this.items.get(was.id);
+      if (was.botTarget && this.mine(was) && !was.paused && current?.paused) this.dropQueued(was);
       if (this.shown.has(was.id) && !this.items.has(was.id) && !(was.finishedAt && now - Date.parse(was.finishedAt) > KEEP_FINISHED_MS)) {
         this.deleted.add(was.id);
         this.dropQueued(was);
@@ -791,11 +805,11 @@ export class Scheduler {
 
   // Writes a made or changed schedule: to the backend, which answers once
   // it has it, or straight into the file.
-  private async put(rec: ScheduleRecord): Promise<void> {
+  private async put(rec: ScheduleRecord, botExpected?: string): Promise<void> {
     if (this.mode === 'backend') {
       const b = this.mustHaveBackend();
       try {
-        await b.save(this.stored({ ...rec, runnerId: rec.runnerId ?? this.self.id }));
+        await b.save(this.stored({ ...rec, runnerId: rec.runnerId ?? this.self.id }), botExpected);
       } catch (e) {
         throw new RpcError(ErrorCode.other, `Couldn't save the schedule to the backend: ${(e as Error).message ?? e}`);
       }
@@ -851,6 +865,10 @@ export class Scheduler {
       });
   }
 
+  botScheduleList(): Schedule[] {
+    return this.listRecords().filter(row => row.botTarget && this.mine(row)).map(row => this.view(row));
+  }
+
   find(idOrPrefix: string): Schedule {
     return this.view(this.mustGet(idOrPrefix));
   }
@@ -892,10 +910,20 @@ export class Scheduler {
       updatedAt: now,
       runs: 0,
     };
+    if (p.botTarget) {
+      if (away || p.threadId || p.check !== undefined || p.createdBy) throw bad('Select a local Bot target for this schedule.');
+      if (this.mode === 'backend' && !this.backend?.supportsBotTargets) throw bad('The connected backend does not support Bot scheduling.');
+      const policy = this.botTargets().verify(p.botTarget);
+      if (policy.private && this.syncOn) throw bad('Schedules for Private Bots are only available with sync off.');
+      rec.botTarget = p.botTarget;
+      rec.botCeiling = lowerMode(policy.ceiling, p.ceiling ?? 'full');
+    }
     if (p.timezone) rec.timezone = this.checkedZone(p.timezone);
     if (p.at !== undefined) rec.at = new Date(this.parseAt(p.at)).toISOString();
     else rec.cron = this.parsedCron(p.cron!).source;
-    if (p.threadId) {
+    if (rec.botTarget) {
+      if (rec.at && Date.parse(rec.at) <= this.clock.now()) throw bad('Pick a time in the future.');
+    } else if (p.threadId) {
       // Throws thread not found for a bad id.
       rec.threadId = this.elsewhere(p.threadId) ? p.threadId : this.runner.get(p.threadId).id;
     } else if (away) {
@@ -927,6 +955,7 @@ export class Scheduler {
     if (!away) this.approveCheck(rec, p.checkCard);
     // Before it's saved, so its first run can't come without it.
     if (rec.threadId) this.setCeiling(rec, p.ceiling ?? (p.createdBy === undefined ? 'full' : p.createdBy === rec.threadId ? (this.savedMode(rec.threadId) ?? 'ask') : 'ask'));
+    if (rec.botTarget) this.botSchedules?.protect();
     await this.put(rec);
     // An `at` that's already passed runs now rather than on the next tick.
     this.tick();
@@ -948,6 +977,17 @@ export class Scheduler {
   private async updateNow(p: UpdateScheduleParams): Promise<Schedule> {
     // A copy, so a write the backend turns down changes nothing here.
     const rec: ScheduleRecord = structuredClone(this.mustGet(p.scheduleId));
+    if (rec.botTarget) {
+      if (!p.botEdit || !this.mine(rec)) throw bad('Open the Bot schedule to make this change.');
+      if (rec.updatedAt !== p.botEdit.expectedUpdatedAt) throw bad('This Bot schedule changed. Reload it before saving.');
+      if (p.paused === true && rec.at && Date.parse(rec.at) <= this.clock.now() && !rec.finishedAt) throw bad('This task is due now and cannot be paused.');
+      if (p.paused === false) {
+        this.botTargets().verify(rec.botTarget);
+        if (rec.at && !p.at && !p.cron && (rec.finishedAt || Date.parse(rec.at) <= this.clock.now())) throw bad('Pick a time in the future.');
+      }
+    } else if (p.botEdit) {
+      throw bad('That schedule has no Bot target.');
+    }
     if (p.ifCheck !== undefined && rec.check !== p.ifCheck) throw bad("The schedule's check changed while the approval card was up, so nothing changed. Look at it again and ask again.");
     const away = !this.mine(rec);
     let replan = false;
@@ -989,7 +1029,7 @@ export class Scheduler {
       if (p.checkTimeoutSecs === null) delete rec.checkTimeoutSecs;
       else rec.checkTimeoutSecs = checkedTimeout(p.checkTimeoutSecs);
     }
-    if (!rec.threadId) {
+    if (!rec.threadId && !rec.botTarget) {
       if (p.cwd !== undefined) rec.cwd = away ? p.cwd.trim() || undefined : this.checkedFolder(p.cwd);
       if (rec.cwd === undefined) delete rec.cwd;
       if (p.accountId !== undefined && p.poolId) throw bad('Give accountId or poolId, not both: a pool picks the login.');
@@ -1025,7 +1065,7 @@ export class Scheduler {
     } else if ([p.cwd, p.accountId, p.poolId, p.provider, p.model, p.effort, p.permissionMode].some((x) => x !== undefined)) {
       throw bad("This schedule sends to a thread, so it has no folder, account or model of its own; change the thread's.");
     }
-    rec.updatedAt = this.iso();
+    rec.updatedAt = rec.botTarget ? new Date(Math.max(this.clock.now(), Date.parse(rec.updatedAt) + 1)).toISOString() : this.iso();
     if (replan) this.plan(rec);
     // New words, or resuming it, are the changer's: Mike's lift its ceiling,
     // a thread's lower it to its own if that's less ("Ceilings").
@@ -1044,18 +1084,20 @@ export class Scheduler {
     // A lowered one before the save, a lifted one after it: a run in
     // between goes by the lower.
     if (ceiling !== undefined && raises(this.ceilingOf(rec), ceiling)) this.setCeiling(rec, ceiling);
-    await this.put(rec);
+    await this.put(rec, p.botEdit?.expectedUpdatedAt);
+    if (rec.botTarget && rec.paused && !was?.paused) this.dropQueued(rec);
     if (ceiling !== undefined && ceiling !== this.ceilingOf(rec)) this.setCeiling(rec, ceiling);
     this.tick();
     return this.view(rec);
   }
 
-  async delete(scheduleId: string): Promise<Record<string, never>> {
+  async delete(scheduleId: string, botEdit = false): Promise<Record<string, never>> {
     this.refused();
     const rec = this.mustGet(scheduleId);
+    if (Boolean(rec.botTarget) !== botEdit || (botEdit && !this.mine(rec))) throw bad('Open the Bot schedule to make this change.');
     if (this.mode === 'backend') {
       try {
-        await this.mustHaveBackend().remove(rec.id);
+        await this.mustHaveBackend().remove(rec.id, rec.botTarget ? rec.updatedAt : undefined);
       } catch (e) {
         if (e instanceof RpcError) throw e;
         throw new RpcError(ErrorCode.other, `Couldn't delete the schedule from the backend: ${(e as Error).message ?? e}`);
@@ -1077,6 +1119,11 @@ export class Scheduler {
   // A deleted schedule's messages still waiting behind a busy turn go
   // with it, rather than arriving after delete_schedule said Deleted.
   private dropQueued(rec: ScheduleRecord): void {
+    if (rec.botTarget) {
+      try { this.botTargets().withdraw(rec.botTarget, rec.id); }
+      catch { this.log.warn('could not withdraw a pending Bot schedule', { scheduleId: rec.id }); }
+      return;
+    }
     const threadId = rec.threadId;
     if (!threadId) return;
     const failed = (e: unknown) => this.log.warn("could not drop a deleted schedule's queued messages", { scheduleId: rec.id, threadId, error: String(e) });
@@ -1097,8 +1144,10 @@ export class Scheduler {
   // the words as theirs, so this run goes by the higher of that and the
   // schedule's own. Left out, Mike (full), as from the app or tb; the RPC
   // gate says a thread's own.
-  async runNow(scheduleId: string, by: PermissionMode = 'full'): Promise<{ schedule: Schedule; threadId?: string; turnId?: string; queued?: boolean }> {
+  async runNow(scheduleId: string, by: PermissionMode = 'full', botEdit = false): Promise<{ schedule: Schedule; threadId?: string; turnId?: string; queued?: boolean }> {
     this.refused();
+    const row = this.mustGet(scheduleId);
+    if (Boolean(row.botTarget) !== botEdit || (botEdit && !this.mine(row))) throw bad('Open the Bot schedule to run it.');
     if (this.runningNow.has(scheduleId)) throw new RpcError(ErrorCode.busy, 'This schedule is already being run; try again in a moment.');
     this.runningNow.add(scheduleId);
     try {
@@ -1789,8 +1838,8 @@ export class Scheduler {
     // in the reminder body. Held notices are delivered only once as well.
     const preserve = Boolean(checked && 'extra' in checked && (checked.held || checked.extra.endsWith('\n```')));
     const text = `[Scheduled: "${rec.title}", ${this.whenText(rec)}]\n\n${rec.text}${checked && 'extra' in checked ? checked.extra : ''}`;
-    const record = (outcome: 'sent' | 'skipped' | 'failed', threadId?: string, note?: string) => {
-      rec.lastRun = { at, outcome, ...(threadId ? { threadId } : {}), ...(note ? { note } : {}) };
+    const record = (outcome: 'sent' | 'skipped' | 'failed', threadId?: string, note?: string, botSettingsRevision?: number) => {
+      rec.lastRun = { at, outcome, ...(threadId ? { threadId } : {}), ...(note ? { note } : {}), ...(botSettingsRevision !== undefined && { botSettingsRevision }) };
       if (outcome === 'sent') rec.runs += 1;
       // Only a sent run has carried it. A skip (the last thread still
       // going), a failure or a refused send keeps it for the next run.
@@ -1829,6 +1878,14 @@ export class Scheduler {
       return { outcome: 'skipped', note };
     }
     try {
+      if (rec.botTarget) {
+        const targets = this.botTargets();
+        this.botSchedules?.protect();
+        if (this.syncOn && targets.verify(rec.botTarget).private) throw bad('This schedule’s Bot is now Private.');
+        const delivered = targets.deliver(rec.botTarget, rec, run, text, since);
+        record('sent', delivered.threadId, undefined, delivered.settingsRevision);
+        return { outcome: 'sent', threadId: delivered.threadId, turnId: delivered.turnId };
+      }
       if (rec.threadId) {
         if (this.sending.has(rec.id)) throw new RpcError(ErrorCode.busy, 'This scheduled message is being sent.');
         // A draining runner can keep a thread for hours while shells run.
@@ -2004,7 +2061,7 @@ export class Scheduler {
   }
 
   private publish(): void {
-    this.runner.publish({ method: 'schedules.updated', params: { schedules: this.list() } });
+    this.runner.publish({ method: 'schedules.updated', params: { schedules: this.list().filter(row => !row.botTarget) } });
   }
 
   private view(rec: ScheduleRecord): Schedule {
@@ -2119,7 +2176,7 @@ function setOrDelete<K extends 'model' | 'effort'>(rec: ScheduleRecord, key: K, 
 
 export function scheduleMethods(s: Scheduler): Record<string, (p: Record<string, unknown>) => unknown> {
   return {
-    'schedules.list': (p) => ({ schedules: s.list(str(p, 'threadId')) }),
+    'schedules.list': (p) => ({ schedules: s.list(str(p, 'threadId')).filter(row => !row.botTarget) }),
     'runners.list': async () => ({ runners: await s.runners() }),
     'schedules.create': async (p) => ({
       schedule: await s.create({

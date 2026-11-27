@@ -2105,6 +2105,10 @@ as they arrive, and you can open a member’s Thread to answer its approval.
 **Stop work** freezes queued messages until you select **Resume**. Use **Review
 as note** on a reply to edit and approve it for the Group’s shared memory.
 
+Create a Bot schedule from a specific conversation, a Bot’s **Schedule a new
+conversation** action, or **Schedule a Group post**. Use **Bot schedules**
+to edit, pause or run these schedules on the owning Runner.
+
 **Set private work folder** gives a Bot a dedicated folder. Stop any existing
 conversations before using it. The Runner withdraws their shared copies and
 keeps Private conversations out of shared links, agent search and phone sync.

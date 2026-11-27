@@ -1057,7 +1057,7 @@ export function phoneCommands(runner: Runner, remote?: Pick<Peers, 'owns' | 'cal
 export function scheduleRouter(local: Scheduler, link: () => PrimaryLink | undefined): ScheduleControl {
   const list = async (threadId?: string) => {
     const l = link();
-    if (!l) return local.list(threadId);
+    if (!l) return local.list(threadId).filter(row => !row.botTarget);
     return (await l.call<{ schedules: ReturnType<Scheduler['list']> }>('schedules.list', threadId ? { threadId } : {})).schedules;
   };
   return {
@@ -1067,8 +1067,10 @@ export function scheduleRouter(local: Scheduler, link: () => PrimaryLink | undef
     },
     list,
     find: async (idOrPrefix) => {
-      if (!link()) return local.find(idOrPrefix);
-      const hits = (await list()).filter((s) => s.id === idOrPrefix || s.id.startsWith(idOrPrefix));
+      const rows = await list();
+      const exact = rows.find(row => row.id === idOrPrefix);
+      if (exact) return exact;
+      const hits = rows.filter(row => row.id.startsWith(idOrPrefix));
       if (hits.length === 1) return hits[0];
       throw new RpcError(ErrorCode.scheduleNotFound, hits.length ? `${idOrPrefix} matches ${hits.length} schedules; use more of the id.` : `No schedule ${idOrPrefix}.`);
     },

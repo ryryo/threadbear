@@ -21,7 +21,10 @@ export const groupDraft = z.object({
 });
 const group = groupDraft.extend({ id, revision: z.int().positive(), archivedAt: date.optional() });
 const entry = z.looseObject({ seq: z.int().positive(), id: z.string(), kind: z.string(), at: date });
+const schedule = z.object({ id, ceiling: z.enum(PERMISSION_MODES), settingsRevision: z.int().positive() });
+export type GroupSchedule = z.infer<typeof schedule>;
 const post = z.object({
+  schedule: schedule.optional(),
   eventId: id, seq: z.int().positive(), operationId: z.string().min(1).max(128),
   text: z.string().min(1).max(30_000), calleeIds: z.array(id), ordered: z.boolean(),
   mentions: z.array(z.object({ start: z.int().nonnegative(), end: z.int().positive(), botIds: z.array(id) })).default([]),
@@ -32,7 +35,7 @@ const call = z.object({
   ordered: z.boolean().optional(), summary: z.boolean().optional(), threadId: id.optional(), turnId: z.string().optional(),
 });
 const roundSchema = z.object({
-  id, roomId: id, sourceSeq: z.int().positive(), status: z.enum(['running', 'finalizing', 'done', 'stopped']),
+  id, roomId: id, schedule: schedule.optional(), sourceSeq: z.int().positive(), status: z.enum(['running', 'finalizing', 'done', 'stopped']),
   batches: z.int().nonnegative(), slots: z.array(call),
 });
 const batch = z.object({
@@ -165,12 +168,12 @@ export class GroupStore {
     return row;
   }
 
-  post(id: string, operationId: string, text: string, at: string): GroupPost {
+  post(id: string, operationId: string, text: string, at: string, scheduled?: GroupSchedule): GroupPost {
     const book = this.get(id);
     if (book.group.archivedAt) throw new Error('This Group is archived.');
     const previous = book.events.find(event => event.kind === 'post' && event.operationId === operationId);
     if (previous) {
-      if (previous.text !== text) throw new Error('That operation ID already names a different post.');
+      if (previous.text !== text || (previous.schedule as GroupSchedule | undefined)?.id !== scheduled?.id) throw new Error('That operation ID already names a different post.');
       return post.parse({ ...previous, eventId: previous.id });
     }
     const members = book.group.memberIds.flatMap(id => this.member(book.group, id) ?? []);
@@ -185,7 +188,7 @@ export class GroupStore {
       ...(admin ? [admin.id] : []),
       ...(ordered ? members.filter(bot => bot.id !== book.group.adminId).map(bot => bot.id) : []),
     ];
-    const fields = { operationId, text, calleeIds: calleeIds.length ? calleeIds : fallback, mentions, ordered };
+    const fields = { operationId, text, ...(scheduled && { schedule: scheduled }), calleeIds: calleeIds.length ? calleeIds : fallback, mentions, ordered };
     const event = this.append(book, 'post', at, fields);
     const ready = post.parse({ ...event, eventId: event.id });
     book.posts.push(ready);
@@ -199,7 +202,7 @@ export class GroupStore {
     if (book.frozen || book.group.archivedAt || !book.posts.length || book.round?.status === 'running' || book.round?.status === 'finalizing') return undefined;
     const post = book.posts.shift()!;
     const peers = post.calleeIds.flatMap(id => this.member(book.group, id) ?? []);
-    const round: GroupRound = { id: randomUUID(), roomId: id, sourceSeq: post.seq, status: 'running', batches: 0, slots: [] };
+    const round: GroupRound = { id: randomUUID(), roomId: id, sourceSeq: post.seq, status: 'running', batches: 0, slots: [], schedule: post.schedule };
     callIn(round, peers, post.text, undefined, { ordered: post.ordered });
     book.round = round;
     book.batches = [];

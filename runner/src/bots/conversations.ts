@@ -17,7 +17,7 @@ export class BotConversations {
     this.scopedMemory = new ScopedMemory({ repo, root, projects: runner.projects, redact, ...groupScope });
   }
 
-  create(botId: string, operationId: string): Conversation {
+  create(botId: string, operationId: string, ceiling?: import('../protocol.ts').PermissionMode): Conversation {
     const reserved = this.repo.reserveConversation(botId, operationId);
     const bot = this.repo.get(botId);
     const existing = this.runner.store.load(reserved.threadId);
@@ -28,7 +28,7 @@ export class BotConversations {
       }
     } else {
       if (typeof reserved.sessionId !== 'string') throw new Error('This Bot conversation’s Thread is gone');
-      this.runner.makeThread({ ...botThreadOptions(this.runner, bot), text: '', title: bot.name }, {
+      this.runner.makeThread({ ...botThreadOptions(this.runner, bot, ceiling), text: '', title: bot.name }, {
         id: reserved.threadId,
         sessionId: reserved.sessionId,
         botLink: { botId, conversationId: reserved.id },

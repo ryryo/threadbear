@@ -11,7 +11,7 @@ import { callIn, startable, type GroupCall } from './group-round.ts';
 import { GroupThreads, type GroupInput } from './group-threads.ts';
 import type { KeptResult } from './handoff-result.ts';
 import { BOT_WORKSPACE_CONCURRENCY, type SavedTask } from './task-journal.ts';
-import type { GroupBook, GroupDraft, GroupStore } from './group-store.ts';
+import type { GroupBook, GroupDraft, GroupSchedule, GroupStore } from './group-store.ts';
 
 const ROUND_CALLS = 32;
 const IDLE_RELAY_LIMIT = 6;
@@ -68,10 +68,31 @@ export class BotGroups {
     return { group: profile, stopped, tasksStopped };
   }
 
-  post(id: string, operationId: string, text: string) {
-    const post = this.store.post(id, operationId, text, this.runner.isoNow());
+  post(id: string, operationId: string, text: string, scheduled?: GroupSchedule) {
+    const post = this.store.post(id, operationId, text, this.runner.isoNow(), scheduled);
     this.recover();
     return post;
+  }
+
+  withdraw(id: string, scheduleId: string): void {
+    const book = this.store.get(id);
+    const queued = book.posts.filter(post => post.schedule?.id === scheduleId);
+    const round = book.round?.schedule?.id === scheduleId ? book.round : undefined;
+    const waiting = round?.slots.filter(slot => slot.status === 'waiting' && !slot.batchKey && !slot.summary) ?? [];
+    const held = round?.slots.filter(slot => {
+      const st = slot.threadId && this.runner.threads.get(slot.threadId);
+      return slot.status === 'speaking' && st && st.rec.queue.some(input =>
+        input.scheduleId === scheduleId && input.botInput?.group?.callId === slot.callId);
+    }) ?? [];
+    if (!queued.length && !waiting.length && !held.length) return;
+    const ids = new Set([...waiting, ...held].map(slot => slot.callId));
+    this.store.change(id, next => {
+      next.posts = next.posts.filter(post => post.schedule?.id !== scheduleId);
+      for (const slot of next.round?.slots ?? []) if (ids.has(slot.callId)) slot.status = 'stopped';
+      this.store.append(next, 'schedule-withdrawn', this.runner.isoNow(), { scheduleId, roundId: round?.id });
+    });
+    for (const slot of held) if (slot.threadId) this.runner.dropScheduled(slot.threadId, scheduleId);
+    this.recover();
   }
 
   read(id: string, from?: number, to?: number) {

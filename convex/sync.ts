@@ -3,6 +3,7 @@
 // twice is harmless, and a runner that was offline writes each changed
 // row once when it's back.
 import { ConvexError, v } from 'convex/values';
+import { botScheduleTarget } from './bot-schedule-values';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -2243,7 +2244,7 @@ const scheduleDoc = v.object({
   nextRunAt: v.optional(v.string()),
   finishedAt: v.optional(v.string()),
   runs: v.number(),
-  lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) })),
+  lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()), botSettingsRevision: v.optional(v.number()) })),
 });
 
 const accountDoc = v.object({
@@ -2646,9 +2647,11 @@ const ownedScheduleDoc = v.object({
   checkTimeoutSecs: v.optional(v.number()),
   provider: v.optional(v.string()),
   starThreads: v.optional(v.boolean()),
+  botTarget: v.optional(botScheduleTarget),
+  botCeiling: v.optional(v.string()),
 });
 
-const lastRunDoc = v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) });
+const lastRunDoc = v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()), botSettingsRevision: v.optional(v.number()) });
 
 async function scheduleRow(ctx: { db: MutationCtx['db'] }, scheduleId: string) {
   const row = await ctx.db
@@ -2785,9 +2788,9 @@ export const schedulesSince = query({
 // schedules.update has it. A change to when it runs drops a claim on the
 // old time.
 export const saveSchedule = mutation({
-  args: { key: v.string(), schedule: ownedScheduleDoc },
+  args: { key: v.string(), schedule: ownedScheduleDoc, expectedUpdatedAt: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { key, schedule }) => {
+  handler: async (ctx, { key, schedule, expectedUpdatedAt }) => {
     const caller = await runnerAuth(ctx, key, 'saveSchedule');
     schedule = clean(schedule);
     const row = await scheduleRow(ctx, schedule.id);
@@ -2797,6 +2800,13 @@ export const saveSchedule = mutation({
     checkRunnerId(schedule.runnerId);
     if (!caller.owner && !SCHEDULE_ID.test(schedule.id)) throw new ConvexError({ kind: 'badArgs', message: "A runner key's schedule ids are UUIDs, as its runner makes them." });
     if (!mayWrite(caller, schedule.runnerId, row?.runnerId) || (await scheduleIdTaken(ctx, caller, schedule.id))) throw forbidden(`save schedule ${schedule.id}`);
+    if (expectedUpdatedAt !== undefined && (row?.updatedAt !== expectedUpdatedAt || !row.botTarget)) {
+      throw new ConvexError({ kind: 'conflict', message: 'This Bot schedule changed. Reload it before saving.' });
+    }
+    if (row?.botTarget && (expectedUpdatedAt === undefined || row.runnerId !== schedule.runnerId ||
+        JSON.stringify(row.botTarget) !== JSON.stringify(schedule.botTarget) || row.botCeiling !== schedule.botCeiling)) {
+      throw forbidden('change the owning Runner or target of a Bot schedule');
+    }
     capText(caller, "A schedule's text", schedule.text, CAP.scheduleText);
     capDoc(caller, 'A schedule', schedule, CAP.scheduleDoc);
     capDoc(caller, 'A schedule', scheduleRoom(schedule), CAP.scheduleDoc - RUN_ROOM);
@@ -2815,14 +2825,17 @@ export const saveSchedule = mutation({
 });
 
 export const deleteSchedule = mutation({
-  args: { key: v.string(), scheduleId: v.string() },
+  args: { key: v.string(), scheduleId: v.string(), expectedUpdatedAt: v.optional(v.string()) },
   returns: v.boolean(),
-  handler: async (ctx, { key, scheduleId }) => {
+  handler: async (ctx, { key, scheduleId, expectedUpdatedAt }) => {
     const caller = await runnerAuth(ctx, key, 'deleteSchedule');
     // Another runner's schedule is as good as missing to a runner key: no
     // refusal to say it's there or whose it is.
     const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
     if (!row) return false;
+    if (row.botTarget && row.updatedAt !== expectedUpdatedAt) {
+      throw new ConvexError({ kind: 'conflict', message: 'This Bot schedule changed. Reload it before deleting.' });
+    }
     await ctx.db.delete(row._id);
     await dropWake(ctx, scheduleId);
     await ctx.db.insert('scheduleGone', { id: row.id, runnerId: row.runnerId, at: Date.now() });
@@ -2990,7 +3003,7 @@ export const requestScheduleRun = mutation({
     // Another runner's schedule is as good as missing to a runner key: no
     // refusal to say it's there or whose it is.
     const row = visibleTo(caller, await scheduleRow(ctx, scheduleId));
-    if (!row) return false;
+    if (!row || row.botTarget) return false;
     await ctx.db.patch(row._id, { runRequestedAt: caller.owner ? at : cutBytes(at, 64), updatedMs: Date.now() });
     return true;
   },

@@ -173,7 +173,8 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 104;
+export const BACKEND_API_VERSION = 105;
+export const BOT_SCHEDULE_API_VERSION = 105;
 export const INDEX_POOL_API_VERSION = 101;
 export const COORDINATORS_API_VERSION = 102;
 export const NEXT_PICK_API_VERSION = 103;
@@ -1429,7 +1430,7 @@ export function toScheduleDoc(s: Schedule) {
   };
   for (const k of ['at', 'cron', 'timezone', 'threadId', 'cwd', 'accountId', 'model', 'nextRunAt', 'finishedAt'] as const) if (s[k] !== undefined) out[k] = s[k];
   if (s.lastRun) {
-    out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}) };
+    out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}), ...(s.botTarget && s.lastRun.botSettingsRevision !== undefined && { botSettingsRevision: s.lastRun.botSettingsRevision }) };
   }
   return out;
 }
@@ -1457,6 +1458,11 @@ export function toOwnedScheduleDoc(s: StoredSchedule, apiVersion = BACKEND_API_V
   if (s.checkTimeoutSecs !== undefined && apiVersion >= SCHEDULE_CHECK_TIMEOUT_API_VERSION) out.checkTimeoutSecs = s.checkTimeoutSecs;
   if (s.provider !== undefined && apiVersion >= SCHEDULE_PROVIDER_API_VERSION) out.provider = s.provider;
   if (s.starThreads && apiVersion >= SCHEDULE_STAR_API_VERSION) out.starThreads = true;
+  if (s.botTarget) {
+    if (apiVersion < BOT_SCHEDULE_API_VERSION) throw new Error('This backend cannot store Bot schedule targets.');
+    out.botTarget = s.botTarget;
+    out.botCeiling = s.botCeiling;
+  }
   if (s.lastRun) {
     out.lastRun = { at: s.lastRun.at, outcome: s.lastRun.outcome, ...(s.lastRun.threadId ? { threadId: s.lastRun.threadId } : {}), ...(s.lastRun.note ? { note: s.lastRun.note } : {}) };
   }
@@ -3616,7 +3622,7 @@ export class ConvexSync {
           await this.sendAccounts(list as Account[], v);
           continue;
         }
-        const rows = (list as Schedule[]).map(toScheduleDoc);
+        const rows = (list as Schedule[]).filter(row => !row.botTarget).map(toScheduleDoc);
         try {
           await this.post('mutation', `sync:set${name[0]!.toUpperCase()}${name.slice(1)}`, { key, runnerId: this.runnerId, [name]: rows });
         } catch (e) {
@@ -4661,7 +4667,9 @@ export class ConvexSync {
     const runnerId = this.runnerId;
     const holder = `${runnerId}:${process.pid}:${this.deps.startedAt}`;
     const call = (kind: 'mutation' | 'query', fn: string, args: Record<string, unknown>) => this.backend(kind, fn, { key, ...args });
+    const supportsBotTargets = () => (this.backendApiVersion ?? 0) >= BOT_SCHEDULE_API_VERSION;
     this.schedulesTable = {
+      get supportsBotTargets() { return supportsBotTargets(); },
       subscribe: (onRows, onError) => {
         if (!this.subscriber) {
           onError(new Error('sync is off'));
@@ -4673,11 +4681,12 @@ export class ConvexSync {
         }
         return subscriber.subscribe('sync:schedules', { key }, (v) => onRows(Array.isArray(v) ? (v as StoredSchedule[]) : []), onError);
       },
-      save: async (sc) => {
-        await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc, this.backendApiVersion ?? 0) });
+      save: async (sc, expectedUpdatedAt) => {
+        await call('mutation', 'sync:saveSchedule', { schedule: toOwnedScheduleDoc(sc, this.backendApiVersion ?? 0),
+          ...(expectedUpdatedAt !== undefined && { expectedUpdatedAt }) });
       },
-      remove: async (scheduleId) => {
-        await call('mutation', 'sync:deleteSchedule', { scheduleId });
+      remove: async (scheduleId, expectedUpdatedAt) => {
+        await call('mutation', 'sync:deleteSchedule', { scheduleId, ...(expectedUpdatedAt !== undefined && { expectedUpdatedAt }) });
       },
       adopt: async (rows) => (await call('mutation', 'sync:adoptSchedules', { runnerId, schedules: rows.map((r) => toOwnedScheduleDoc(r, this.backendApiVersion ?? 0)) })) as { held?: { id: string; why: string }[] } | null ?? undefined,
       claim: async (scheduleId, kind, expect) => (await call('mutation', 'sync:claimSchedule', { runnerId, scheduleId, holder, kind, expect })) === true,

@@ -1224,6 +1224,7 @@ export function buildThreadbearTools(
         }
         const sc = await s.update({
           scheduleId: current.id,
+          ...(current.botTarget ? { botEdit: { expectedUpdatedAt: current.updatedAt } } : {}),
           text,
           title,
           at: when === undefined ? undefined : parseWhen(when, now()),

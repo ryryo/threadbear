@@ -339,3 +339,55 @@ Then('the Group can be resumed', async function (this: GroupWorld) {
     assert.fail('The Group remained stopped.');
   });
 });
+
+When('I schedule a new Bot conversation saying {string}', async function (this: BotWorld, body: string) {
+  await click(this, 'Schedule a new conversation');
+  await this.app.do({ cmd: 'type', here: true, text: body });
+  await click(this, 'Save the schedule (Return)');
+});
+
+When('I run the saved Bot schedule now', async function (this: BotWorld) {
+  assert.ok(this.app instanceof GpuiDriver);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const labels = JSON.parse(await this.app.do({ cmd: 'labels' })) as { label: string }[];
+    const editorOpen = labels.some(item => item.label === 'Save the schedule (Return)');
+    if (!editorOpen) {
+      const saved = await this.app.withManagedRunner(client =>
+        client.call<{ schedules: unknown[] }>('bots.schedules.list', {}));
+      if (saved.schedules.length) {
+        await click(this, 'Bot schedules');
+        await click(this, 'Run now');
+        return;
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.fail('The Bot schedule editor did not finish saving.');
+});
+
+Then('the scheduled message ran in a new conversation with {string}', async function (this: BotWorld, name: string) {
+  assert.ok(this.app instanceof GpuiDriver);
+  await this.app.withManagedRunner(async client => {
+    const { bots } = await client.call<{ bots: { id: string; name: string }[] }>('bots.list', {});
+    const bot = bots.find(row => row.name === name);
+    assert.ok(bot);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const { schedules } = await client.call<{ schedules: {
+        botTarget: { kind: string; botId: string };
+        lastRun?: { outcome: string; threadId?: string; botSettingsRevision?: number };
+      }[] }>('bots.schedules.list', {});
+      const row = schedules[0];
+      if (row?.lastRun?.outcome === 'sent') {
+        assert.deepEqual(row.botTarget, { kind: 'newConversation', botId: bot.id });
+        const { conversations } = await client.call<{ conversations: { threadId: string }[] }>('bots.get', { botId: bot.id });
+        assert.deepEqual(conversations.map(row => row.threadId), [row.lastRun.threadId]);
+        assert.equal(row.lastRun.botSettingsRevision, 1);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail('The saved Bot schedule did not start its conversation.');
+  });
+});

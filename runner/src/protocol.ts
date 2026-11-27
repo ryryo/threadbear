@@ -246,6 +246,7 @@ export type BotInputRef = {
   request?: { id: string; role: 'request' | 'result' };
   task?: { id: string; role: 'work' | 'result' };
   group?: { groupId: string; roundId: string; callId: string };
+  scheduledRevision?: number;
 };
 
 export type ThreadSummary = {
@@ -1073,6 +1074,11 @@ export const TRANSIENT_TYPES = new Set<string>(['assistant.text.delta', 'reasoni
 export type InProgressItem = { itemId: string; type: 'assistant.text' | 'reasoning'; text: string };
 
 // JSON-RPC error codes from docs/protocol.md.
+export type BotScheduleTarget =
+  | { kind: 'conversation'; botId: string; conversationId: string; threadId: string }
+  | { kind: 'newConversation'; botId: string }
+  | { kind: 'group'; groupId: string };
+
 // A message sent at a set time, once (at) or over and over (cron). See
 // "Schedules" in docs/protocol.md.
 export type Schedule = {
@@ -1116,12 +1122,14 @@ export type Schedule = {
   nextRunAt?: string;
   finishedAt?: string;
   runs: number;
-  lastRun?: { at: string; outcome: 'sent' | 'skipped' | 'failed'; threadId?: string; note?: string };
+  lastRun?: { at: string; outcome: 'sent' | 'skipped' | 'failed'; threadId?: string; note?: string; botSettingsRevision?: number };
   // Where it runs, once schedules live in the backend (Schedules, "Runners").
   runnerId?: string;
   runnerName?: string;
   runnerIcon?: string; // its SF Symbol (RunnerInfo.icon)
   runRequestedAt?: string;
+  botTarget?: BotScheduleTarget;
+  botCeiling?: PermissionMode;
 };
 
 // Who sent a message when it wasn't a person or a client: the runner by

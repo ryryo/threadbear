@@ -499,4 +499,5 @@
 //    next) for mutually exclusive done-card follow-ups. A runner sends them
 //    only to a backend of 103 or later; older apps ignore them.
 // 104: phone:registerDevice accepts an optional locale for push notifications.
-export const API_VERSION = 104;
+// 105: native Bot schedule targets and compare-and-save for owned Bot schedules.
+export const API_VERSION = 105;

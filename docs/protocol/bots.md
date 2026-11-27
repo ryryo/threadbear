@@ -266,3 +266,19 @@ A member can use `call_group_members` within its own current native Group
 call. The group, member, parent call and permissions are resolved from that
 Thread. A background Task started in a Group is linked to that call,
 retains its own Thread and approvals, and records its result in the Group.
+
+### Scheduled Bot work
+
+A schedule can target an existing Bot conversation, a new conversation of
+a specific Bot on each fire, or a Group. Its target is saved in the existing
+schedule record. The owning Runner resolves the same target at fire time.
+It keeps the Schedule's run ID as the conversation reservation or Group
+post receipt. This lets a Runner retry without generating another input or
+a second conversation for the same fire.
+
+A scheduled delivery uses the lower of the recorded permission ceiling
+and the current Bot or Group limit. A schedule still points to the same
+conversation if the user opens another one. When the configured Bot or
+Group is archived, the schedule cannot create or start work. Pause and
+delete withdraw pending inputs. A turn that has already started can be
+stopped separately in its Thread or Group.

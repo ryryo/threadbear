@@ -21,6 +21,7 @@ export type GroupRound = {
   id: string;
   roomId: string;
   sourceSeq: number;
+  schedule?: import('./group-store.ts').GroupSchedule;
   status: 'running' | 'finalizing' | 'done' | 'stopped';
   batches: number;
   slots: GroupCall[];

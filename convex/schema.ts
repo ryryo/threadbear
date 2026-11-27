@@ -5,6 +5,7 @@
 // are what an agent showed Mike on purpose or he pasted (replyImages), or a shared thread's.
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { botScheduleTarget } from './bot-schedule-values';
 import { machineTimers } from '@convex-dev/state-machines';
 import { commandStateV } from './commandStates';
 import { moveStateV } from './moveStates';
@@ -1190,13 +1191,15 @@ export const appSchema = defineSchema({
     nextRunAt: v.optional(v.string()),
     finishedAt: v.optional(v.string()),
     runs: v.number(),
-    lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()) })),
+    lastRun: v.optional(v.object({ at: v.string(), outcome: v.string(), threadId: v.optional(v.string()), note: v.optional(v.string()), botSettingsRevision: v.optional(v.number()) })),
     // Since API 9 a row can be the schedule itself rather than a runner's
     // mirror of its own file (docs/protocol/projects.md, Schedules, "Runners"):
     // `owned` marks those, which only the sync:*Schedule functions write
     // and setSchedules never touches. They also keep what the mirror left
     // out, a run being sent (`claim`, which lapses at `until`), and a
     // schedules.run made on another runner (`runRequestedAt`).
+    botTarget: v.optional(botScheduleTarget),
+    botCeiling: v.optional(v.string()),
     owned: v.optional(v.boolean()),
     effort: v.optional(v.string()),
     permissionMode: v.optional(v.string()),
