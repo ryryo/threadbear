@@ -39,11 +39,11 @@ const noteErasurePage = z.object({
   })).max(128),
   cursor: z.string().min(1).nullable(),
 });
-const retiredNoteErasure = z.union([
-  z.strictObject({ revision: z.int().positive() }),
-  z.strictObject({ revision: z.int().positive(),
-    scope: z.object({ kind: z.enum(['bot', 'group']), id: z.uuid() }), entryId: z.string().min(1).max(128) }),
-]).nullable();
+const retiredNoteErasurePage = z.object({
+  items: z.array(z.object({ revision: z.int().nonnegative(),
+    scope: z.object({ kind: z.enum(['bot', 'group']), id: z.string() }), entryId: z.string().min(1).max(128) })).max(16),
+  cursor: z.string().min(1).nullable(),
+});
 type NoteErasureProof = { revision: number; rows: RequiredNoteErasure[] };
 type MoveLocator = { workspaceId: string; moveId: string };
 
@@ -67,6 +67,7 @@ const transferInfo = (id: string) => sealInfo('bot-workspace:' + id);
 export class BotWorkspaceWire {
   private readonly ports: Ports;
   private checkingRetiredNote = false;
+  private retiredNoteCursor: string | null = null;
   constructor(ports: Ports) { this.ports = ports; }
 
   private async pollRetiredNote(locator: { workspaceId: string; moveId: string; epoch: number }): Promise<void> {
@@ -74,10 +75,23 @@ export class BotWorkspaceWire {
     if (this.checkingRetiredNote || !canScrubRetiredNoteErasures?.()) return;
     this.checkingRetiredNote = true;
     try {
-      const item = retiredNoteErasure.parse(await call('query', 'botWorkspaceMoves:retiredNoteErasure', locator));
-      if (item === null || !canScrubRetiredNoteErasures()) return;
-      if ('scope' in item) store.eraseRetiredNote(locator, item);
-      await call('mutation', 'botWorkspaceMoves:ackRetiredNoteErasure', { ...locator, ...item });
+      const cursor = this.retiredNoteCursor;
+      const page = retiredNoteErasurePage.parse(await call('query', 'botWorkspaceMoves:retiredNoteErasure', {
+        ...locator, ...(cursor !== null ? { cursor } : {}),
+      }));
+      if (page.cursor !== null && page.cursor === cursor) throw new Error('The retired note erasure scan did not advance.');
+      this.retiredNoteCursor = page.cursor;
+      const errors: unknown[] = [];
+      for (const item of page.items) {
+        if (!canScrubRetiredNoteErasures()) break;
+        try {
+          store.eraseRetiredNote(locator, item);
+          await call('mutation', 'botWorkspaceMoves:ackRetiredNoteErasure', { ...locator, ...item });
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length) throw errors[0];
     } finally {
       this.checkingRetiredNote = false;
     }

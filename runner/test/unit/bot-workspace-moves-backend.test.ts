@@ -173,20 +173,20 @@ test('only the retired process can acknowledge the scoped erasure and unblock it
   const ack = (id = SOURCE, row = expected) => t.invoke(id, 'botWorkspaceMoves:ackRetiredNoteErasure', { ...loc, ...row });
   const erase = () => call(t.ctx, sync.eraseBotWorkspaceNote, { key: t.key(TARGET), runnerId: TARGET, startedAt: RELEASE,
     workspaceId: WORKSPACE, epoch: 2, scope, entryId });
-  assert.equal(await pending(), null);
+  assert.deepEqual(await pending(), { items: [], cursor: null });
   assert.deepEqual(await erase(), { done: false, waitingForSources: true });
   assert.deepEqual(await erase(), { done: false, waitingForSources: true }, 'an offline source is still outstanding');
   assert.equal(await outcome(pending(OTHER)), 'forbidden');
   assert.equal(await outcome(pending(SOURCE, { ...loc, epoch: 2 })), 'forbidden');
   assert.equal(await outcome(t.invoke(SOURCE, 'botWorkspaceMoves:retiredNoteErasure', { ...loc, startedAt: 'old-process' })), 'forbidden');
-  assert.deepEqual(await pending(), expected);
+  assert.deepEqual(await pending(), { items: [expected], cursor: null });
   assert.equal(await ack(SOURCE, { ...expected, scope: { ...scope, kind: 'group' } }), false);
   assert.equal(await outcome(ack(TARGET)), 'forbidden');
   assert.equal(await ack(), false, 'the sealed transfer copy is still queued for reclamation');
   await call(t.ctx, moves.discardSealedBotWorkspace, { workspaceId: WORKSPACE, moveId: loc.moveId });
   assert.equal(await ack(), true);
-  assert.equal(await ack(), false, 'a lost acknowledgment can be followed by polling again');
-  assert.equal(await pending(), null);
+  assert.equal(await ack(), true, 'a lost acknowledgment can be safely repeated');
+  assert.deepEqual(await pending(), { items: [], cursor: null });
   assert.deepEqual(await erase(), { done: true });
   const [owner] = t.rows('botWorkspaceOwners');
   await t.ctx.db.patch('botWorkspaceOwners', owner._id, { epoch: 3, transfer: undefined });
@@ -194,7 +194,7 @@ test('only the retired process can acknowledge the scoped erasure and unblock it
     workspaceId: WORKSPACE, epoch: 3, scope, entryId }), { done: false, waitingForSources: true });
 });
 
-test('a revision change cannot advance a retired source past an unacknowledged note in another scope', async () => {
+test('a retired source can confirm one note while a different scope with the same ID remains pending', async () => {
   const t = await fixture();
   const loc = { workspaceId: WORKSPACE, moveId: 'move-1', epoch: 1 };
   await t.begin();
@@ -208,16 +208,14 @@ test('a revision change cannot advance a retired source past an unacknowledged n
   const pending = () => t.invoke(SOURCE, 'botWorkspaceMoves:retiredNoteErasure', loc);
   const ack = (item: Record<string, unknown>) => t.invoke(SOURCE, 'botWorkspaceMoves:ackRetiredNoteErasure', { ...loc, ...item });
   await erase(one);
-  const prior = await pending();
+  const [prior] = (await pending()).items;
   await erase(two);
-  assert.equal(await ack(prior), false);
-  const first = await pending();
-  assert.deepEqual(first, { revision: 2, ...one });
-  assert.equal(await ack(first), true);
-  assert.deepEqual(await erase(one), { done: false, waitingForSources: true });
-  const second = await pending();
+  assert.equal(await ack({ ...prior, revision: 2 }), false);
+  assert.equal(await ack(prior), true);
+  assert.deepEqual(await erase(one), { done: true });
+  assert.deepEqual(await erase(two), { done: false, waitingForSources: true });
+  const [second] = (await pending()).items;
   assert.deepEqual(second, { revision: 2, ...two });
-  assert.equal(await ack(first), false);
   assert.equal(await ack(second), true);
   assert.deepEqual(await erase(two), { done: true });
   assert.deepEqual(await erase(one), { done: true });
@@ -238,9 +236,13 @@ test('the retired native Runner erases only the exact scope and retries across a
   const stored = oldMemory.change({ op: 'add', text: draft }, 'before-move', 'empty', now);
   assert.ok(stored.note);
   const entryId = stored.note.id;
+  const otherBot = repo.create({ name: 'Second Editor', instructions: '' });
+  const otherMemory = new PersonalMemory(join(oldRoot, 'memory', otherBot.id));
+  const otherEntry = otherMemory.change({ op: 'add', text: 'independent synthetic copy' }, 'healthy-note', 'empty', now).note!;
   const packId = saveManagedMemoryBackup(source.home, captureManagedMemoryBackup(identity,
     { scope, expectedRevision: stored.revision, operationId: 'retired-backup' }, oldMemory));
-  const fullPack = join(source.home, 'bot-backups', randomUUID() + '.pack');
+  const fullPackId = randomUUID();
+  const fullPack = join(source.home, 'bot-backups', fullPackId + '.pack');
   const legacy = archive([...readTree(oldRoot, 'bots'),
     { path: 'bots/memory/' + bot.id + '/opaque.snapshot', data: Buffer.from(draft) }]);
   writeFileSync(fullPack, legacy);
@@ -257,7 +259,7 @@ test('the retired native Runner erases only the exact scope and retries across a
     key: async () => secret.publicKey(),
     call: async (_kind, method, params) => {
       const response = await backend.invoke(runnerId, method, params);
-      if (method === 'botWorkspaceMoves:ackRetiredNoteErasure' && lostReply) {
+      if (method === 'botWorkspaceMoves:ackRetiredNoteErasure' && params.entryId === entryId && lostReply) {
         lostReply = false;
         throw new Error('lost acknowledgment reply');
       }
@@ -271,13 +273,18 @@ test('the retired native Runner erases only the exact scope and retries across a
   await receiver.poll();
   await sender.poll();
   await call(backend.ctx, moves.discardSealedBotWorkspace, { workspaceId: identity.workspaceId, moveId: 'retired-source' });
-  const erase = () => call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(TARGET), runnerId: TARGET,
-    startedAt: RELEASE, workspaceId: identity.workspaceId, epoch: 2, scope, entryId });
+  const erase = (botId = bot.id, id = entryId) => call(backend.ctx, sync.eraseBotWorkspaceNote, { key: backend.key(TARGET), runnerId: TARGET,
+    startedAt: RELEASE, workspaceId: identity.workspaceId, epoch: 2, scope: { ...scope, id: botId }, entryId: id });
   assert.deepEqual(await erase(), { done: false, waitingForSources: true });
+  assert.deepEqual(await erase(otherBot.id, otherEntry.id), { done: false, waitingForSources: true });
   await wire(SOURCE, source, false).poll();
   assert.equal(oldMemory.list(now)[0]?.id, entryId);
   await assert.rejects(sender.poll(), /unknown file in its memory scope/);
-  assert.deepEqual(readFileSync(fullPack), legacy);
+  const remaining = openManagedMemoryBackup(source.home, { backupId: fullPackId });
+  assert.ok(Buffer.concat(remaining.files.map(file => file.data)).includes(draft));
+  assert.ok(!Buffer.concat(remaining.files.map(file => file.data)).includes('independent synthetic copy'));
+  assert.equal(otherMemory.list(now).length, 0);
+  assert.deepEqual(await erase(otherBot.id, otherEntry.id), { done: true });
   assert.deepEqual(await erase(), { done: false, waitingForSources: true });
   rmSync(fullPack);
   const state = join(oldRoot, 'state.json');

@@ -854,10 +854,11 @@ export const appSchema = defineSchema({
 
   botWorkspaceRetiredSources: defineTable({
     workspaceId: v.string(), moveId: v.string(), sourceRunnerId: v.string(), epoch: v.number(),
-    erasureRevision: v.optional(v.number()),
-    erasureScan: v.optional(v.object({ revision: v.number(), cursor: v.string() })),
-  }).index('by_workspace_epoch', ['workspaceId', 'epoch']).index('by_move', ['workspaceId', 'moveId'])
-    .index('by_erasure_revision', ['workspaceId', 'erasureRevision']),
+  }).index('by_workspace_epoch', ['workspaceId', 'epoch']).index('by_move', ['workspaceId', 'moveId']),
+
+  botWorkspaceRetiredNoteReceipts: defineTable({
+    erasureId: v.id('botWorkspaceErasedNotes'), epoch: v.number(),
+  }).index('by_erasure_epoch', ['erasureId', 'epoch']),
 
   botWorkspaces: defineTable({
     runnerId: v.string(),
@@ -869,6 +870,7 @@ export const appSchema = defineSchema({
   botWorkspaceErasedNotes: defineTable({
     workspaceId: v.string(), kind: v.union(v.literal('bot'), v.literal('group')), scopeId: v.string(), entryId: v.string(),
     revision: v.optional(v.number()),
+    retiredSourceReceipts: v.optional(v.number()),
     receiptCursor: v.optional(v.string()), receiptsDone: v.optional(v.literal(true)),
     legacyReceiptCursor: v.optional(v.string()), legacyReceiptsDone: v.optional(v.literal(true)),
   }).index('by_scope_entry', ['workspaceId', 'kind', 'scopeId', 'entryId']),

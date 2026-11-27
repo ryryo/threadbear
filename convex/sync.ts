@@ -2367,7 +2367,7 @@ export const eraseBotWorkspaceNote = mutation({
         await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { legacyReceiptsDone: true });
       }
     }
-    return await retiredBotSourcesErased(ctx, owner, erasure.revision ?? revision)
+    return await retiredBotSourcesErased(ctx, owner, erasure.retiredSourceReceipts ?? 0)
       ? { done: true } : { done: false, waitingForSources: true as const };
   },
 });

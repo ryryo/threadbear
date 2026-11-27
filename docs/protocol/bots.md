@@ -530,14 +530,13 @@ most recent claim from an older backend is recorded before starting a
 new move. Claims already replaced by the older backend are outside this
 record; absence of earlier sources is not proof that old copies are gone.
 
-On backend API 109, a signed-in retiring Runner may fetch one erasure at a
-time for its own workspace, move ID and retiring epoch. It receives the
-scope and note ID only. It advances the saved scan only after the exact
-erasure was applied locally and the sealed transport parts are gone.
-Stale responses cannot acknowledge a
-different note. The current owner waits until the known retiring Runners
-acknowledge the applicable revision. A missing ownership generation also
-keeps the erasure pending.
+On backend API 109, a signed-in retiring Runner reads pending erasures for
+its own workspace, move ID and retiring epoch. The list contains scoped
+note IDs and their revisions. The Runner acknowledges each exact erasure
+after it applies it locally and the sealed transport parts are gone.
+An unresolved copy of one note does not block another. The current owner
+waits for each retiring generation's acknowledgment of the selected note.
+A missing ownership generation also keeps the erasure pending.
 
 The backend drops the sealed transport parts in bounded batches after a
 claim or cancellation. An active offer keeps its parts for restart and

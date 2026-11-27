@@ -31,14 +31,10 @@ export async function rememberRetiredBotSource(ctx: MutationCtx, owner: Authorit
   return epoch;
 }
 
-export async function retiredBotSourcesErased(ctx: MutationCtx, owner: Authority, revision: number): Promise<boolean> {
+export async function retiredBotSourcesErased(ctx: MutationCtx, owner: Authority, acknowledged: number): Promise<boolean> {
   if (owner.epoch === 1) return true;
   const covered = owner.transfer?.state === 'claimed' ? await rememberRetiredBotSource(ctx, owner, owner.transfer) : owner.retiredSourcesCovered ?? 0;
-  if (covered !== owner.epoch - 1) return false;
-  const untouched = await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_erasure_revision',
-    q => q.eq('workspaceId', owner.workspaceId).eq('erasureRevision', undefined)).first();
-  return !untouched && !await ctx.db.query('botWorkspaceRetiredSources').withIndex('by_erasure_revision',
-    q => q.eq('workspaceId', owner.workspaceId).lt('erasureRevision', revision)).first();
+  return covered === owner.epoch - 1 && acknowledged === covered;
 }
 
 export function ownedWorkspace(ctx: BotWorkspaceRead, runnerId: string) {

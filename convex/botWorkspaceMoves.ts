@@ -8,7 +8,7 @@ import type { MutationCtx } from './_generated/server';
 import { botScheduleRevision } from './botScheduleValues';
 import { botNoteScope } from './botWorkspaceValues';
 import { forbidden, runnerAuth } from './lib';
-import { botRunner, botWorkspaceOwner, ownedWorkspace, rememberRetiredBotSource, requireBotRunnerProcess, retiredBotSource, workspaceStagedFor as stagedFor, type BotWorkspaceRead } from './botWorkspaceAuthority';
+import { botNoteErasure, botRunner, botWorkspaceOwner, ownedWorkspace, rememberRetiredBotSource, requireBotRunnerProcess, retiredBotSource, workspaceStagedFor as stagedFor, type BotWorkspaceRead } from './botWorkspaceAuthority';
 import { claimBotWorkspaceThread, checkBotWorkspaceThread } from './moves';
 import { isThreadId } from './runnerAccess';
 import { syncWake } from './wakes';
@@ -129,32 +129,37 @@ export const verifyBotWorkspaceNoteErasures = query({
 });
 
 const retiredArgs = { ...runnerArgs, epoch: v.number() };
-const erasureItem = { revision: v.number(), scope: v.optional(botNoteScope), entryId: v.optional(v.string()) };
+const erasureItem = { revision: v.number(), scope: botNoteScope, entryId: v.string() };
 
-async function retiredErasurePage(ctx: BotWorkspaceRead, { workspaceId, moveId, runnerId, epoch }: {
+async function requireRetiredSource(ctx: BotWorkspaceRead, { workspaceId, moveId, runnerId, epoch }: {
   workspaceId: string; moveId: string; runnerId: string; epoch: number;
-}) {
+}): Promise<void> {
   const owner = await botWorkspaceOwner(ctx, workspaceId);
   const source = await retiredBotSource(ctx, workspaceId, epoch);
   if (!owner || owner.epoch <= epoch || owner.ownerRunnerId === runnerId ||
       source?.sourceRunnerId !== runnerId || source.moveId !== moveId) {
     throw forbidden('read this retired Bot workspace’s erasures');
   }
-  const revision = owner.noteErasureRevision ?? 0;
-  if ((source.erasureRevision ?? 0) === revision) return null;
-  const cursor = source.erasureScan?.revision === revision ? source.erasureScan.cursor : null;
-  const page = await ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry', q => q.eq('workspaceId', workspaceId))
-    .paginate({ numItems: 1, cursor });
-  const row = page.page[0];
-  return { source, page, item: { revision, ...(row ? { scope: { kind: row.kind, id: row.scopeId }, entryId: row.entryId } : {}) } };
+}
+
+function retiredNoteReceipt(ctx: BotWorkspaceRead, erasureId: Doc<'botWorkspaceErasedNotes'>['_id'], epoch: number) {
+  return ctx.db.query('botWorkspaceRetiredNoteReceipts').withIndex('by_erasure_epoch',
+    q => q.eq('erasureId', erasureId).eq('epoch', epoch)).unique();
 }
 
 export const retiredNoteErasure = query({
-  args: retiredArgs,
-  returns: v.union(v.null(), v.object(erasureItem)),
-  handler: async (ctx, { key, startedAt, ...locator }) => {
+  args: { ...retiredArgs, cursor: v.optional(v.string()) },
+  returns: v.object({ items: v.array(v.object(erasureItem)), cursor: v.union(v.string(), v.null()) }),
+  handler: async (ctx, { key, startedAt, cursor, ...locator }) => {
     await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'retiredBotNoteErasure'), locator.runnerId, startedAt);
-    return (await retiredErasurePage(ctx, locator))?.item ?? null;
+    await requireRetiredSource(ctx, locator);
+    const page = await ctx.db.query('botWorkspaceErasedNotes').withIndex('by_scope_entry', q => q.eq('workspaceId', locator.workspaceId))
+      .paginate({ numItems: 16, cursor: cursor ?? null });
+    const items = await Promise.all(page.page.map(async row => {
+      if (await retiredNoteReceipt(ctx, row._id, locator.epoch)) return null;
+      return { revision: row.revision ?? 0, scope: { kind: row.kind, id: row.scopeId }, entryId: row.entryId };
+    }));
+    return { items: items.filter(row => row !== null), cursor: page.isDone ? null : page.continueCursor };
   },
 });
 
@@ -163,18 +168,18 @@ export const ackRetiredNoteErasure = mutation({
   returns: v.boolean(),
   handler: async (ctx, { key, startedAt, revision, scope, entryId, ...locator }) => {
     await requireBotRunnerProcess(ctx, await runnerAuth(ctx, key, 'ackRetiredBotNoteErasure'), locator.runnerId, startedAt);
-    const current = await retiredErasurePage(ctx, locator);
-    if (!current || current.item.revision !== revision || current.item.entryId !== entryId ||
-        current.item.scope?.kind !== scope?.kind || current.item.scope?.id !== scope?.id) return false;
+    await requireRetiredSource(ctx, locator);
+    const erasure = await botNoteErasure(ctx, locator.workspaceId, scope, entryId);
+    if (!erasure || (erasure.revision ?? 0) !== revision) return false;
+    if (await retiredNoteReceipt(ctx, erasure._id, locator.epoch)) return true;
     const sealed = await ctx.db.query('botWorkspaceParts').withIndex('by_part',
       q => q.eq('workspaceId', locator.workspaceId).eq('moveId', locator.moveId)).first();
     if (sealed) {
       await queueDiscard(ctx, locator.workspaceId, locator.moveId);
       return false;
     }
-    await ctx.db.patch('botWorkspaceRetiredSources', current.source._id, current.page.isDone
-      ? { erasureRevision: revision, erasureScan: undefined }
-      : { erasureScan: { revision, cursor: current.page.continueCursor } });
+    await ctx.db.insert('botWorkspaceRetiredNoteReceipts', { erasureId: erasure._id, epoch: locator.epoch });
+    await ctx.db.patch('botWorkspaceErasedNotes', erasure._id, { retiredSourceReceipts: (erasure.retiredSourceReceipts ?? 0) + 1 });
     return true;
   },
 });
