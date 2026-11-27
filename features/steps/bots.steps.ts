@@ -229,6 +229,11 @@ When('I replace the Chief with {string}', async function (this: BotWorld, bot: s
   await click(this, `Replace Chief with ${bot}`);
 });
 
+When('I add {string} to the team and appoint it as Chief in Japanese', async function (this: BotWorld, bot: string) {
+  await click(this, `${bot}を追加`);
+  await click(this, `${bot}をChiefにする`);
+});
+
 Then('{string} is the Chief of the Bot team', async function (this: BotWorld, bot: string) {
   assert.ok(this.app instanceof GpuiDriver);
   const deadline = Date.now() + 15_000;

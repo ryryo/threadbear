@@ -230,8 +230,8 @@ impl Edit {
             Self::Privacy => tr!("Dedicated work folder"),
             Self::Review(_, _) => tr!("Proposed note"),
             Self::RequestRerun(_, _) => tr!("Instructions for the new run"),
-            Self::NewTeam | Self::RenameTeam(..) => "Team name",
-            Self::GrantChief(..) => "Management grants",
+            Self::NewTeam | Self::RenameTeam(..) => tr!("Team name"),
+            Self::GrantChief(..) => tr!("Management grants"),
             Self::TaskStart => tr!("Task title on the first line, then the brief"),
             Self::TaskWrite(_) => tr!("Instruction for the task"),
             Self::TaskRetry(_, _) => tr!("Brief for the new task run"),
@@ -669,7 +669,7 @@ impl Threadbear {
         }
         if self.bots.teams_available {
             list = list.child(
-                bot_button("bot-teams", "Teams", disabled)
+                bot_button("bot-teams", tr!("Teams"), disabled)
                     .when(self.bots.show_teams, |button| button.primary())
                     .on_click(cx.listener(|this, _, _, cx| this.open_bot_teams(cx))),
             );
@@ -1956,8 +1956,9 @@ impl Threadbear {
             ),
             Edit::GrantChief(team_id, revision, bot_id) => {
                 let Ok(grant) = serde_json::from_str::<Value>(&text) else {
-                    self.bots.error =
-                        Some("Enter a JSON object with the permissions for this Chief.".into());
+                    self.bots.error = Some(
+                        tr!("Enter a JSON object with the permissions for this Chief.").into(),
+                    );
                     cx.notify();
                     return;
                 };

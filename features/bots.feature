@@ -62,3 +62,14 @@ Feature: Bot workspace
     And I appoint "Editor" as the first Chief
     And I replace the Chief with "Writer"
     Then "Writer" is the Chief of the Bot team
+
+  @bots.teams @bots @settings.language @swift-pending
+  Scenario: A Japanese Bot team can appoint a Chief
+    Given the app is connected to an isolated Bot Runner
+    When I create a Bot called "Editor" from the Bots page
+    And I create the Bot team "Editorial"
+    And I open Settings
+    And I choose Japanese as the desktop language
+    Then the Settings title is "一般" in "ja"
+    When I add "Editor" to the team and appoint it as Chief in Japanese
+    Then "Editor" is the Chief of the Bot team

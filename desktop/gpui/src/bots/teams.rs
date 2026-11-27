@@ -55,7 +55,7 @@ impl Threadbear {
                                 this.bots.teams = teams;
                             }
                             Err(_) => {
-                                this.bots.error = Some("Could not read the Bot teams.".into())
+                                this.bots.error = Some(tr!("Could not read the Bot teams.").into())
                             }
                         }
                     }
@@ -76,9 +76,9 @@ impl Threadbear {
     ) -> AnyElement {
         let mut options = h_flex().gap(px(6.)).flex_wrap();
         for (mode, label) in [
-            ("ask", "Limit to Ask before edits"),
-            ("auto", "Limit to Auto"),
-            ("full", "Allow Full access"),
+            ("ask", tr!("Limit to Ask before edits")),
+            ("auto", tr!("Limit to Auto")),
+            ("full", tr!("Allow Full access")),
         ] {
             let params =
                 json!({ "botId": bot.id, "expectedRevision": bot.revision, "ceiling": mode });
@@ -107,7 +107,7 @@ impl Threadbear {
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Permission limit"),
+                    .child(tr!("Permission limit")),
             )
             .child(options)
             .into_any_element()
@@ -118,11 +118,11 @@ impl Threadbear {
             div()
                 .text_size(px(24.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .child("Bot teams"),
+                .child(tr!("Bot teams")),
         );
         let disabled = self.bots.busy || self.bots.editor.is_some();
         let mut tabs = h_flex().gap(px(6.)).flex_wrap().child(
-            bot_button("bots-new-team", "New team", disabled)
+            bot_button("bots-new-team", tr!("New team"), disabled)
                 .primary()
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.edit_bot(Edit::NewTeam, String::new(), window, cx)
@@ -159,9 +159,9 @@ impl Threadbear {
         {
             page = page.child(self.render_bot_team(team, cx));
         } else if !self.bots.busy {
-            page = page.child(
-                "Create a team to appoint a Chief and grant specific management permissions.",
-            );
+            page = page.child(tr!(
+                "Create a team to appoint a Chief and grant specific management permissions."
+            ));
         }
         page.into_any_element()
     }
@@ -172,7 +172,7 @@ impl Threadbear {
         let revision = team.revision;
         let current = team.title.clone();
         let mut actions = h_flex().gap(px(6.)).flex_wrap().child(
-            bot_button("bot-team-rename", "Rename team", busy).on_click(cx.listener(
+            bot_button("bot-team-rename", tr!("Rename team"), busy).on_click(cx.listener(
                 move |this, _, window, cx| {
                     this.edit_bot(
                         Edit::RenameTeam(id.clone(), revision),
@@ -184,7 +184,7 @@ impl Threadbear {
             )),
         );
         if !team.chief_ids.is_empty() {
-            actions = actions.child(self.team_action("bot-chief-enable", if team.chief_enabled { "Turn off Chief tools" } else { "Turn on Chief tools" }, "bots.teams.update",
+            actions = actions.child(self.team_action("bot-chief-enable", if team.chief_enabled { tr!("Turn off Chief tools") } else { tr!("Turn on Chief tools") }, "bots.teams.update",
                 json!({ "teamId": team.id, "expectedRevision": team.revision, "chiefEnabled": !team.chief_enabled }), cx));
         }
         let mut page = v_flex().gap(px(10.)).child(actions);
@@ -221,7 +221,11 @@ impl Threadbear {
                 .child(div().min_w(px(120.)).child(bot.name.clone()));
             if !chief {
                 row = row.child(self.team_action(SharedString::from(format!("bot-team-member-{}", bot.id)),
-                    format!("{} {}", if member { "Remove" } else { "Add" }, bot.name), "bots.teams.update",
+                    if member {
+                        threadbear_core::trf!("Remove {name}", name = bot.name)
+                    } else {
+                        threadbear_core::trf!("Add {name}", name = bot.name)
+                    }, "bots.teams.update",
                     json!({ "teamId": team.id, "expectedRevision": team.revision, "memberIds": members }), cx));
             }
             if member && bot.privacy.is_none() {
@@ -243,7 +247,7 @@ impl Threadbear {
         let mut actions = h_flex().gap(px(6.));
         if chief {
             if team.chief_ids.len() > 1 {
-                actions = actions.child(self.team_action(SharedString::from(format!("remove-chief-{}", bot.id)), format!("Remove {} as Chief", bot.name),
+                actions = actions.child(self.team_action(SharedString::from(format!("remove-chief-{}", bot.id)), threadbear_core::trf!("Remove {name} as Chief", name = bot.name),
                     "bots.teams.setChief", json!({ "teamId": team.id, "expectedRevision": team.revision, "botId": bot.id, "main": false }), cx));
             }
             let edit = Edit::GrantChief(team.id.clone(), team.revision, bot.id.clone());
@@ -253,11 +257,11 @@ impl Threadbear {
             );
             return Some(
                 actions
-                    .child(div().child("Chief"))
+                    .child(div().child(tr!("Chief")))
                     .child(
                         bot_button(
                             SharedString::from(format!("bot-chief-grants-{}", bot.id)),
-                            format!("Edit grants for {}", bot.name),
+                            threadbear_core::trf!("Edit grants for {name}", name = bot.name),
                             self.bots.busy,
                         )
                         .on_click(cx.listener(
@@ -270,14 +274,14 @@ impl Threadbear {
             );
         }
         let label = if team.chief_ids.is_empty() {
-            format!("Make {} Chief", bot.name)
+            threadbear_core::trf!("Make {name} Chief", name = bot.name)
         } else {
-            format!("Replace Chief with {}", bot.name)
+            threadbear_core::trf!("Replace Chief with {name}", name = bot.name)
         };
         let mut params = json!({ "teamId": team.id, "expectedRevision": team.revision, "botId": bot.id, "main": true });
         if let Some(old) = team.chief_ids.first() {
             params["replace"] = json!(old);
-            actions = actions.child(self.team_action(SharedString::from(format!("add-chief-{}", bot.id)), format!("Add {} as Chief", bot.name),
+            actions = actions.child(self.team_action(SharedString::from(format!("add-chief-{}", bot.id)), threadbear_core::trf!("Add {name} as Chief", name = bot.name),
                 "bots.teams.setChief", json!({ "teamId": team.id, "expectedRevision": team.revision, "botId": bot.id, "main": true }), cx));
         }
         Some(
@@ -307,9 +311,11 @@ impl Threadbear {
     }
 
     fn render_team_history(&self, team: &TeamCard, cx: &App) -> AnyElement {
-        let mut history = v_flex()
-            .gap(px(4.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Changes"));
+        let mut history = v_flex().gap(px(4.)).child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(tr!("Changes")),
+        );
         for event in team.audit.iter().rev() {
             let who = event
                 .bot_id
@@ -317,20 +323,25 @@ impl Threadbear {
                 .and_then(|id| self.bots.list.iter().find(|bot| &bot.id == id))
                 .map(|bot| bot.name.as_str());
             let title = match event.kind.as_str() {
-                "created" => "Created team",
-                "membership" => "Updated team settings",
-                "chief" => "Changed Chief role",
-                "grants" => "Changed management grants",
-                "bot-created" => "Created Bot",
-                "bot-updated" => "Updated Bot",
-                "bot-stopped" => "Stopped Bot",
-                _ => "Updated team",
+                "created" => tr!("Created team"),
+                "membership" => tr!("Updated team settings"),
+                "chief" => tr!("Changed Chief role"),
+                "grants" => tr!("Changed management grants"),
+                "bot-created" => tr!("Created Bot"),
+                "bot-updated" => tr!("Updated Bot"),
+                "bot-stopped" => tr!("Stopped Bot"),
+                _ => tr!("Updated team"),
             };
-            let line = format!(
-                "{title}{} · {}",
-                who.map_or_else(String::new, |name| format!(" for {name}")),
-                event.at
-            );
+            let line = if let Some(name) = who {
+                threadbear_core::trf!(
+                    "{title} for {name} · {at}",
+                    title = title,
+                    name = name,
+                    at = event.at
+                )
+            } else {
+                threadbear_core::trf!("{title} · {at}", title = title, at = event.at)
+            };
             history = history.child(div().text_color(style::secondary_text(cx)).child(line));
             if let Some(reason) = &event.reason {
                 history = history.child(div().child(reason.clone()));
