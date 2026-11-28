@@ -1155,6 +1155,7 @@ fn testOriginIsReadAndCarriedToTheRow() {
         EventPayload::UserMessage {
             text: "Check your change.".into(),
             images: vec![],
+            page_comments: vec![],
             origin: Some("runner".into()),
             wake_reason: None,
             answers: vec![],
