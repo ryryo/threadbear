@@ -156,6 +156,9 @@ where it installs (Antigravity: an `agy_acp_server.par` on the PATH).
   version feed to compare with: `clis.list` has a row for each, and
   `clis.update` runs the agent's own updater when asked. `clis.setPolicy` does
   nothing for them, and `THREADBEAR_CLI_UPDATES=off` turns updating off.
+- **Gemini startup.** Antigravity can take longer to launch on a busy Mac.
+  When starting or resuming a thread on Gemini, the runner gives ACP
+  `initialize` the same 90-second limit as opening a session.
 - **Not offered:** rewind, steering
   (a message sent during a turn runs next).
 

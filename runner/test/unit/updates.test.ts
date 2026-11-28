@@ -674,7 +674,7 @@ fi`);
     binary: () => binary,
     registry: new ProcessRegistry(path.join(t.home, 'run'), nullLogger),
     log: nullLogger,
-    timings: { requestMs: 500, sessionMs: 50, closeWaitMs: 300 },
+    timings: { requestMs: 500, sessionMs: 500, closeWaitMs: 300 },
   });
   const account: Account = { id: 'antigravity-main', provider: 'antigravity', title: 'Antigravity', configDir: root };
   const h = makeHarness(t.home, {}, { adapters: { antigravity: adapter }, accounts: new FakeAccounts([account]) });

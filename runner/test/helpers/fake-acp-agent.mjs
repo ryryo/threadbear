@@ -503,6 +503,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (!h) return send({ id: m.id, error: { code: -32601, message: `no ${m.method}` } });
   try {
     const result = h(m.params);
+    if (m.method === 'initialize' && env.FAKE_ACP_SLOW_INITIALIZE) return void setTimeout(() => send({ id: m.id, result }), Number(env.FAKE_ACP_SLOW_INITIALIZE));
     if (m.method === 'session/set_config_option' && env.FAKE_ACP_SLOW_SET) return void setTimeout(() => send({ id: m.id, result }), Number(env.FAKE_ACP_SLOW_SET));
     send({ id: m.id, result });
   } catch (e) {

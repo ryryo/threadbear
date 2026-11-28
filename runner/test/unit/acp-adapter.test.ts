@@ -7,6 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { AcpAdapter, AcpSession, EDIT_RULE, LIMITS_POLL_MS, modelChoices } from '../../src/adapters/acp/adapter.ts';
+import type { AcpTimings } from '../../src/adapters/acp/connection.ts';
 import { ACP_AGENTS, acpAccounts, antigravityInput, folderPlugins, isCursorBinary, isGoogleSigned, opencodeEnv } from '../../src/adapters/acp/agents.ts';
 import type { AcpAgent } from '../../src/adapters/acp/agents.ts';
 import { AcpMcpServer } from '../../src/adapters/acp/mcp-http.ts';
@@ -44,7 +45,7 @@ afterEach(async () => {
   for (const d of made.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
-function rig(o: { mode?: PermissionMode; agent?: AcpAgent; env?: Record<string, string>; opts?: Partial<StartSessionOptions>; mcpServers?: () => Record<string, { command: string; args: string[] }>; deny?: boolean; answer?: (r: ToolApprovalRequest) => ToolApprovalAnswer | Promise<ToolApprovalAnswer>; question?: (r: QuestionRequest) => QuestionAnswer | Promise<QuestionAnswer> } = {}) {
+function rig(o: { mode?: PermissionMode; agent?: AcpAgent; env?: Record<string, string>; opts?: Partial<StartSessionOptions>; timings?: Partial<AcpTimings>; mcpServers?: () => Record<string, { command: string; args: string[] }>; deny?: boolean; answer?: (r: ToolApprovalRequest) => ToolApprovalAnswer | Promise<ToolApprovalAnswer>; question?: (r: QuestionRequest) => QuestionAnswer | Promise<QuestionAnswer> } = {}) {
   const root = tmp();
   made.push(root);
   const cwd = path.join(root, 'work');
@@ -82,7 +83,7 @@ function rig(o: { mode?: PermissionMode; agent?: AcpAgent; env?: Record<string, 
     registry: new ProcessRegistry(path.join(root, 'run'), nullLogger),
     log: nullLogger,
     env: { PATH: process.env.PATH, FAKE_ACP_LOG: logFile, ...o.env },
-    timings: { closeWaitMs: 300 },
+    timings: { closeWaitMs: 300, ...o.timings },
     ...(o.mcpServers ? { mcpServers: o.mcpServers } : {}),
   });
   const start = (): AcpSession => {
@@ -1107,6 +1108,15 @@ test('no protocol version in initialize is refused', async () => {
 // ---- Antigravity (Google's antigravity-acp, as Gemini)
 
 const agy = (o: Parameters<typeof rig>[0] = {}) => rig({ agent: ACP_AGENTS.antigravity, ...o, env: { FAKE_ACP_NAME: 'Antigravity', ...o.env } });
+
+test('Antigravity: an initialize slower than an ordinary request can still start a thread', { timeout: 30_000 }, async () => {
+  const r = agy({ mode: 'full', env: { FAKE_ACP_SLOW_INITIALIZE: '400' }, timings: { requestMs: 200, sessionMs: 12_000 } });
+  const s = r.start();
+  const outcome = await Promise.race([turn(r, s, 'hello').then(() => 'completed'), r.exited().then(() => r.exitError())]);
+  assert.equal(outcome, 'completed');
+  assert.equal(results(r.outputs).at(-1)?.outcome, 'completed');
+  assert.equal(r.log().filter((entry) => 'prompt' in entry).length, 1);
+});
 
 test('Antigravity: a session runs from a folder of its own, with the thread\'s as an extra one, so its skills folder never lands in the repo', async () => {
   const r = agy({ mode: 'full' });

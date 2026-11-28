@@ -26,7 +26,7 @@ import { acpCoordinatorTool, archiveReadTool, isHelperQuestionTool } from '../..
 import type { AdapterOutput, AgentAdapter, AgentSession, QuestionAnswer, SessionSink, StartSessionOptions, ToolApprovalAnswer, TurnResult, UserInput } from '../types.ts';
 import { SessionNotFoundError } from '../types.ts';
 import type { AcpAgent } from './agents.ts';
-import { AcpExitedError, AcpProcess, AcpRpcError, AUTH_REQUIRED, failureNote, genericRpcMessage, laterFailure, outOfUsage, type AcpTimings, type InitializeResult, type RequestId } from './connection.ts';
+import { AcpExitedError, AcpProcess, AcpRpcError, AUTH_REQUIRED, DEFAULT_ACP_TIMINGS, failureNote, genericRpcMessage, laterFailure, outOfUsage, type AcpTimings, type InitializeResult, type RequestId } from './connection.ts';
 import { AcpMcpServer } from './mcp-http.ts';
 import { AcpNormalizer, absolutePath, isPlainEdit, isPlainObject, requestPaths, writesFiles, type AcpToolCall } from './normalize.ts';
 
@@ -508,7 +508,10 @@ export class AcpSession implements AgentSession {
   private async boot(): Promise<void> {
     const { opts, deps } = this;
     const name = providerName(deps.agent.provider);
-    this.init = await this.proc.start();
+    // Antigravity took 36 seconds just to initialize on a busy Mac.
+    // Give its interactive startup the longer session-opening budget.
+    const initializeTimeoutMs = deps.agent.provider === 'antigravity' ? deps.timings?.sessionMs ?? DEFAULT_ACP_TIMINGS.sessionMs : undefined;
+    this.init = await this.proc.start(initializeTimeoutMs);
     if (this.state !== 'starting') return void (await this.proc.close());
     if (!deps.agent.identifies(this.init)) {
       const said = this.init.agentInfo?.name ? ` (it says it's ${this.init.agentInfo.name})` : '';

@@ -187,7 +187,7 @@ export class AcpProcess {
   }
 
   // Spawns the process and completes initialize.
-  start(): Promise<InitializeResult> {
+  start(initializeTimeoutMs?: number): Promise<InitializeResult> {
     const { opts } = this;
     this.abort = new AbortController();
     const spawn = groupSpawner(opts.registry, opts.log, (line) => this.stderr(line), opts.label);
@@ -232,13 +232,17 @@ export class AcpProcess {
         this.onExit = null;
         onExit?.(this.closing ? undefined : new Error(what));
       });
-      this.request<InitializeResult>('initialize', {
-        protocolVersion: ACP_VERSION,
-        // Nothing the agent could use to read or write through the client:
-        // it works on the files itself, and asks first (AcpSession).
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, ...(opts.forms ? { elicitation: { form: {} } } : {}) },
-        clientInfo: { name: 'threadbear', title: 'Threadbear', version: RUNNER_VERSION },
-      })
+      this.request<InitializeResult>(
+        'initialize',
+        {
+          protocolVersion: ACP_VERSION,
+          // Nothing the agent could use to read or write through the client:
+          // it works on the files itself, and asks first (AcpSession).
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, ...(opts.forms ? { elicitation: { form: {} } } : {}) },
+          clientInfo: { name: 'threadbear', title: 'Threadbear', version: RUNNER_VERSION },
+        },
+        initializeTimeoutMs,
+      )
         .then((init) => {
           if (init?.protocolVersion !== ACP_VERSION) {
             throw new Error(`This agent speaks ACP version ${String(init?.protocolVersion)}, and Threadbear speaks ${ACP_VERSION}.`);
