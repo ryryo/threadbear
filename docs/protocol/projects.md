@@ -165,12 +165,15 @@ a side, 4096 x 4096 px and 64 MB decoded in all, at most 32 pictures in an
 never decoded (Daybreak, 24 Nov). Only PNG (whole and well formed, not
 animated, its compressed text and colour profile within 1 MB inflated), ICO
 (PNG or uncompressed bitmaps) and ICNS (PNG and the old fixed-size
-elements; no JPEG 2000 or nested sets) are icons. JPEG and WebP aren't, as
+elements; no JPEG 2000 or nested sets) are accepted by the runner. JPEG and WebP aren't, as
 what a decoder makes of them can't be told from their headers for sure, and
 nor is SVG: it's a program for its renderer more than a size, and three
 review rounds each found a way past a check of its text (a picture inside
 it, CDATA, namespace prefixes, CSS sizing, a mask fan-out), so it waits for
-a real parser. What's copied is the one read and checked, made into a PNG
+a real parser. When you pick a WebP by hand in the GPUI app, the app checks its
+size and converts its first frame to a PNG with transparency before sending it
+to the runner. The runner keeps the original WebP path for Show Original.
+What's copied is the one read and checked, made into a PNG
 of at most 256 px (ImageMagick also told the budget), never the file as it
 was: when the best picture can't be made into one here (an `.icns` on Linux) the next best is tried,
 and with none the project gets a symbol. A copy an older runner kept that

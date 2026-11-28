@@ -23,8 +23,54 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use threadbear_core::inbox::{Project as Membership, ThreadSummary};
 use threadbear_core::projects::{self as rules, Project, TextField, Update};
+
+/// Stages the first frame of a manually chosen WebP as a small, private PNG.
+/// The same decoder and memory accounting used by picture previews limits the
+/// decode, and the caller keeps the file alive until the runner has copied it.
+fn webp_icon_png(path: &Path) -> Result<tempfile::NamedTempFile, &'static str> {
+    use crate::fit_picture::{self, Missed, Plan};
+    use crate::projects_page::{ICON_MAX_BYTES, ICON_MAX_SIDE};
+    use image::{DynamicImage, ImageFormat};
+
+    const KEPT_SIDE: u32 = 256;
+    let read = || {
+        let bytes = threadbear_core::open_policy::local_read(path, ICON_MAX_BYTES + 1).ok()?;
+        if bytes.len() > ICON_MAX_BYTES
+            || !matches!(image::guess_format(&bytes), Ok(ImageFormat::WebP))
+        {
+            return None;
+        }
+        let (width, height) = fit_picture::size_of(&bytes)?;
+        (width.max(height) <= ICON_MAX_SIDE).then_some(bytes)
+    };
+
+    let plan = |_| Plan {
+        shown_pixels: u64::from(ICON_MAX_SIDE).pow(2),
+        made_bytes: u64::from(KEPT_SIDE).pow(2) * 4 + (1 << 20),
+    };
+    fit_picture::decode_now(read, plan, |picture| {
+        let picture = DynamicImage::ImageRgba8(picture);
+        let picture = if picture.width().max(picture.height()) > KEPT_SIDE {
+            picture.thumbnail(KEPT_SIDE, KEPT_SIDE)
+        } else {
+            picture
+        };
+        let mut png = tempfile::Builder::new()
+            .prefix("threadbear-icon-")
+            .suffix(".png")
+            .tempfile_in(crate::composer::paste_base())
+            .ok()?;
+        picture.write_to(png.as_file_mut(), ImageFormat::Png).ok()?;
+        Some(png)
+    })
+    .map_err(|error| match error {
+        Missed::Busy => threadbear_core::tr!("Too many pictures are open. Try choosing the WebP again."),
+        Missed::Failed => threadbear_core::tr!("Couldn’t import this WebP. Choose a readable image up to 4096 pixels per side and 10 MB."),
+    })
+}
 
 /// The projects' state in the app (`Threadbear::projects`).
 #[derive(Default)]
@@ -590,18 +636,31 @@ impl Threadbear {
         if self.project(id).is_none() || self.projects.busy.contains(&format!("icon:{id}")) {
             return;
         }
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Use".into()),
-        });
+        let paths = cx.prompt_for_paths_with_extensions(
+            PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: Some(threadbear_core::tr!("Use as Icon").into()),
+            },
+            rules::PROJECT_ICON_EXTENSIONS,
+        );
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(mut paths))) = paths.await {
                 if let Some(path) = paths.pop() {
-                    this.update(cx, |this, cx| {
-                        this.set_project_icon(&id, Some(path.to_string_lossy().into_owned()), cx)
+                    this.update_in(cx, |this, window, cx| {
+                        if rules::project_icon_extension(&path).is_some() {
+                            this.set_project_icon(&id, Some(path), cx);
+                        } else {
+                            drop(window.prompt(
+                                PromptLevel::Warning,
+                                threadbear_core::tr!("Choose a PNG, ICNS, ICO or WebP file"),
+                                None,
+                                &[PromptButton::ok("OK")],
+                                cx,
+                            ));
+                        }
                     })
                     .ok();
                 }
@@ -614,7 +673,7 @@ impl Threadbear {
     pub(crate) fn set_project_icon(
         &mut self,
         id: &str,
-        path: Option<String>,
+        path: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) {
         let key = format!("icon:{id}");
@@ -623,12 +682,36 @@ impl Threadbear {
         }
         cx.notify();
         let mut params = json!({ "projectId": id });
-        if let Some(path) = path {
-            params["path"] = json!(path);
-        }
+        let original = path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
-            let res = call(client, "projects.setIcon", params).await;
+            let staged = match path {
+                Some(path) if rules::project_icon_extension(&path) == Some("webp") => cx
+                    .background_executor()
+                    .spawn(async move { webp_icon_png(&path) })
+                    .await
+                    .map(Some),
+                _ => Ok(None),
+            };
+            let res = match staged {
+                Ok(staged) => {
+                    if let Some(original) = original {
+                        if let Some(png) = &staged {
+                            params["path"] = json!(png.path());
+                            params["originalPath"] = json!(original);
+                        } else {
+                            params["path"] = json!(original);
+                        }
+                    }
+                    let result = call(client, "projects.setIcon", params).await;
+                    // The runner has copied the PNG by the time it replies.
+                    drop(staged);
+                    result.map_err(|e| e.message)
+                }
+                Err(message) => Err(message.to_owned()),
+            };
             this.update(cx, |this, cx| {
                 this.projects.busy.remove(&key);
                 match res {
@@ -637,7 +720,7 @@ impl Threadbear {
                             this.replace_project(project);
                         }
                     }
-                    Err(e) => this.show_error(e.message, cx),
+                    Err(message) => this.show_error(message, cx),
                 }
                 cx.notify();
             })
@@ -1557,5 +1640,45 @@ pub(crate) fn automation(
             )))
         }
         other => Err(format!("unknown projects command {other}")),
+    }
+}
+
+#[cfg(test)]
+mod webp_icon_tests {
+    use super::webp_icon_png;
+    use image::{codecs::webp::WebPEncoder, ExtendedColorType, ImageEncoder, Rgba, RgbaImage};
+
+    fn webp(width: u32, height: u32) -> tempfile::NamedTempFile {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pixels = RgbaImage::from_pixel(width, height, Rgba([35, 70, 100, 128]));
+        WebPEncoder::new_lossless(file.as_file())
+            .write_image(pixels.as_raw(), width, height, ExtendedColorType::Rgba8)
+            .unwrap();
+        file
+    }
+
+    #[test]
+    fn webp_project_icon_preserves_transparency() {
+        let input = webp(2, 2);
+        let png = webp_icon_png(input.path()).unwrap();
+        let pixels = image::open(png.path()).unwrap().into_rgba8();
+        assert_eq!(pixels.dimensions(), (2, 2));
+        assert_eq!(*pixels.get_pixel(0, 0), Rgba([35, 70, 100, 128]));
+        let staged_path = png.path().to_owned();
+        drop(png);
+        assert!(!staged_path.exists());
+    }
+
+    #[test]
+    fn webp_project_icon_refuses_sources_over_the_side_limit() {
+        let input = webp(4097, 1);
+        assert!(webp_icon_png(input.path()).is_err());
+    }
+
+    #[test]
+    fn webp_project_icon_scales_to_fit_without_cropping() {
+        let input = webp(1024, 64);
+        let png = webp_icon_png(input.path()).unwrap();
+        assert_eq!(image::image_dimensions(png.path()).unwrap(), (256, 16));
     }
 }

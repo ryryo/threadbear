@@ -1236,6 +1236,11 @@ the same with update_project. The phone and the website list parts as
 projects of their own for now. When a project update needs your approval, its details show the current
 project name and ID alongside the proposed changes.
 
+To pick your own project icon, click the icon on its page and choose a
+PNG, ICNS, ICO or WebP picture. The desktop app turns a WebP into a still PNG.
+Use the Librarian's Icon switches back to an
+automatically chosen icon.
+
 A project can show a task board from Notion. Give it a Notion page with a
 Tasks database on it (a board grouped by Status): Add Notion page… under
 Tasks on its page, Notion Page… when you right-click it in Projects, or ask

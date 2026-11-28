@@ -35,7 +35,7 @@ export type StoredIcon = ProjectIcon & { hash?: string };
 
 // What Mike or an agent chooses: a picture, a symbol, or neither to go
 // back to the one the librarian finds.
-export type IconChoice = { path?: string; symbol?: string };
+export type IconChoice = { path?: string; originalPath?: string; symbol?: string };
 
 // What the projects need from the runner: its threads, a way to change
 // one (which saves it, sends its summary and says what changed), and the
@@ -649,13 +649,18 @@ export class Projects {
     const rec = this.must(projectId);
     if (this.frozen) throw new RpcError(ErrorCode.other, 'This runner is handing over; projects are changed on the new one.');
     if (choice.path !== undefined && choice.symbol !== undefined) throw bad('Give a picture or a symbol, not both.');
+    const original = choice.originalPath?.trim();
+    if (original !== undefined && (!original.toLowerCase().endsWith('.webp') || !choice.path?.trim().toLowerCase().endsWith('.png'))) {
+      throw bad('Give the original WebP path with its converted PNG.');
+    }
     if (choice.path !== undefined) {
       const src = path.resolve(expandHome(choice.path.trim()));
       if (!/\.(png|icns|ico)$/i.test(src)) throw bad('An icon is a picture: PNG, ICNS or ICO (no SVG, JPEG or WebP since 24 Nov 2026, as what a renderer makes of one can\'t be checked before it draws it).');
       const hash = await fileHash(src);
       if (!hash) throw bad(`Picture not found (or over 10 MB): ${src}`);
       const image = await storeIcon(src, this.iconDir, rec.id, hash);
-      return this.putIcon(this.must(rec.id), { image, from: src, hash, by, updatedAt: this.iso() });
+      const from = original === undefined ? src : path.resolve(expandHome(original));
+      return this.putIcon(this.must(rec.id), { image, from, hash, by, updatedAt: this.iso() });
     }
     if (choice.symbol !== undefined) {
       const symbol = choice.symbol.trim();
@@ -965,7 +970,8 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
     'projects.setIcon': async (p) => {
       const path = str(p, 'path');
       const symbol = str(p, 'symbol');
-      return { project: await projects.chooseIcon(reqStr(p, 'projectId'), { path, symbol }, 'mike') };
+      const originalPath = str(p, 'originalPath');
+      return { project: await projects.chooseIcon(reqStr(p, 'projectId'), { path, originalPath, symbol }, 'mike') };
     },
     'projects.merge': (p) => ({ project: projects.merge(reqStr(p, 'projectId'), reqStr(p, 'intoId')) }),
     'projects.delete': (p) => projects.delete(reqStr(p, 'projectId')),

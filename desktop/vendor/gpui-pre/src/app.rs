@@ -2043,6 +2043,16 @@ impl App {
         self.platform.prompt_for_paths(options)
     }
 
+    /// Displays a file picker filtered by extension on platforms that support it.
+    /// Callers must still validate the returned paths.
+    pub fn prompt_for_paths_with_extensions(
+        &self,
+        options: PathPromptOptions,
+        extensions: &'static [&'static str],
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.platform.prompt_for_paths_with_extensions(options, extensions)
+    }
+
     /// Displays a platform modal for selecting a new path where a file can be saved.
     ///
     /// The provided directory will be used to set the initial location.

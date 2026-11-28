@@ -172,6 +172,30 @@ test('a project with no picture gets a symbol from the list; a made-up one is ig
   s.librarian.stop();
 });
 
+test('a converted PNG keeps the manually selected WebP as its original', async () => {
+  const s = setup(() => ({ ok: true, value: 'hammer', model: 'haiku' }));
+  const project = s.projects.create({ title: 'Pictures', by: 'mike' });
+  const original = path.join(s.root, 'original.WebP');
+  const converted = path.join(s.root, 'converted.png');
+  fs.writeFileSync(converted, png(64, 64));
+  try {
+    const setIcon = projectMethods(s.projects)['projects.setIcon'];
+    await assert.rejects(Promise.resolve().then(() => setIcon({ projectId: project.id, path: original })), /PNG, ICNS or ICO/);
+    await assert.rejects(Promise.resolve().then(() => setIcon({ projectId: project.id, originalPath: original })), /converted PNG/);
+    await setIcon({
+      projectId: project.id, path: converted, originalPath: original,
+    });
+    fs.rmSync(converted);
+    const icon = s.projects.list()[0].icon;
+    assert.equal(icon?.from, original);
+    assert.equal(icon?.image?.mediaType, 'image/png');
+    assert.equal(icon?.image?.width, 64);
+    assert.ok(icon?.image?.path && fs.existsSync(icon.image.path));
+  } finally {
+    s.librarian.stop();
+  }
+});
+
 test("Alex's and agents' choices stay until set back to automatic", async () => {
   const s = setup(() => ({ ok: true, value: 'hammer', model: 'haiku' }));
   const app = folder(s.root, 'tandem', { 'icons/tandem.png': png(300, 300) });

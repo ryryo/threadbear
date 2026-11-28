@@ -528,8 +528,8 @@ impl Threadbear {
 /// made of a repo's own file (or anything else at the path) to the same, so
 /// a small file whose header says it's huge is refused before any pixels
 /// are allocated (Daybreak, 24 Nov).
-const ICON_MAX_SIDE: u32 = 4096;
-const ICON_MAX_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const ICON_MAX_SIDE: u32 = 4096;
+pub(crate) const ICON_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// A project icon's bytes, within the budget; None for one over it, or one
 /// that won't read. Only a PNG, which is all the runner keeps: the image

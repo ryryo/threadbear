@@ -805,12 +805,20 @@ impl Platform for WindowsPlatform {
         &self,
         options: PathPromptOptions,
     ) -> Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.prompt_for_paths_with_extensions(options, &[])
+    }
+
+    fn prompt_for_paths_with_extensions(
+        &self,
+        options: PathPromptOptions,
+        extensions: &'static [&'static str],
+    ) -> Receiver<Result<Option<Vec<PathBuf>>>> {
         let owner = self
             .find_current_active_window()
             .and_then(|hwnd| self.window_from_hwnd(hwnd))
             .map(|window| window.dialog_owner.clone());
         crate::dialog::show_dialog(owner, &self.foreground_executor, move |window| {
-            file_open_dialog(options, Some(window))
+            file_open_dialog(options, extensions, Some(window))
         })
     }
 
@@ -1605,6 +1613,7 @@ fn open_target_in_explorer(target: &Path) -> Result<()> {
 
 fn file_open_dialog(
     options: PathPromptOptions,
+    extensions: &[&str],
     window: Option<HWND>,
 ) -> Result<Option<Vec<PathBuf>>> {
     let folder_dialog: IFileOpenDialog =
@@ -1620,6 +1629,19 @@ fn file_open_dialog(
 
     unsafe {
         folder_dialog.SetOptions(dialog_options)?;
+
+        if !options.directories && !extensions.is_empty() {
+            let pattern = extensions
+                .iter()
+                .map(|ext| format!("*.{ext}"))
+                .collect::<Vec<_>>()
+                .join(";");
+            let pattern: Vec<u16> = pattern.encode_utf16().chain(Some(0)).collect();
+            folder_dialog.SetFileTypes(&[Common::COMDLG_FILTERSPEC {
+                pszName: windows::core::w!("Supported files"),
+                pszSpec: windows::core::PCWSTR(pattern.as_ptr()),
+            }])?;
+        }
 
         if let Some(prompt) = options.prompt {
             let prompt: &str = &prompt;

@@ -40,6 +40,7 @@ use objc2_foundation::{
     NSActivityOptions, NSArray, NSBundle, NSError, NSInteger, NSProcessInfo, NSString, NSURL,
     NSUTF8StringEncoding,
 };
+use objc2_uniform_type_identifiers::UTType;
 use parking_lot::Mutex;
 use semver::Version;
 use std::{
@@ -864,6 +865,14 @@ impl Platform for MacPlatform {
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.prompt_for_paths_with_extensions(options, &[])
+    }
+
+    fn prompt_for_paths_with_extensions(
+        &self,
+        options: PathPromptOptions,
+        extensions: &'static [&'static str],
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
         let (done_tx, done_rx) = oneshot::channel();
         self.foreground_executor()
             .spawn(async move {
@@ -882,6 +891,13 @@ impl Platform for MacPlatform {
                 panel.setCanChooseDirectories(options.directories);
                 panel.setCanChooseFiles(options.files);
                 panel.setAllowsMultipleSelection(options.multiple);
+                if !extensions.is_empty() {
+                    let types: Vec<_> = extensions
+                        .iter()
+                        .filter_map(|ext| UTType::typeWithFilenameExtension(&NSString::from_str(ext)))
+                        .collect();
+                    panel.setAllowedContentTypes(&NSArray::from_retained_slice(&types));
+                }
 
                 panel.setCanCreateDirectories(true);
                 panel.setResolvesAliases(false);

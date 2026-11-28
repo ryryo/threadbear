@@ -50,6 +50,16 @@ When('I press New Thread on the project\'s page', async function (this: Threadbe
   await this.app.do({ cmd: 'click', tip: 'Start a thread in this project, in its folder, with its goals from the first message' });
 });
 
+When('I open the project icon menu', async function (this: ThreadbearWorld) {
+  await this.until('a project page', (d) => Boolean(page(d)));
+  this.lastAnswer = await this.app.do({ cmd: 'realMenu', tipPrefix: 'No icon yet:' });
+});
+
+Then('the project icon menu offers {string}', function (this: ThreadbearWorld, item: string) {
+  const items = JSON.parse(okValue(this.lastAnswer ?? '')) as string[];
+  assert.ok(items.includes(item), `${item} not in: ${items.join(' | ')}`);
+});
+
 When('I press the control {string}', async function (this: ThreadbearWorld, tip: string) {
   await this.app.do({ cmd: 'click', tip });
 });

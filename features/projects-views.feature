@@ -34,6 +34,12 @@ Feature: Projects: the list, the page of cards and a project's own page
     Then the project page lists the folders "/Users/alex/dev/walkies, /Users/alex/dev/walkies-backend"
     And the project page lists 2 threads
 
+  @projects.page @swift-pending
+  Scenario: The project icon menu says which picture formats it accepts
+    When I open the project "Walkies"
+    And I open the project icon menu
+    Then the project icon menu offers "Choose a Picture (PNG, ICNS, ICO or WebP)…"
+
   @header.projectchip @projects.page
   Scenario: A thread's project tile opens the project's page, and the thread comes back
     When I open the thread "Make uploads resume after a crash"

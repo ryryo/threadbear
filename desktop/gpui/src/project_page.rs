@@ -173,7 +173,7 @@ impl Threadbear {
         let busy = self.projects.busy.contains(&format!("icon:{id}"));
         let tip = rules::icon_help(project, &crate::files::home_dir());
         let mut rows = vec![MenuRow::item(
-            "Choose a Picture…",
+            threadbear_core::tr!("Choose a Picture (PNG, ICNS, ICO or WebP)…"),
             "photo",
             MenuAction::Project(ProjectAction::ChooseIcon(id.clone())),
         )];

@@ -168,6 +168,10 @@ the owning runner.
   HEIC paste, a phone still, a project icon) are converted by a hidden
   `powershell.exe` started for each, running `runner/src/win-image.ps1`
   with Windows' own imaging, in place of `sips`; SVG isn't drawn there.
+- **A WebP chosen as a project icon:** the desktop app reads the selected
+  image locally, stages a private PNG in the session's temporary folder,
+  and removes it after the runner answers. The runner keeps its own PNG
+  and records the path of the selected image.
 - **A one-shot update job:** when the runner's LaunchAgent or
   Threadbear Runner.app is behind main (or you press Update it in the
   Updates panel after one failed), the runner

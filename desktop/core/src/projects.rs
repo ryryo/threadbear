@@ -21,6 +21,18 @@ use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------- the project
 
+/// The desktop picker also accepts WebP, which the app converts before sending.
+pub const PROJECT_ICON_EXTENSIONS: &[&str] = &["png", "icns", "ico", "webp"];
+
+pub fn project_icon_extension(path: &std::path::Path) -> Option<&'static str> {
+    let name = path.file_name()?.to_string_lossy();
+    let (_, extension) = name.rsplit_once('.')?;
+    PROJECT_ICON_EXTENSIONS
+        .iter()
+        .copied()
+        .find(|allowed| extension.eq_ignore_ascii_case(allowed))
+}
+
 /// Who made a project, put a thread in one or chose its icon
 /// (`ProjectAuthor`). One from a newer runner reads as an agent, the middle
 /// of the three: neither Mike's own choice nor the librarian's guess.
@@ -1397,6 +1409,25 @@ mod tests {
     use chrono::FixedOffset;
 
     const NOW: i64 = 1_000_000_000;
+
+    #[test]
+    fn project_icon_picker_accepts_supported_picture_extensions() {
+        use std::path::Path;
+
+        for name in ["icon.png", "app.ICNS", "favicon.Ico", "my.icon.PNG", ".png"] {
+            assert!(project_icon_extension(Path::new(name)).is_some(), "{name}");
+        }
+        assert_eq!(project_icon_extension(Path::new("icon.WeBp")), Some("webp"));
+        for name in [
+            "icon.svg",
+            "photo.jpg",
+            "photo.jpeg",
+            "icon",
+            "icon.png.txt",
+        ] {
+            assert_eq!(project_icon_extension(Path::new(name)), None, "{name}");
+        }
+    }
 
     fn minutes_ago(m: f64) -> String {
         iso_time(NOW - (m * 60_000.) as i64)
