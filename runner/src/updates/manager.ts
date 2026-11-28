@@ -274,10 +274,13 @@ export class CliUpdates {
     if (f.count >= 2 && !f.warned) {
       f.warned = true;
       const prev = p === 'codex' ? this.copies.state().previous : undefined;
-      const message =
+      const hint =
         p === 'claude'
-          ? `Claude Code ${version} failed to start twice. To go back: claude install ${this.lastClaude ?? '<version>'}`
-          : `Codex ${version} failed to start twice.${prev ? ` Go back to ${prev} in Usage.` : ''}`;
+          ? ` To go back: claude install ${this.lastClaude ?? '<version>'}`
+          : p === 'codex' && prev
+            ? ` Go back to ${prev} in Usage.`
+            : '';
+      const message = `${cliName(p)} ${version} failed to start twice.${hint}`;
       this.d.notice?.('warning', message);
       this.history.append({ at: this.iso(), provider: p, action: 'notice', ok: false, version, message });
     }
