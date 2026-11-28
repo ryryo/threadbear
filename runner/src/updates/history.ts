@@ -11,13 +11,14 @@ export const OUTPUT_MAX_BYTES = 10 * 1024;
 
 // Per provider: the last check, the last update's outcome, the policy the
 // app chose (over runner.json's), and how many sessions in a row failed to
-// start on a new version.
+// start on the same version (which may be unknown).
 export type ProviderState = {
   policy?: CliPolicy;
   latestVersion?: string;
   checkedAt?: string;
   update?: CliStatus['update'];
-  startFailures?: { version: string; count: number; warned?: boolean };
+  // The old true marker could also mean an ACP warning that said "Codex".
+  startFailures?: { version?: string; count: number; warned?: boolean | 'named' };
 };
 export type UpdatesFile = Partial<Record<Provider, ProviderState>>;
 

@@ -13,8 +13,11 @@ import { UpdateHistory, HISTORY_MAX_LINES, OUTPUT_MAX_BYTES } from '../../src/up
 import { compareVersions, defaultExec, type Exec } from '../../src/updates/exec.ts';
 import { FakeClock } from '../../src/clock.ts';
 import { nullLogger } from '../../src/log.ts';
-import type { CliStatus, Provider } from '../../src/protocol.ts';
-import { testConfig, tmpDir } from '../helpers/fakes.ts';
+import { AcpAdapter } from '../../src/adapters/acp/adapter.ts';
+import { ACP_AGENTS } from '../../src/adapters/acp/agents.ts';
+import { ProcessRegistry } from '../../src/proc.ts';
+import type { Account, CliStatus, Provider } from '../../src/protocol.ts';
+import { FakeAccounts, makeHarness, testConfig, tmpDir } from '../helpers/fakes.ts';
 
 const NATIVE = ['node_modules', '@openai', 'codex-darwin-arm64', 'vendor', 'aarch64-apple-darwin', 'bin', 'codex'];
 const REQUIRED = ['turn/start', 'turn/steer'];
@@ -100,7 +103,7 @@ const checkSurface = (dir: string) => {
 
 type Hooks = CliUpdatesHooks & { released: [Provider, string][]; pending: boolean; binaries: string[] };
 
-function setup(o: { latest?: Partial<Record<Provider, string>>; env?: NodeJS.ProcessEnv; exec?: Exec; cfg?: Partial<ReturnType<typeof testConfig>> } = {}) {
+function setup(o: { latest?: Partial<Record<Provider, string>>; env?: NodeJS.ProcessEnv; exec?: Exec; cfg?: Partial<ReturnType<typeof testConfig>>; acp?: ConstructorParameters<typeof CliUpdates>[0]['acp'] } = {}) {
   const root = tmpDir('tb-updates-');
   const home = path.join(root, 'home');
   fs.mkdirSync(path.join(home, 'run'), { recursive: true });
@@ -131,8 +134,8 @@ function setup(o: { latest?: Partial<Record<Provider, string>>; env?: NodeJS.Pro
   // to do with these temp folders, and at background priority ps can outlast
   // cleanupCodex's 10 s limit, which skips the cleanup a test then checks (2 Nov).
   const exec: Exec = o.exec ?? ((cmd, args, opts) => (cmd === '/bin/ps' ? Promise.resolve({ code: 0, stdout: '', stderr: '' }) : defaultExec(cmd, args, opts)));
-  const make = () =>
-    new CliUpdates({ cfg, log: nullLogger, clock, hooks, env, execPath: npm.execPath, fetchText, exec, random: () => 0, notice: (_l, m) => void notices.push(m), codex: { resolve, checkSurface, testedVersion: '0.164.0' } });
+  const make = (extra: Partial<typeof cfg> = {}) =>
+    new CliUpdates({ cfg: { ...cfg, ...extra }, log: nullLogger, clock, hooks, env, execPath: npm.execPath, fetchText, exec, random: () => 0, notice: (_l, m) => void notices.push(m), codex: { resolve, checkSurface, testedVersion: '0.164.0' }, acp: o.acp });
   const u = make();
   const changes: CliStatus[][] = [];
   u.onChange((c) => changes.push(c));
@@ -623,11 +626,128 @@ test('two failed starts on a version send one warning', () => {
   assert.equal(t.notices.length, 1, 'a success in between resets the count');
   t.u.sessionStarted('claude', '2.1.312', false);
   assert.equal(t.notices.length, 2);
-  assert.match(t.notices[1], /^Claude Code 2\.1\.312 failed to start twice\./);
+  assert.equal(t.notices[1], 'Claude Code 2.1.312 failed to start twice.');
   t.u.sessionStarted('antigravity', '1.4.5', false);
   t.u.sessionStarted('antigravity', '1.4.5', false);
   assert.equal(t.notices.length, 3);
   assert.equal(t.notices[2], 'Antigravity 1.4.5 failed to start twice.');
+});
+
+test('a saved legacy ACP warning is corrected once, including across Runner restarts', () => {
+  const t = setup();
+  const history = new UpdateHistory(t.home);
+  history.write({
+    antigravity: { startFailures: { version: '1.4.5', count: 2, warned: true } },
+    codex: { startFailures: { version: '0.165.0', count: 2, warned: true } },
+  });
+  const updated = t.make();
+  updated.sessionStarted('antigravity', '1.4.5', false);
+  assert.deepEqual(t.notices, ['Antigravity 1.4.5 failed to start twice.']);
+  updated.sessionStarted('antigravity', '1.4.5', false);
+  const restarted = t.make();
+  restarted.sessionStarted('antigravity', '1.4.5', false);
+  restarted.sessionStarted('codex', '0.165.0', false);
+  assert.deepEqual(t.notices, ['Antigravity 1.4.5 failed to start twice.']);
+});
+
+test('Antigravity initialize timeouts warn even when --version only prints its build date', { timeout: 10_000 }, async () => {
+  const root = tmpDir('tb-agy-start-');
+  const binary = path.join(root, 'antigravity', 'agy_acp_server.par');
+  const answerInitialize = path.join(root, 'answer-initialize');
+  script(binary, `if [ "$1" = "--version" ]; then
+  echo "Built on Fri Oct 30 01:09:22 2026"
+elif [ -f "${answerInitialize}" ]; then
+  IFS= read -r line
+  printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp"}}}'
+  while IFS= read -r line; do :; done
+else
+  while IFS= read -r line; do :; done
+fi`);
+  const t = setup({ acp: { providers: ['antigravity'], binary: () => binary, updateArgs: () => [] } });
+  t.u.check('antigravity');
+  await t.u.settled();
+  const row = of(t.u.list(), 'antigravity');
+  assert.equal(row.path, binary);
+  assert.equal(row.installedVersion, undefined);
+  const adapter = new AcpAdapter({
+    agent: ACP_AGENTS.antigravity,
+    binary: () => binary,
+    registry: new ProcessRegistry(path.join(t.home, 'run'), nullLogger),
+    log: nullLogger,
+    timings: { requestMs: 500, sessionMs: 50, closeWaitMs: 300 },
+  });
+  const account: Account = { id: 'antigravity-main', provider: 'antigravity', title: 'Antigravity', configDir: root };
+  const h = makeHarness(t.home, {}, { adapters: { antigravity: adapter }, accounts: new FakeAccounts([account]) });
+  h.runner.attachClis(t.u);
+  const run = async () => {
+    const completed = new Promise<void>((resolve) => {
+      const off = h.runner.onNotification((n) => {
+        if (n.method !== 'thread.event' || n.params.event.type !== 'turn.completed') return;
+        off();
+        resolve();
+      });
+    });
+    const { thread } = h.runner.create({ text: 'test', accountId: account.id });
+    await completed;
+    return h.events(thread.id).find((e) => e.type === 'error')?.message ?? '';
+  };
+  assert.match(await run(), /didn't answer initialize/);
+  assert.deepEqual(t.notices, []);
+  assert.match(await run(), /didn't answer initialize/);
+  assert.deepEqual(t.notices, ['Antigravity failed to start twice.']);
+  assert.equal(new UpdateHistory(t.home).entries().at(-1)?.version, undefined);
+  fs.writeFileSync(answerInitialize, '');
+  assert.match(await run(), /didn't answer session\/new/);
+  fs.rmSync(answerInitialize);
+  assert.match(await run(), /didn't answer initialize/);
+  assert.equal(t.notices.length, 1, 'an initialize without a version resets the unknown-version count');
+  assert.match(await run(), /didn't answer initialize/);
+  assert.equal(t.notices.length, 2);
+});
+
+test('Codex only suggests going back to an available managed copy', async () => {
+  const t = setup();
+  t.u.update('codex', { version: '0.164.0' });
+  await t.u.settled();
+  t.u.update('codex', { version: '0.165.0' });
+  await t.u.settled();
+  assert.equal(of(t.u.list(), 'codex').previousVersion, '0.164.0');
+  const external = path.join(t.root, 'external-codex');
+  const binary = path.join(external, 'bin', 'codex');
+  script(binary, 'exit 1');
+  fs.writeFileSync(path.join(external, 'package.json'), '{"name":"@openai/codex","version":"0.165.0"}');
+  const manual = t.make({ codexPath: binary });
+  manual.start();
+  await manual.settled();
+  manual.stop();
+  const row = of(manual.list(), 'codex');
+  assert.equal(row.installedVersion, '0.165.0');
+  assert.equal(row.previousVersion, undefined);
+  manual.sessionStarted('codex', row.installedVersion, false);
+  manual.sessionStarted('codex', row.installedVersion, false);
+  t.u.sessionStarted('codex', '0.165.0', false);
+  t.u.sessionStarted('codex', '0.165.0', false);
+  assert.deepEqual(t.notices, [
+    'Codex 0.165.0 failed to start twice.',
+    'Codex 0.165.0 failed to start twice. Go back to 0.164.0 in Usage.',
+  ]);
+});
+
+test('Claude only suggests going back after an update from a different version', async () => {
+  const t = setup();
+  t.u.setPolicy('claude', 'notify');
+  t.u.check('claude');
+  await t.u.settled();
+  t.u.sessionStarted('claude', '2.1.310', false);
+  t.u.sessionStarted('claude', '2.1.310', false);
+  t.u.update('claude');
+  await t.u.settled();
+  t.u.sessionStarted('claude', '2.1.311', false);
+  t.u.sessionStarted('claude', '2.1.311', false);
+  assert.deepEqual(t.notices, [
+    'Claude Code 2.1.310 failed to start twice.',
+    'Claude Code 2.1.311 failed to start twice. To go back: claude install 2.1.310',
+  ]);
 });
 
 test('updates.ndjson keeps the last 500 lines and 10 KB of output each', () => {

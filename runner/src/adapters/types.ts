@@ -125,9 +125,9 @@ export type AdapterOutput =
   // aside: titles of windows shown but never deciding the login's room or
   // its block (Gemini's Claude and GPT group: agy-usage.ts).
   | { kind: 'limits'; windows: UsageWindow[]; blocked?: boolean; email?: string; plan?: string; resets?: UsageResets; aside?: string[] }
-  // The version of the CLI process actually running this session (not the
-  // one that created it).
-  | { kind: 'cliVersion'; version: string }
+  // The CLI initialized. Its version, when reported, is the one actually
+  // running this session (not the one that created it).
+  | { kind: 'cliVersion'; version?: string }
   // The CLI started a turn of its own; `note` says why, when it's known.
   | { kind: 'cliTurn'; note?: string }
   // The Stop hook sent a turn back to call end_turn, as its message is the

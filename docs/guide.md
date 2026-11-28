@@ -1735,6 +1735,8 @@ with room in its own pool, or waits for room. OpenCode and Cursor have no
 usage readings. None of these have a sandbox or
 going back to an earlier message yet, and Threadbear only updates
 their CLIs when you press Update in the Updates panel.
+If a CLI fails to start twice, the app warns you by name, with the version
+when Threadbear knows it.
 
 Titles, the librarian and Wake when… run on any small-job provider in the
 pool you pick in Settings > Models (Claude, Codex, Grok or OpenCode); with

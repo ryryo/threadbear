@@ -123,7 +123,7 @@ export class CliUpdates {
   private retryOptions: Partial<Record<Provider, UpdateOptions>> = {};
   private stopped = false;
   // The Claude version before the newest update, for the "go back" hint.
-  private lastClaude?: string;
+  private claudeRollback?: { from: string; to: string };
   // Held Codex versions already put through the gate again since this
   // runner started (recheckHold).
   private regated = new Set<string>();
@@ -255,36 +255,40 @@ export class CliUpdates {
     return () => this.listeners.delete(fn);
   }
 
-  // The runner tells this whether a session on `version` got as far as the
-  // CLI's init (Claude) or initialize (Codex). Two failures in a row on a
-  // version it just moved to send a warning, once.
+  // The runner reports whether the CLI got as far as init or initialize.
+  // Warn once after two failures in a row, even without a version.
   sessionStarted(p: Provider, version: string | undefined, ok: boolean): void {
-    if (!version) return;
     const s = this.ps(p);
+    const previous = s.startFailures;
     if (ok) {
-      if (s.startFailures?.version === version) {
+      // Initialize can identify a version that was unknown before launch.
+      if (previous && (previous.version === undefined || previous.version === version)) {
         delete s.startFailures;
         this.save();
       }
       return;
     }
-    const f = s.startFailures?.version === version ? s.startFailures : { version, count: 0 };
+    const f = previous && previous.version === version ? previous : { version, count: 0 };
     f.count++;
     s.startFailures = f;
-    if (f.count >= 2 && !f.warned) {
-      f.warned = true;
-      const prev = p === 'codex' ? this.copies.state().previous : undefined;
-      const hint =
-        p === 'claude'
-          ? ` To go back: claude install ${this.lastClaude ?? '<version>'}`
-          : p === 'codex' && prev
-            ? ` Go back to ${prev} in Usage.`
-            : '';
-      const message = `${cliName(p)} ${version} failed to start twice.${hint}`;
+    const alreadyWarned = f.warned === 'named' || (f.warned === true && MANAGED.includes(p));
+    if (f.count >= 2 && !alreadyWarned) {
+      f.warned = 'named';
+      const name = version ? `${cliName(p)} ${version}` : cliName(p);
+      const message = `${name} failed to start twice.${this.rollbackHint(p, version)}`;
       this.d.notice?.('warning', message);
       this.history.append({ at: this.iso(), provider: p, action: 'notice', ok: false, version, message });
     }
     this.save();
+  }
+
+  private rollbackHint(p: Provider, version: string | undefined): string {
+    if (!version || this.installed[p] !== version) return '';
+    if (p === 'claude' && this.claudeRollback?.to === version) return ` To go back: claude install ${this.claudeRollback.from}`;
+    if (p !== 'codex' || this.codexBinary() !== this.copies.currentLink) return '';
+    const { previousVersion, hold, update } = this.status(p);
+    if (!previousVersion || previousVersion === version || previousVersion === hold?.version || update?.state === 'running' || update?.state === 'waiting') return '';
+    return ` Go back to ${previousVersion} in Usage.`;
   }
 
   // ---- status
@@ -430,7 +434,6 @@ export class CliUpdates {
     const codex = bin === this.copies.currentLink ? this.copies.currentVersion() : codexPackageVersion(bin);
     const changed = claude !== this.installed.claude || codex !== this.installed.codex;
     this.installed = { ...this.installed, claude, codex };
-    if (claude) this.lastClaude ??= claude;
     if (changed) this.changed();
   }
 
@@ -603,7 +606,8 @@ export class CliUpdates {
     const r = await runClaudeUpdate({ claudePath: this.cfg.claudePath, cwd: paths.run(this.cfg.home), exec: this.exec, env: this.env, timeoutMs: RUN_TIMEOUT_MS });
     const target = this.st.claude?.latestVersion;
     if (r.kind === 'updated') {
-      this.lastClaude = r.from ?? before;
+      const from = r.from ?? before;
+      this.claudeRollback = from && from !== r.to ? { from, to: r.to } : undefined;
       this.installed.claude = r.to;
       this.history.append({ at: this.iso(), provider: 'claude', action: 'update', ok: true, version: r.to, message: `from ${r.from ?? 'unknown'}`, output: r.output });
       this.finish('claude', { state: 'succeeded', targetVersion: r.to });

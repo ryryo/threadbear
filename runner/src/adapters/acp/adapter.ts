@@ -514,7 +514,7 @@ export class AcpSession implements AgentSession {
       const said = this.init.agentInfo?.name ? ` (it says it's ${this.init.agentInfo.name})` : '';
       throw new Error(`The program found for ${name} isn't ${name}${said}, so this thread wasn't started.`);
     }
-    if (this.proc.version) this.sink.output({ kind: 'cliVersion', version: this.proc.version });
+    this.sink.output({ kind: 'cliVersion', version: this.proc.version });
 
     const defs = deps.toolsFor?.(opts.threadId) ?? [];
     let mcpServers: unknown[] = [];

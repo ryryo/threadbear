@@ -3255,10 +3255,11 @@ export class Runner {
         break;
       }
       case 'cliVersion': {
-        rt.cliVersion = o.version;
+        if (o.version) rt.cliVersion = o.version;
         // Started on the version an update wants: nothing to move.
-        const said = this.cli(st, { kind: 'version', gen, atWanted: this.wantedVersion[rec.provider] === o.version });
-        if (said.ok && said.out.reportStart) this.tellStarted(rec.provider, o.version, true);
+        const said = this.cli(st, { kind: 'version', gen, atWanted: !!o.version && this.wantedVersion[rec.provider] === o.version });
+        if (said.ok && said.out.reportStart) this.tellStarted(rec.provider, o.version ?? rt.startVersion, true);
+        if (!o.version) break;
         if (rec.cliVersion && rec.cliVersion !== o.version) {
           this.emit(st, { type: 'system.note', text: `${cliName(rec.provider)} ${o.version} from this turn on (was ${rec.cliVersion})` }, rt.turn?.turnId);
         }
