@@ -408,10 +408,14 @@ external browser directly. Ordinary clicks and links shown by a pin follow
 Default in the link menu.
 
 Choose Pick element to mark an element on the page, or Select area to draw a
-rectangle. Type a comment in the panel. You can pick again or switch modes
-without losing the comment. Choose Review to see the cutout, then add it to
-the draft or leave the image out. The comment and any image stay with that
-thread's unsent draft until you send it.
+rectangle. Type beside the selection. You can pick again or switch modes
+while keeping the comment. Press Return or Attach to add one chip at the
+chat cursor. Shift-Return inserts a new line. Open the chip to see the
+comment and cutout or remove the picture. Delete the chip to remove the
+whole annotation, and use Undo to bring it back. The annotation stays with
+the thread's draft through a restart. When sending is available,
+Command-Return or Control-Return sends the annotation with the existing
+draft. The sent message retains the annotation's details.
 
 With [BrowserBear](https://github.com/mikecann/browserbear), Agent tabs in
 Browser lists the pages the thread's agents have open. Each has a still and

@@ -408,7 +408,7 @@ impl ThreadPane {
             } else {
                 message.text.clone()
             };
-            let answered_words = answered_words(message);
+            let mut answered_words = answered_words(message);
             let answered = answered_words.is_some();
             // As wide as its widest line, as the Swift bubble is (its text's
             // used width): GPUI's wrapped text takes all the width it's
@@ -432,6 +432,23 @@ impl ThreadPane {
             } else {
                 self.chip_lines(ix, &row.id, message, max_text, window, cx)
             };
+            let answer_chips = answered_words.as_mut().and_then(|words| {
+                if message.page_comments.is_empty() {
+                    return None;
+                }
+                let prefix = message.text.strip_suffix(&words.extra)?.len();
+                let mut extra = message.clone();
+                extra.text = words.extra.clone();
+                extra.page_comments.retain(|note| note.block[0] >= prefix);
+                for note in &mut extra.page_comments {
+                    note.shift(prefix, 0);
+                }
+                let body = self
+                    .chip_lines(ix, &row.id, &extra, max_text, window, cx)?
+                    .1;
+                words.extra.clear();
+                Some(body)
+            });
             let fit = (!answered && chips.is_none() && (has_words || edited.is_empty()))
                 .then(|| widest_line(&text, max_text, window));
             let words = fit
@@ -471,6 +488,7 @@ impl ThreadPane {
                 .when_some(answered_words, |d, words| {
                     d.child(answers_body(ix, &words, cx))
                 })
+                .children(answer_chips)
                 // Room for the chip under a short line.
                 .when(drafts.is_some(), |d| d.min_w(px(EDITED_DRAFTS_MIN)))
                 .children(drafts);

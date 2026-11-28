@@ -929,6 +929,13 @@ impl Threadbear {
         // A patch panel come into sight goes in ⌘K's Recent.
         self.note_panels_shown(&layout, cx);
         self.pinned_panels_layout_changed(&layout);
+        if !self.dock.read(cx).is_showing(BROWSER) {
+            self.side.update(cx, |side, cx| {
+                if side.cancel_browser_note() {
+                    cx.notify();
+                }
+            });
+        }
         cx.notify();
     }
 

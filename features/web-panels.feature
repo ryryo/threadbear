@@ -184,6 +184,118 @@ Feature: Web pages in a thread's panels
     Then the page comment detail says "本文内の注釈" and has a picture
     When I send the chat composer
     Then the sent page comment contains "本文内の注釈" and its picture
+    When I open the sent page comment chip "本文内の注釈"
+    Then I can open the original crop from the sent page comment
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: The comment stays in its original draft when importing the crop fails
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When the runner refuses the next page comment picture
+    And I press the browser control "Mark an element for this thread"
+    And I select the colored button after scrolling
+    And I enter the page comment "このボタンを青に"
+    And I press the browser control "Attach to this thread's draft"
+    Then my draft includes the page comment text "このボタンを青に"
+    And my page comment describes a button without a picture
+    And the page comment has not sent a message
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Attach belongs to the original thread even while its picture imports
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When the runner takes a moment to import the page comment picture
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "漢字"
+    And I confirm and send the page comment with Command-Enter
+    And I open the thread "Add dark mode to the dashboard"
+    Then my draft has no page comment
+    When I open the thread "Morning brief"
+    Then my draft includes the page comment text "漢字"
+    And the page comment has not sent a message
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario Outline: <modifier>-Enter sends the annotation and the existing draft once
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When I put the chat cursor between "既存の" and "本文"
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "直接送信"
+    And I add a line to the page comment
+    Then the page comment field has a new line
+    And the page comment has not sent a message
+    When I confirm and send the page comment with <modifier>-Enter
+    Then the sent page comment contains "直接送信" and its picture
+
+    Examples:
+      | modifier |
+      | Command  |
+      | Control  |
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Closing the Browser pane cancels the pending send but keeps the comment
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When the runner takes a moment to import the page comment picture
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "パネルを閉じても残る"
+    And I confirm and send the page comment with Command-Enter
+    And I choose "Hide Panels" from the menu bar
+    Then my draft includes the page comment text "パネルを閉じても残る"
+    And no page selection is in progress
+    And the page comment has not sent a message
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: A confirmed comment remains in its draft if the app quits during its picture import
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When the runner takes a moment to import the page comment picture
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "確定時に保存"
+    And I confirm the page comment with Enter
+    Then the page comment is still attaching
+    When the app is quit and opened again
+    And I open the thread "Morning brief"
+    Then my draft includes the page comment text "確定時に保存"
+    And the page comment has not sent a message
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Changing a card answer while a crop imports cancels the pending send
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply links to the page server and asks for a decision
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    And the card in the composer says "Needs you"
+    When the runner takes a moment to import the page comment picture
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "回答を変えても下書きに残す"
+    And I confirm and send the page comment with Command-Enter
+    Then the page comment is still attaching
+    When I pick answer 1 of ask 1 on the card
+    And I pick answer 1 of ask 1 on the card
+    Then my draft includes the page comment text "回答を変えても下書きに残す"
+    And the page comment has not sent a message
 
   @panel.web @swift-pending
   Scenario: The globe is available without BrowserBear

@@ -1054,50 +1054,49 @@ impl SidePane {
             .upgrade()
             .is_some_and(|app| app.read(cx).main_window == window.window_handle());
         self.sync_browser_note(&thread.id, cx);
-        let marked = self.render_browser_note_review(cx);
-        let note_controls = self.render_browser_note_review_controls(cx);
         let note_toolbar = self.render_browser_note_toolbar(cx);
         let note_overlay = self.render_browser_note_overlay(cx);
-        let note_error = self.browser_note_error.filter(|_| note_controls.is_none());
-        let note_buttons =
-            if page.as_ref().is_some_and(|p| !p.loading()) && self.browser_pick.is_none() {
-                let element = cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.start_browser_note(true, window, cx)
-                });
-                let region = cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.start_browser_note(false, window, cx)
-                });
-                Some(
-                    h_flex()
-                        .gap(px(5.))
-                        .px(px(6.))
-                        .pb(px(6.))
-                        .flex_none()
-                        .child(
-                            PushButton::new(
-                                "browser-comment-element",
-                                tr!("Pick element"),
-                                tr!("Mark an element for this thread"),
-                            )
-                            .small()
-                            .render(cx, element),
+        let note_error = self.browser_note_error;
+        let note_buttons = if page.as_ref().is_some_and(|p| !p.loading()) && note_toolbar.is_none()
+        {
+            let attaching = self.browser_pick.is_some();
+            let element = cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.start_browser_note(true, window, cx)
+            });
+            let region = cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.start_browser_note(false, window, cx)
+            });
+            Some(
+                h_flex()
+                    .gap(px(5.))
+                    .px(px(6.))
+                    .pb(px(6.))
+                    .flex_none()
+                    .child(
+                        PushButton::new(
+                            "browser-comment-element",
+                            tr!("Pick element"),
+                            tr!("Mark an element for this thread"),
                         )
-                        .child(
-                            PushButton::new(
-                                "browser-comment-area",
-                                tr!("Select area"),
-                                tr!("Mark a region for this thread"),
-                            )
-                            .small()
-                            .render(cx, region),
-                        ),
-                )
-            } else {
-                None
-            };
-        let body = if let Some(marked) = marked {
-            marked
-        } else if stored.is_empty() {
+                        .small()
+                        .disabled(attaching)
+                        .render(cx, element),
+                    )
+                    .child(
+                        PushButton::new(
+                            "browser-comment-area",
+                            tr!("Select area"),
+                            tr!("Mark a region for this thread"),
+                        )
+                        .small()
+                        .disabled(attaching)
+                        .render(cx, region),
+                    ),
+            )
+        } else {
+            None
+        };
+        let body = if stored.is_empty() {
             crate::files::pane_note(
                 tr!("Enter an address to open a page beside the conversation."),
                 p,
@@ -1112,7 +1111,6 @@ impl SidePane {
             .child(buttons)
             .children(note_buttons)
             .children(note_toolbar)
-            .children(note_controls)
             .when_some(note_error.filter(|_| note_overlay.is_none()), |d, error| {
                 d.child(div().px(px(6.)).text_color(p.failed).child(error))
             })

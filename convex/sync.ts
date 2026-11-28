@@ -2,6 +2,7 @@
 // runner key (lib.ts). Rows are current state, so writing the same thing
 // twice is harmless, and a runner that was offline writes each changed
 // row once when it's back.
+import { pageComments, pageCommentsInText } from './pageComments';
 import { ConvexError, v } from 'convex/values';
 import { botScheduleTarget } from './botScheduleValues';
 import { botNoteScope, botWorkspaceProjection } from './botWorkspaceValues';
@@ -791,6 +792,7 @@ function fitMessage<T extends Record<string, any>>(m: T): T | undefined {
   const cap = plan ? CAP.planDoc : CAP.messageDoc;
   // They repeat the start of the text, so they're what goes when the row
   // wouldn't fit with them: the message is kept, drawn as plain text.
+  if (out.pageComments && (out.text !== m.text || docBytes(out) > cap)) delete out.pageComments;
   if (out.answers && docBytes(out) > cap) delete out.answers;
   return docBytes(out) <= cap ? (out as T) : undefined;
 }
@@ -1853,6 +1855,7 @@ const messageDoc = v.object({
   wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // API 33
   buttons: v.optional(v.array(messageButton)), // API 59
   pictures: v.optional(v.number()), // API 87: how many pictures a user's message came with
+  pageComments: v.optional(pageComments),
   answers: v.optional(v.array(v.object({ action: v.string(), answer: v.string() }))), // API 89: the asks a user's message answered
   wakeReason: v.optional(v.string()), // API 98: why the runner sent its own message
   at: v.string(),
@@ -1871,11 +1874,17 @@ export const appendMessages = mutation({
   handler: async (ctx, { key, messages }) => {
     const caller = await runnerAuth(ctx, key, 'appendMessages');
     // Answers only as the scrubbed text says them (answersInText), and only on his messages.
-    messages = clean(messages).map((m) => {
-      if (m.answers === undefined) return m;
-      const { answers, ...rest } = m;
-      const kept = m.role === 'user' ? answersInText(m.text, answers) : undefined;
-      return kept ? { ...rest, answers: kept } : rest;
+    const input = messages;
+    messages = clean(messages).map((m, index) => {
+      const { answers, pageComments: refs, ...rest } = m;
+      const keptAnswers = m.role === 'user' && answers ? answersInText(m.text, answers) : undefined;
+      const keptComments = m.role === 'user' && !m.origin && !caller.box && m.text === input[index]?.text
+        ? pageCommentsInText(refs, m.text, m.pictures ?? 0) : undefined;
+      return {
+        ...rest,
+        ...(keptAnswers ? { answers: keptAnswers } : {}),
+        ...(keptComments ? { pageComments: keptComments } : {}),
+      };
     });
     const checked = new Map<string, 'yes' | 'none'>();
     const skipped: string[] = [];
@@ -1955,6 +1964,10 @@ export const appendMessages = mutation({
         // sends one again, so nothing here clears them.
         const patch: Partial<Doc<'messages'>> = {};
         if (m.pagedAt && !existing.pagedAt) patch.pagedAt = m.pagedAt;
+        if (m.pageComments && m.text === existing.text && m.pictures === existing.pictures
+          && m.role === existing.role && JSON.stringify(m.pageComments) !== JSON.stringify(existing.pageComments)) {
+          patch.pageComments = m.pageComments;
+        }
         const buttons = keepPresses(existing.buttons, m.buttons);
         if (!sameButtons(existing.buttons, buttons)) patch.buttons = buttons;
         // A plan's row sent again once it's resolved (API 76): only on a plan.

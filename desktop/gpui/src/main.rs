@@ -51,6 +51,7 @@ mod composer_context;
 mod composer_drafts;
 mod composer_inline;
 mod composer_media;
+mod composer_page_comments;
 mod composer_send;
 mod composer_spelling;
 #[cfg(target_os = "macos")]
@@ -375,6 +376,7 @@ fn main() {
     let links = deep_links::receive(&application);
     application.run(|cx| {
         gpui_kit::init(cx);
+        browser_notes::init(cx);
         // Fonts the app carries (fonts.rs), before anything is measured in one.
         fonts::register(cx);
         // An untouched caret should not redraw the window indefinitely.

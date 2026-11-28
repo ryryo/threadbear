@@ -39,6 +39,7 @@
 // an app has it subscribed, through a 15-row tail and its one threads row;
 // older rows are read once by page and kept here, and a tail that skips past
 // what's held reads the gap once rather than leave a hole.
+import { PAGE_COMMENTS_API, pageCommentsInText, type PageCommentRef } from './page-comments.ts';
 import type { Clock, TimerHandle } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { Notification } from './runner.ts';
@@ -206,6 +207,7 @@ export type RelayRow = {
   pictures?: number;
   // The asks a user's message answered (API 89).
   answers?: AskAnswer[];
+  pageComments?: PageCommentRef[];
   // Why the runner sent its own message (API 98): its note's header.
   wakeReason?: string;
   at: string;
@@ -444,7 +446,8 @@ export function relayEvents(threadId: string, rows: RelayRow[], row: RelayThread
     if (r.role === 'user') {
       // Without the pictures read (an older backend), as that runner's words alone.
       const { text, images } = pictures ? messageWithPictures(threadId, r, pictures.get(r.seq)) : { text: r.text, images: [] };
-      out.push(env(base + 1, r, { type: 'user.message', text, images, ...(r.answers?.length ? { answers: r.answers.map((a) => ({ action: a.action, answer: a.answer })) } : {}), ...(r.origin === 'phone' || r.origin === 'runner' || r.origin === 'schedule' ? { origin: r.origin } : {}), ...(r.origin === 'runner' && r.wakeReason ? { wakeReason: r.wakeReason } : {}) }));
+      const pageComments = !r.origin && r.text.startsWith(text) ? pageCommentsInText(r.pageComments, text, images.length) : undefined;
+      out.push(env(base + 1, r, { type: 'user.message', text, images, ...(pageComments ? { pageComments } : {}), ...(r.answers?.length ? { answers: r.answers.map((a) => ({ action: a.action, answer: a.answer })) } : {}), ...(r.origin === 'phone' || r.origin === 'runner' || r.origin === 'schedule' ? { origin: r.origin } : {}), ...(r.origin === 'runner' && r.wakeReason ? { wakeReason: r.wakeReason } : {}) }));
     } else if (r.role === 'assistant' && r.plan) {
       // A Plan first plan: its card, as that runner's own Mac draws it. As a
       // reply it folded into the turn's work and nothing showed (12 Nov).
@@ -1652,13 +1655,15 @@ export class Relay {
       case 'threads.send': {
         const text = typeof p.text === 'string' ? p.text : '';
         const started = this.deps.clock.now();
+        const pageComments = (this.src().apiVersion ?? 0) >= PAGE_COMMENTS_API
+          ? pageCommentsInText(p.pageComments, text, Array.isArray(p.images) ? p.images.length : 0) : undefined;
         // The runner it was checked against (rpc.ts mustReachShown), held
         // through the uploads: the watch may follow a move meanwhile, and
         // the words go to that runner or nowhere (the backend refuses one
         // that no longer has the thread).
         const to = w.runnerId;
         const r = await this.withPictures(to, p.images, started, (images) =>
-          this.command(to, threadId, 'send', { text, ...(Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {}), ...(images.length ? { images } : {}) }, images.length ? { settleBy: started + REPLY_BUDGET_MS } : {}),
+          this.command(to, threadId, 'send', { text, ...(pageComments ? { pageComments } : {}), ...(Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {}), ...(images.length ? { images } : {}) }, images.length ? { settleBy: started + REPLY_BUDGET_MS } : {}),
         );
         // Not taken in TAKE_MS: it waits in the backend for that runner.
         return { turnId: '', ...(r.state === 'pending' ? { queued: true } : {}) };

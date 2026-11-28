@@ -1,4 +1,5 @@
 // WebSocket JSON-RPC 2.0 server at ws://127.0.0.1:<port>/rpc.
+import { pageCommentsInText } from './page-comments.ts';
 import type { YearTokenParams } from './year-token-maker.ts';
 import { EXPERIMENTS, experimentOn } from './experiments.ts';
 import http from 'node:http';
@@ -950,13 +951,22 @@ export class RpcServer {
       case 'threads.send': {
         // `ceiling`: set by the RPC gate for a thread's own key (runner/ceiling.ts).
         const origin = optSendOrigin(p);
-        return r.send(reqString(p, 'threadId'), optString(p, 'text') ?? '', optImages(p) ?? [], {
-          ...optAnswers(p), ...origin, ...(isPermissionMode(p.ceiling) ? { ceiling: p.ceiling } : {}),
+        const text = optString(p, 'text') ?? '';
+        const images = optImages(p) ?? [];
+        const pageComments = conn.caller ? undefined : pageCommentsInText(p.pageComments, text, images.length);
+        return r.send(reqString(p, 'threadId'), text, images, {
+          ...(pageComments ? { pageComments } : {}), ...optAnswers(p), ...origin, ...(isPermissionMode(p.ceiling) ? { ceiling: p.ceiling } : {}),
           botSource: conn.caller ? { kind: 'thread', threadId: conn.caller } : { kind: origin.origin ?? 'owner' },
         });
       }
-      case 'threads.edit':
-        return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), optString(p, 'text') ?? '', optImages(p) ?? [], { stopBackground: p.stopBackground === true });
+      case 'threads.edit': {
+        const text = optString(p, 'text') ?? '';
+        const images = optImages(p) ?? [];
+        const pageComments = conn.caller ? undefined : pageCommentsInText(p.pageComments, text, images.length);
+        return r.editMessage(reqString(p, 'threadId'), reqNumber(p, 'seq'), text, images, {
+          stopBackground: p.stopBackground === true, ...(pageComments ? { pageComments } : {}),
+        });
+      }
       case 'threads.interrupt':
         // Sent on for an agent's interrupt_thread (handover.ts), it isn't his Stop.
         return r.interrupt(reqString(p, 'threadId'), { byMike: p.byAgent !== true });

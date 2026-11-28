@@ -127,6 +127,8 @@ pub enum BoxChip {
     Picture(Option<ImageRef>),
     /// A card or a thread, whose text in the box is the link it stands for.
     Mention,
+    /// Page comments live beside the draft text. Only the position of this reference is saved here.
+    PageComment(String),
 }
 
 /// Whether the box holds anything a restart would lose: words, a picture
@@ -138,7 +140,7 @@ pub fn holds_anything(text: &str, chips: &[(Range<usize>, BoxChip)]) -> bool {
         || !images.is_empty()
         || chips
             .iter()
-            .any(|(_, c)| matches!(c, BoxChip::Picture(None)))
+            .any(|(_, c)| matches!(c, BoxChip::Picture(None) | BoxChip::PageComment(_)))
 }
 
 /// The draft in `range` of the box's `text` (ComposerTextView.draft(in:)):
@@ -152,12 +154,28 @@ pub fn draft_in(
     chips: &[(Range<usize>, BoxChip)],
     range: Range<usize>,
 ) -> (String, Vec<ImageRef>) {
+    let draft = draft_with_page_comments(text, chips, range);
+    (draft.text, draft.images)
+}
+
+#[derive(Default)]
+pub struct DraftContent {
+    pub text: String,
+    pub images: Vec<ImageRef>,
+    /// Byte offsets into `text`, in document order. Several comments may share one offset.
+    pub page_comments: Vec<(String, usize)>,
+}
+
+pub fn draft_with_page_comments(
+    text: &str,
+    chips: &[(Range<usize>, BoxChip)],
+    range: Range<usize>,
+) -> DraftContent {
     let end = range.end.min(text.len());
     let mut at = range.start.min(end);
-    let mut out = String::new();
-    let mut images = Vec::new();
+    let mut draft = DraftContent::default();
     if at == end {
-        return (out, images);
+        return draft;
     }
     for (chip_range, chip) in chips {
         // Only the chips the range reaches into.
@@ -165,22 +183,25 @@ pub fn draft_in(
             continue;
         }
         if chip_range.start > at {
-            out.push_str(&draft_words(&text[at..chip_range.start]));
+            draft
+                .text
+                .push_str(&draft_words(&text[at..chip_range.start]));
         }
         match chip {
             BoxChip::Picture(Some(image)) => {
-                out.push(PICTURE_MARK);
-                images.push(image.clone());
+                draft.text.push(PICTURE_MARK);
+                draft.images.push(image.clone());
             }
             BoxChip::Picture(None) => {}
-            BoxChip::Mention => out.push_str(&text[chip_range.clone()]),
+            BoxChip::Mention => draft.text.push_str(&text[chip_range.clone()]),
+            BoxChip::PageComment(id) => draft.page_comments.push((id.clone(), draft.text.len())),
         }
         at = chip_range.end.max(at);
     }
     if at < end {
-        out.push_str(&draft_words(&text[at..end]));
+        draft.text.push_str(&draft_words(&text[at..end]));
     }
-    (out, images)
+    draft
 }
 
 /// What a copy or cut of chips puts on the clipboard: the words as the agent

@@ -275,6 +275,26 @@ Both sides ignore fields they don't know; the app leaves out a row whose
 `kind` it doesn't know, and draws a row whose `id` it doesn't know in grey
 after the ones it does.
 
+## Page comments in a message
+
+The desktop browser attaches a page comment as an inline reference in the
+originating thread's unsent draft. A sent comment is ordinary readable
+`text` and, when available, an entry in the existing `images` list. Neither
+older clients nor the agent need to understand a special marker to read it.
+
+The owner's `threads.send` and `threads.edit` may also carry `pageComments`.
+The matching `user.message` retains this optional display information. Each
+entry has `block`, `title`, `url`, `target`, and `comment` as pairs of
+zero-based UTF-8 byte offsets, start inclusive and end exclusive, into the
+exact `text` sent. `block` is the full fallback text for that comment. The
+other pairs lie inside it, in order. `image`, when given, is a zero-based
+index in `images`. The records are in text order and do not overlap.
+Only the supported ranges and image index are projected, with no extra text,
+paths or other fields. Invalid ranges, or versions that do not support the
+display information, leave the original readable text and images in place.
+Relay projects ranges only while it can preserve the text and the image
+index. Thread-scoped RPC keys cannot set the field.
+
 ## Editing a message
 
 Mike can go back to one of his own messages, change it and carry on from

@@ -16,7 +16,7 @@ export type LabLedger = LabReviewLedger & { delivered?: number; answered?: numbe
 // A reviewer's verdict: its findings, none when nothing holds up.
 export type ReviewVerdict = { findings: Pick<ReviewFinding, 'severity' | 'claim' | 'where' | 'case'>[] };
 
-export type QueuedSend = { beforeMessage?: true; retryAfterInterrupt?: true; preserveSchedule?: boolean; scheduledSince?: number; turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; ceiling?: PermissionMode; seq?: number; botInput?: BotInputRef };
+export type QueuedSend = { beforeMessage?: true; retryAfterInterrupt?: true; preserveSchedule?: boolean; scheduledSince?: number; turnId: string; text: string; images: ImageRef[]; pageComments?: import('./page-comments.ts').PageCommentRef[]; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; ceiling?: PermissionMode; seq?: number; botInput?: BotInputRef };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 // A report held for a thread from one it started (runner/nested.ts).

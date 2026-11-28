@@ -22,7 +22,7 @@ export const editingPart = {
   // (docs/protocol/threads.md, "Editing a message"): the turn stops, the native
   // session is cut back to just before the message, the agent's file
   // changes since are put back, and the new text starts a turn.
-  async editMessage(this: Runner, threadId: string, seq: number, text: string, images: ImageRef[] = [], opts: { stopBackground?: boolean } = {}): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
+  async editMessage(this: Runner, threadId: string, seq: number, text: string, images: ImageRef[] = [], opts: { stopBackground?: boolean; pageComments?: import('../page-comments.ts').PageCommentRef[] } = {}): Promise<{ turnId: string; rewound: { seq: number; fromSeq: number; toSeq: number; files: RewoundFiles } }> {
     const st = this.mustGet(threadId);
     const { rec, rt } = st;
     this.checkAccepting();
@@ -134,7 +134,7 @@ export const editingPart = {
       rt.editing = false;
       // The edited message goes first; anything sent during the edit after it.
       const later = rec.queue.splice(0);
-      const turnId = this.sendTo(st, text, images, { editOf: seq });
+      const turnId = this.sendTo(st, text, images, { editOf: seq, ...(opts.pageComments ? { pageComments: opts.pageComments } : {}) });
       if (later.length) {
         rec.queue.push(...later);
         this.markDirty(st);

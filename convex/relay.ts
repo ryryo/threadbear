@@ -9,6 +9,7 @@
 // Read rules (docs/convex-backend.md, "Read rules"): the live tail is a few rows, older pages
 // are read once and kept on the runner, a thread's row is one document, and
 // a command's state is one get by id.
+import { pageComments, pageCommentsInText } from './pageComments';
 import { ConvexError, v } from 'convex/values';
 import type { OrderedQuery } from 'convex/server';
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
@@ -50,6 +51,7 @@ const relayRow = v.object({
   // The asks a user's message answered (API 89), so another Mac draws them
   // as answers.
   answers: v.optional(v.array(v.object({ action: v.string(), answer: v.string() }))),
+  pageComments: v.optional(pageComments),
   // Why the runner sent its own message (API 98), so another Mac heads its
   // note as that runner's own Mac does.
   wakeReason: v.optional(v.string()),
@@ -57,7 +59,7 @@ const relayRow = v.object({
 });
 
 type Button = { id: string; title: string; kind: 'start' | 'send'; target?: string; pressedThreadId?: string; failed?: string };
-type Row = { seq: number; role: 'user' | 'assistant' | 'tool' | 'note'; text: string; origin?: string; toolKind?: string; summary?: boolean; plan?: boolean; planDecision?: 'go' | 'revise'; turn?: string; wokeBy?: { kind: string; description: string }[]; buttons?: Button[]; pictures?: number; answers?: { action: string; answer: string }[]; wakeReason?: string; at: string };
+type Row = { seq: number; role: 'user' | 'assistant' | 'tool' | 'note'; text: string; origin?: string; toolKind?: string; summary?: boolean; plan?: boolean; planDecision?: 'go' | 'revise'; turn?: string; wokeBy?: { kind: string; description: string }[]; buttons?: Button[]; pictures?: number; answers?: { action: string; answer: string }[]; pageComments?: ReturnType<typeof pageCommentsInText>; wakeReason?: string; at: string };
 function toRow(m: Row): Row {
   return {
     seq: m.seq,
@@ -76,6 +78,7 @@ function toRow(m: Row): Row {
     // Only a count a message could have: a runner key writes what it likes.
     ...(m.role === 'user' && Number.isSafeInteger(m.pictures) && m.pictures! >= 1 && m.pictures! <= 999 ? { pictures: m.pictures } : {}),
     ...(m.role === 'user' && m.answers?.length ? { answers: m.answers } : {}),
+    ...(m.role === 'user' && m.pageComments?.length ? { pageComments: m.pageComments } : {}),
     ...(m.role === 'user' && m.origin === 'runner' && m.wakeReason ? { wakeReason: m.wakeReason } : {}),
     at: m.at,
   };
@@ -274,15 +277,18 @@ function pick(o: Record<string, unknown>, keys: string[]): Record<string, unknow
   return out;
 }
 
-export function commandArgs(kind: Kind, raw: unknown): Record<string, unknown> {
+export function commandArgs(kind: Kind, raw: unknown, imageCount = 0): Record<string, unknown> {
   const a = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const bad = (why: string) => new ConvexError({ kind: 'badArgs', message: why });
   let out: Record<string, unknown>;
   switch (kind) {
-    case 'send':
-      if (str(a.text) === undefined) throw bad('a send needs text');
-      out = pick(a, ['text', 'answers']);
+    case 'send': {
+      const text = str(a.text);
+      if (text === undefined) throw bad('a send needs text');
+      const refs = pageCommentsInText(a.pageComments, text, imageCount);
+      out = { ...pick(a, ['text', 'answers']), ...(refs ? { pageComments: refs } : {}) };
       break;
+    }
     case 'respond':
       if (!str(a.approvalId) || !['allow', 'allowAlways', 'deny', 'answered'].includes(String(a.decision))) throw bad('a respond needs approvalId and decision');
       // A secret's answer only ever goes sealed to that runner's key.
@@ -403,7 +409,7 @@ export const queueCommand = mutation({
   args: { key: v.string(), runnerId: v.string(), threadId: v.optional(v.string()), kind: v.union(...KINDS.map((k) => v.literal(k))), args: v.any() },
   returns: v.id('commands'),
   handler: async (ctx, { key, runnerId, threadId, kind, args }) => {
-    await runnerAuth(ctx, key, 'queueCommand');
+    const caller = await runnerAuth(ctx, key, 'queueCommand');
     checkRunnerId(runnerId);
     const runner = await ctx.db.query('runners').withIndex('by_runnerId', (q) => q.eq('runnerId', runnerId)).unique();
     if (!runner) throw new ConvexError({ kind: 'notFound', message: 'no such runner' });
@@ -421,7 +427,9 @@ export const queueCommand = mutation({
       throw new ConvexError({ kind: 'badArgs', message: "That runner is one thread's box on a virtual runner: it takes no new threads." });
     }
     const images = kind === 'send' || kind === 'create' ? await commandPictures(ctx, (args as { images?: unknown } | null)?.images) : [];
-    const commandId = await queued(ctx, { runnerId, ...(threadId !== undefined ? { threadId } : {}), kind, args: { ...commandArgs(kind, args), ...(images.length ? { images } : {}), from: 'mac' }, createdAt: Date.now() });
+    const params = commandArgs(kind, args, images.length);
+    if (caller.box) delete params.pageComments;
+    const commandId = await queued(ctx, { runnerId, ...(threadId !== undefined ? { threadId } : {}), kind, args: { ...params, ...(images.length ? { images } : {}), from: 'mac' }, createdAt: Date.now() });
     // On their way, so nothing deletes them before that runner has fetched
     // them; sync:finishCommand deletes them once it has (as a phone's photos).
     for (const image of images) await ctx.db.insert('commandFiles', { storageId: image.storageId, commandId });

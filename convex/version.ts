@@ -517,4 +517,5 @@
 // 110: durable scoped note erasure in the mirror and retention of receipt provenance.
 // 111: retired Bot workspace sources must acknowledge local copies of note erasures.
 // 112: registered paired draft stores acknowledge deletion before a Bot note erasure finishes.
-export const API_VERSION = 112;
+// 113: page-comment display ranges in messages and desktop relay sends.
+export const API_VERSION = 113;

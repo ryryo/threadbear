@@ -11,6 +11,7 @@
 // key the deployment's RUNNER_KEY was set to (`npx convex env set`).
 // THREADBEAR_SYNC=off turns it off whatever runner.json says, which
 // check.sh sets so no test runner ever writes to the real project.
+import { PAGE_COMMENTS_API, pageCommentsInText, type PageCommentRef } from './page-comments.ts';
 import { MEMORY_API_VERSION, type MemoryBackend, type MemoryOffer, type MemoryRow } from './memory-sync.ts';
 import { wellFormedJson } from './well-formed-json.ts';
 import { moveInfoFrom, type MoveInfo, type MovePreview, type MoveRow, type MovesBackend } from './moves.ts';
@@ -173,7 +174,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 112;
+export const BACKEND_API_VERSION = 113;
 export const BOT_SCHEDULE_API_VERSION = 107;
 export const BOT_WORKSPACE_API_VERSION = 108;
 export const BOT_WORKER_API_VERSION = 109;
@@ -571,7 +572,7 @@ export type PhoneAsk = { action: string; why?: string; reply?: string; options?:
 // A text message, or one line for a tool call (role "tool", since backend
 // API 2): what the phone and the website show of a thread.
 export type WokeByDoc = { kind: string; description: string };
-export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool' | 'note'; text: string; origin?: string; toolKind?: string; summary?: true; plan?: true; planDecision?: 'go' | 'revise'; turn?: string; wokeBy?: WokeByDoc[]; buttons?: MessageButton[]; pictures?: number; answers?: AskAnswer[]; wakeReason?: string; at: string; pagedAt?: number };
+export type MessageDoc = { threadId: string; seq: number; role: 'user' | 'assistant' | 'tool' | 'note'; text: string; origin?: string; toolKind?: string; summary?: true; plan?: true; planDecision?: 'go' | 'revise'; turn?: string; wokeBy?: WokeByDoc[]; buttons?: MessageButton[]; pictures?: number; answers?: AskAnswer[]; pageComments?: PageCommentRef[]; wakeReason?: string; at: string; pagedAt?: number };
 // A reply button as a message row carries it (API 59): enough to draw it
 // and say where it goes, never its brief or message, which stay on the Mac.
 // target: the new thread's folder name, or the title of the thread it messages.
@@ -693,7 +694,7 @@ export type CommandHost = {
   botProfileEdit?: (input: Record<string, unknown>, scrub: (text: string) => string) => unknown;
   botDeviceAction?: (input: Record<string, unknown>, scrub: (text: string) => string) => unknown;
   // origin: absent for a message Mike sent from the main Mac (a command `from: "mac"`).
-  send(threadId: string, text: string, images: ImageRef[], opts: { origin?: 'phone'; answers?: AskAnswer[] }): unknown;
+  send(threadId: string, text: string, images: ImageRef[], opts: { origin?: 'phone'; answers?: AskAnswer[]; pageComments?: PageCommentRef[] }): unknown;
   respondApproval(p: { threadId: string; approvalId: string; decision: ApprovalDecision; message?: string; answers?: Record<string, string>; remote?: boolean }): unknown;
   answerSecret(p: { threadId: string; approvalId: string; secret?: string; decline?: boolean }): unknown;
   update(p: {
@@ -1333,6 +1334,10 @@ export function toMessageDoc(threadId: string, e: PersistedEvent, scrub: (text: 
   // the words: a typed "[Picture 2]" isn't one, and the cut above can take
   // the only marker (Codex's review, 18 Nov).
   if (e.type === 'user.message' && e.images?.length) doc.pictures = e.images.length;
+  if (e.type === 'user.message' && e.pageComments && !e.origin && clean === e.text && cut === clean) {
+    const comments = pageCommentsInText(e.pageComments, text, e.images?.length ?? 0);
+    if (comments) doc.pageComments = comments;
+  }
   // The asks it answered, scrubbed as its words are, so the phone draws
   // them as the Mac does (it finds them at the start of the text).
   if (e.type === 'user.message' && e.answers?.length) {
@@ -1840,11 +1845,18 @@ export class ConvexSync {
       // since): a message's answers go only as that text still says them
       // (Codex's review, 18 Nov).
       if (fn === 'sync:appendMessages' && Array.isArray(clean.messages)) {
-        clean.messages = (clean.messages as MessageDoc[]).map((m) => {
-          if (!m.answers) return m;
-          const { answers, ...rest } = m;
-          const kept = answersInText(m.text, answers);
-          return kept ? { ...rest, answers: kept } : rest;
+        const original = Array.isArray(args.messages) ? args.messages as MessageDoc[] : [];
+        clean.messages = (clean.messages as MessageDoc[]).map((m, index) => {
+          const { answers, pageComments, ...rest } = m;
+          const keptAnswers = answers ? answersInText(m.text, answers) : undefined;
+          const keptComments = (this.backendApiVersion ?? 0) >= PAGE_COMMENTS_API
+            && original[index]?.text === m.text && m.role === 'user' && !m.origin
+            ? pageCommentsInText(pageComments, m.text, m.pictures ?? 0) : undefined;
+          return {
+            ...rest,
+            ...(keptAnswers ? { answers: keptAnswers } : {}),
+            ...(keptComments ? { pageComments: keptComments } : {}),
+          };
         });
       }
       return send(kind, fn, clean);
@@ -5300,7 +5312,15 @@ export class ConvexSync {
       }
       case 'send': {
         const text = commandText(a);
-        await this.withPhoneImages(a.images, (images) => host.send(needThread(), text, images, { ...origin, ...(phoneAnswers(a.answers) ? { answers: phoneAnswers(a.answers) } : {}) }));
+        await this.withPhoneImages(a.images, (images) => {
+          const pageComments = a.from === 'mac' ? pageCommentsInText(a.pageComments, text, images.length) : undefined;
+          const answers = phoneAnswers(a.answers);
+          return host.send(needThread(), text, images, {
+            ...origin,
+            ...(answers ? { answers } : {}),
+            ...(pageComments ? { pageComments } : {}),
+          });
+        });
         return undefined;
       }
       case 'respond': {

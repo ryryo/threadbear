@@ -1,5 +1,5 @@
-// T3 Code's picker runs in the live page. GPUI owns the comment and the
-// review, so a site never receives the comment's keystrokes or the draft ID.
+// T3 Code's picker runs in the live page. GPUI owns the comment, so the site
+// never receives the comment's keystrokes or its destination draft.
 
 mod geometry;
 mod live;
@@ -9,28 +9,50 @@ use crate::highlights::{palette, SidePane};
 use crate::push_button::PushButton;
 use crate::style::px;
 use geometry::clean_url;
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _};
+use gpui_kit::component::input::{Enter, Escape, InputEvent, Textarea, TextareaState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
-use live::{Anchor, Capture, LivePicker};
+use live::{Anchor, LivePicker};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use threadbear_core::reducer::ImageRef;
 use threadbear_core::tr;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct PageNote {
-    url: String,
-    title: String,
-    target: String,
-    comment: String,
-    image: Option<Value>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub(crate) id: String,
+    /// UTF-8 offset in the serialized draft. Older comments had no position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) offset: Option<usize>,
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) target: String,
+    pub(crate) comment: String,
+    pub(crate) image: Option<Value>,
 }
 
 impl PageNote {
+    pub(crate) fn identify(&mut self) {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        if self.id.is_empty() {
+            self.id = format!(
+                "page-comment-{}-{}",
+                crate::now_ms(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+        }
+    }
+
+    pub(crate) fn label(&self) -> String {
+        threadbear_core::page_comments::label(&self.comment, &self.title)
+            .unwrap_or_else(|| tr!("Page comment").into())
+    }
+
     pub(crate) fn image(&self) -> Option<ImageRef> {
         self.image.as_ref().and_then(ImageRef::decode)
     }
@@ -52,6 +74,8 @@ pub(crate) struct Pick {
     ready: bool,
     element: bool,
     target: Option<String>,
+    version: u32,
+    prior_focus: Option<FocusHandle>,
     anchor: Option<Anchor>,
     editor: Rc<Cell<Option<Bounds<Pixels>>>>,
     comment: Entity<TextareaState>,
@@ -61,12 +85,7 @@ pub(crate) struct Pick {
 
 enum Phase {
     Selecting,
-    Capturing,
-    Review {
-        capture: Option<Capture>,
-        keep: bool,
-    },
-    Saving,
+    Attaching,
 }
 
 impl Pick {
@@ -82,8 +101,23 @@ impl Pick {
 
 impl Drop for Pick {
     fn drop(&mut self) {
-        self.live.stop();
+        if matches!(self.phase, Phase::Selecting) {
+            self.live.stop();
+        }
     }
+}
+
+/// AnnotationKeyboard.ts at T3 Code c2fcbd79523e accepts Control as well as
+/// Command. The ordinary GPUI text area uses the platform's command key.
+pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new(
+        "ctrl-enter",
+        Enter {
+            secondary: true,
+            shift: false,
+        },
+        Some("BrowserNote"),
+    )]);
 }
 
 impl SidePane {
@@ -107,18 +141,9 @@ impl SidePane {
                 .auto_grow(1, 4)
                 .submit_on_enter(true)
         });
-        let comment_events = cx.subscribe_in(&comment, window, |this, _, event, window, cx| {
+        let comment_events = cx.subscribe(&comment, |_, _, event, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
-                return;
-            }
-            let InputEvent::PressEnter { shift: false, .. } = event else {
-                return;
-            };
-            match this.browser_pick.as_ref().map(|pick| &pick.phase) {
-                Some(Phase::Selecting) => this.review_browser_note(cx),
-                Some(Phase::Review { .. }) => this.attach_browser_note(window, cx),
-                _ => {}
             }
         });
         let live = Rc::new(LivePicker::new(page.clone()));
@@ -131,6 +156,8 @@ impl SidePane {
             ready: false,
             element,
             target: None,
+            version: 0,
+            prior_focus: window.focused(cx),
             anchor: None,
             editor: Rc::new(Cell::new(None)),
             comment,
@@ -165,7 +192,7 @@ impl SidePane {
                     }
                     let target = selection.label();
                     pick.anchor = selection.anchor;
-                    if selection.moved {
+                    if selection.moved && selection.version == pick.version {
                         cx.notify();
                         return true;
                     }
@@ -174,6 +201,7 @@ impl SidePane {
                         crate::web_panels::keyboard_to_app(window);
                     }
                     pick.target = target;
+                    pick.version = selection.version;
                     this.browser_note_error = if selection.frame {
                         Some(tr!("Use Select area to mark something inside a frame."))
                     } else if selection.small {
@@ -210,9 +238,10 @@ impl SidePane {
             .filter(|p| std::ptr::eq(p.live.as_ref(), live))
     }
 
-    pub(crate) fn cancel_browser_note(&mut self) {
-        self.browser_pick = None;
-        self.browser_note_error = None;
+    pub(crate) fn cancel_browser_note(&mut self) -> bool {
+        let pick = self.browser_pick.take();
+        let error = self.browser_note_error.take();
+        pick.is_some() || error.is_some()
     }
 
     pub(crate) fn sync_browser_note(&mut self, thread: &str, cx: &mut Context<Self>) {
@@ -234,140 +263,157 @@ impl SidePane {
         else {
             return Value::Null;
         };
-        let Phase::Review { capture, .. } = &pick.phase else {
-            let (x, y, w, h) = pick.live.page.bounds();
-            let editor = pick
-                .editor
-                .get()
-                .filter(|_| pick.anchor.is_some())
-                .map(|b| {
-                    [
-                        f32::from(b.origin.x) - x,
-                        f32::from(b.origin.y) - y,
-                        f32::from(b.size.width),
-                        f32::from(b.size.height),
-                    ]
-                });
-            let target_rect = pick.anchor.map(|a| [a.x * w, a.y * h, a.w * w, a.h * h]);
-            return json!({
-                "editor": editor,
-                "targetRect": target_rect,
-                "ready": pick.ready,
-                "target": pick.target,
-                "comment": pick.comment.read(cx).value().to_string(),
+        let (x, y, w, h) = pick.live.page.bounds();
+        let editor = pick
+            .editor
+            .get()
+            .filter(|_| pick.anchor.is_some())
+            .map(|b| {
+                [
+                    f32::from(b.origin.x) - x,
+                    f32::from(b.origin.y) - y,
+                    f32::from(b.size.width),
+                    f32::from(b.size.height),
+                ]
             });
-        };
         json!({
-            "ready": true,
+            "editor": editor,
+            "targetRect": pick.anchor.map(|a| [a.x * w, a.y * h, a.w * w, a.h * h]),
+            "ready": pick.ready,
             "target": pick.target,
             "comment": pick.comment.read(cx).value().to_string(),
-            "review": true,
-            "crop": capture.as_ref().map(|capture| &capture.proof),
+            "attaching": matches!(pick.phase, Phase::Attaching),
         })
     }
 
-    fn review_browser_note(&mut self, cx: &mut Context<Self>) {
-        let Some(pick) = self
-            .browser_pick
-            .as_mut()
-            .filter(|p| p.target.is_some() && matches!(p.phase, Phase::Selecting))
-        else {
-            return;
-        };
-        pick.phase = Phase::Capturing;
-        self.browser_note_error = None;
-        let live = pick.live.clone();
-        cx.spawn(async move |this, cx| {
-            let capture = live.capture(cx).await;
-            let _ = this.update(cx, |this, cx| {
-                let Some(pick) = this
-                    .pick_for(&live)
-                    .filter(|p| matches!(p.phase, Phase::Capturing))
-                else {
-                    return;
-                };
-                pick.phase = Phase::Review {
-                    keep: capture.is_some(),
-                    capture,
-                };
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn attach_browser_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm_browser_note(&mut self, send: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(thread) = self.thread(cx) else {
             return;
         };
-        let Some(pick) = self
-            .browser_pick
-            .as_mut()
-            .filter(|p| p.valid(&thread.id, cx))
-        else {
-            return;
-        };
-        let Phase::Review { capture, keep } = &pick.phase else {
+        let Some(pick) = self.browser_pick.as_mut().filter(|p| {
+            matches!(p.phase, Phase::Selecting)
+                && p.valid(&thread.id, cx)
+                && !p.comment.read(cx).has_composition()
+        }) else {
             return;
         };
         let Some(target) = pick.target.clone() else {
             return;
         };
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let composer = app.update(cx, |app, cx| app.composer_for(&thread.id, window, cx));
+        if send && !composer.read(cx).browser_comment_can_send(cx) {
+            return;
+        }
         let mut note = PageNote {
+            id: String::new(),
+            offset: None,
             url: clean_url(&pick.address).to_owned(),
             title: pick.title.clone(),
             target,
             comment: pick.comment.read(cx).value().trim().to_owned(),
             image: None,
         };
-        let image = capture
-            .as_ref()
-            .filter(|_| *keep)
-            .map(|capture| capture.image.clone());
-        let wants_image = image.is_some();
-        let client = self.client.clone();
-        let Some(app) = self.app.upgrade() else {
-            return;
-        };
-        let composer = app.update(cx, |app, cx| app.composer_for(&thread.id, window, cx));
+        note.identify();
+        composer.update(cx, |composer, cx| {
+            composer.begin_page_note(note.clone(), cx)
+        });
+        let send_state = send.then(|| composer.read(cx).browser_comment_send_state(cx));
+        app.update(cx, |app, cx| app.persist_page_comment(cx));
         let live = pick.live.clone();
-        live.stop();
-        pick.phase = Phase::Saving;
-        cx.spawn(async move |this, cx| {
-            if let Some(image) = image {
-                let staged = cx
+        let version = pick.version;
+        let client = self.client.clone();
+        let prior_focus = pick.prior_focus.clone();
+        let comment_focus = pick.comment.read(cx).focus_handle(cx);
+        let origin = thread.id;
+        self.browser_note_error = None;
+        pick.phase = Phase::Attaching;
+        pick.editor.set(None);
+
+        cx.spawn_in(window, async move |pane, cx| {
+            // Once accepted, capture and attachment belong to the originating
+            // composer even if the page or the pane is closed meanwhile.
+            let capture = live.capture(version, cx).await;
+            live.stop();
+            if let Some(capture) = capture {
+                let path = cx
                     .background_executor()
                     .spawn(async move {
                         crate::composer::stage_private(
                             &crate::composer::paste_base(),
                             "page-comment.png",
-                            &image.bytes,
+                            &capture.image.bytes,
                         )
                     })
                     .await;
-                if let Some(path) = staged {
-                    let imported = crate::call(client, "media.import", json!({"path":path}))
+                if let Some(path) = path {
+                    let imported = crate::call(client, "media.import", json!({"path": path}))
                         .await
                         .ok();
-                    note.image = imported.and_then(|val| {
-                        ImageRef::decode(&val["image"]).map(|i| crate::composer::image_ref_json(&i))
+                    note.image = imported.and_then(|reply| {
+                        ImageRef::decode(&reply["image"])
+                            .map(|image| crate::composer::image_ref_json(&image))
                     });
                     crate::composer::unstage(&path);
                 }
             }
-            let failed = wants_image && note.image.is_none();
-            let _ = this.update(cx, |this, cx| {
-                composer.update(cx, |composer, cx| composer.add_page_note(note, cx));
-                if this.pick_for(&live).is_some() {
-                    this.cancel_browser_note();
-                    if failed {
-                        this.browser_note_error =
-                            Some(tr!("The comment was added without an image."));
-                    }
+            let mut accepted = Some(note);
+            let _ = cx.update(|window, cx| {
+                let Some(note) = accepted.take() else { return };
+                let no_image = note.image.is_none();
+                let visible = pane
+                    .update(cx, |pane, cx| {
+                        let current = pane.pick_for(&live).is_some();
+                        let valid = current
+                            && pane.dock_showing(crate::highlights::BROWSER, cx)
+                            && pane
+                                .browser_pick
+                                .as_ref()
+                                .is_some_and(|pick| pick.valid(&origin, cx));
+                        if current {
+                            pane.cancel_browser_note();
+                            cx.notify();
+                        }
+                        valid
+                    })
+                    .unwrap_or(false);
+                let visible = visible && app.read(cx).selected.as_deref() == Some(origin.as_str());
+                let send = composer.update(cx, |composer, cx| {
+                    composer.finish_page_note_capture(&note.id);
+                    let send = send_state.as_ref().is_some_and(|before| {
+                        visible
+                            && composer.browser_comment_can_send(cx)
+                            && before == &composer.browser_comment_send_state(cx)
+                    });
+                    composer.add_page_note(note, window, cx) && send
+                });
+                if visible && no_image {
+                    window.push_notification(tr!("The comment was added without an image."), cx);
                 }
-                cx.notify();
+                // Persist the attached payload before trying to send it.
+                let saved = app.update(cx, |app, cx| app.persist_page_comment(cx));
+                if send && saved {
+                    composer.update(cx, |composer, cx| composer.send(window, cx));
+                }
+                let focus = window.focused(cx);
+                if visible && (focus.is_none() || focus.as_ref() == Some(&comment_focus)) {
+                    if let Some(focus) = prior_focus {
+                        window.focus(&focus, cx);
+                    }
+                    crate::web_panels::keyboard_to_app(window);
+                }
             });
+            if let Some(note) = accepted {
+                // An accepted comment still belongs to its draft when its
+                // floating browser window closes during the image import.
+                composer.update(cx, |composer, cx| {
+                    composer.finish_page_note_capture(&note.id);
+                    composer.queue_page_note(note, cx);
+                });
+                app.update(cx, |app, cx| app.persist_page_comment(cx));
+            }
         })
         .detach();
         cx.notify();
@@ -375,7 +421,7 @@ impl SidePane {
 
     pub(crate) fn render_browser_note_toolbar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pick = self.browser_pick.as_ref()?;
-        if !matches!(pick.phase, Phase::Selecting | Phase::Capturing) {
+        if !matches!(pick.phase, Phase::Selecting) {
             return None;
         }
         let mode = cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -388,7 +434,15 @@ impl SidePane {
                 cx.notify();
             }
         });
-        let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
+        let cancel = cx.listener(|this, _: &ClickEvent, window, cx| {
+            if let Some(focus) = this
+                .browser_pick
+                .as_ref()
+                .and_then(|pick| pick.prior_focus.as_ref())
+            {
+                window.focus(focus, cx);
+            }
+            crate::web_panels::keyboard_to_app(window);
             this.cancel_browser_note();
             cx.notify();
         });
@@ -409,7 +463,7 @@ impl SidePane {
                         tr!("Switch selection mode without clearing the comment"),
                     )
                     .small()
-                    .disabled(!pick.ready || !matches!(pick.phase, Phase::Selecting))
+                    .disabled(!pick.ready)
                     .render(cx, mode),
                 )
                 .child(
@@ -428,7 +482,7 @@ impl SidePane {
     pub(crate) fn render_browser_note_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pick = self.browser_pick.as_ref()?;
         let anchor = pick.anchor?;
-        if !matches!(pick.phase, Phase::Selecting | Phase::Capturing) {
+        if !matches!(pick.phase, Phase::Selecting) {
             return None;
         }
         let page = pick.live.page.clone();
@@ -468,188 +522,68 @@ impl SidePane {
         )
     }
 
-    pub(crate) fn render_browser_note_review_controls(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let pick = self.browser_pick.as_ref()?;
-        matches!(pick.phase, Phase::Review { .. } | Phase::Saving)
-            .then(|| self.render_browser_note_controls(cx))
-            .flatten()
-    }
-
     fn render_browser_note_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pick = self.browser_pick.as_ref()?;
-        let p = palette(cx);
-        let summary = self.browser_note_error.unwrap_or(match &pick.phase {
-            Phase::Selecting if !pick.ready => tr!("Starting selection…"),
-            Phase::Selecting => pick.target.as_deref().unwrap_or(if pick.element {
-                tr!("Click an element to select it.")
-            } else {
-                tr!("Drag over the area to select it.")
-            }),
-            Phase::Capturing => tr!("Capturing the selected area…"),
-            Phase::Review { capture: None, .. } => {
-                tr!("No image was captured. You can still add the comment.")
-            }
-            Phase::Review { .. } => tr!("Review the image and comment."),
-            Phase::Saving => tr!("Adding the comment to the draft…"),
+        let attach = cx.listener(|this, _: &ClickEvent, window, cx| {
+            this.confirm_browser_note(false, window, cx)
         });
-        let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
-            this.cancel_browser_note();
-            cx.notify();
-        });
-        let compact = matches!(pick.phase, Phase::Selecting | Phase::Capturing);
-        let mut controls = h_flex().flex_wrap().gap(px(5.)).when(!compact, |row| {
-            row.child(
-                PushButton::new(
-                    "browser-note-cancel",
-                    tr!("Cancel"),
-                    tr!("Cancel page comment"),
-                )
-                .small()
-                .disabled(matches!(pick.phase, Phase::Saving))
-                .render(cx, cancel),
-            )
-        });
-        match &pick.phase {
-            Phase::Selecting | Phase::Capturing => {
-                let review =
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.review_browser_note(cx));
-                controls = controls.child(
-                    PushButton::new(
-                        "browser-note-review",
-                        tr!("Review"),
-                        tr!("Review selected page area"),
-                    )
-                    .small()
-                    .busy(matches!(pick.phase, Phase::Capturing))
-                    .disabled(pick.target.is_none())
-                    .render(cx, review),
-                );
-            }
-            Phase::Review { keep, capture } => {
-                let retry = cx.listener(|this, _: &ClickEvent, _, cx| {
-                    if let Some(pick) = &mut this.browser_pick {
-                        pick.live.resume();
-                        pick.phase = Phase::Selecting;
-                        cx.notify();
-                    }
-                });
-                let image = cx.listener(|this, _: &ClickEvent, _, cx| {
-                    if let Some(Pick {
-                        phase: Phase::Review { keep, .. },
-                        ..
-                    }) = &mut this.browser_pick
-                    {
-                        *keep = !*keep;
-                        cx.notify();
-                    }
-                });
-                let attach = cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.attach_browser_note(window, cx)
-                });
-                controls = controls
-                    .child(
-                        PushButton::new(
-                            "browser-note-retry",
-                            tr!("Choose again"),
-                            tr!("Return to page selection"),
-                        )
-                        .small()
-                        .render(cx, retry),
-                    )
-                    .when(capture.is_some(), |controls| {
-                        controls.child(
-                            PushButton::new(
-                                "browser-note-image",
-                                if *keep {
-                                    tr!("Skip image")
-                                } else {
-                                    tr!("Include image")
-                                },
-                                tr!("Choose whether the cutout is attached"),
-                            )
-                            .small()
-                            .render(cx, image),
-                        )
-                    })
-                    .child(
-                        PushButton::new(
-                            "browser-note-add",
-                            tr!("Add to draft"),
-                            tr!("Attach to this thread's draft"),
-                        )
-                        .small()
-                        .render(cx, attach),
-                    );
-            }
-            Phase::Saving => {}
-        }
-        let field = Textarea::new(&pick.comment)
-            .small()
-            .disabled(matches!(pick.phase, Phase::Saving));
-        let editor = if compact {
-            h_flex()
-                .items_start()
-                .gap(px(6.))
-                .child(div().flex_1().min_w_0().child(field))
-                .child(controls.flex_none())
-                .into_any_element()
-        } else {
-            v_flex()
-                .gap(px(4.))
-                .child(field)
-                .child(controls)
-                .into_any_element()
-        };
         Some(
             v_flex()
+                .key_context("BrowserNote")
                 .p(px(6.))
                 .gap(px(4.))
                 .flex_none()
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "escape"
-                        && this
-                            .browser_pick
-                            .as_ref()
-                            .is_some_and(|p| !matches!(p.phase, Phase::Saving))
-                    {
-                        this.cancel_browser_note();
-                        cx.stop_propagation();
-                        cx.notify();
+                .on_action(cx.listener(|this, enter: &Enter, window, cx| {
+                    if enter.shift {
+                        cx.propagate();
+                    } else {
+                        this.confirm_browser_note(enter.secondary, window, cx);
                     }
                 }))
-                .when(!compact || self.browser_note_error.is_some(), |card| {
+                .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                    let Some(pick) = this.browser_pick.as_ref().filter(|pick| {
+                        matches!(pick.phase, Phase::Selecting)
+                            && !pick.comment.read(cx).has_composition()
+                    }) else {
+                        return;
+                    };
+                    if let Some(focus) = pick.prior_focus.clone() {
+                        window.focus(&focus, cx);
+                    }
+                    crate::web_panels::keyboard_to_app(window);
+                    this.cancel_browser_note();
+                    cx.notify();
+                }))
+                .when_some(self.browser_note_error, |card, error| {
                     card.child(
                         div()
-                            .text_color(p.secondary)
+                            .text_color(palette(cx).failed)
                             .truncate()
-                            .child(summary.to_owned()),
+                            .child(error.to_owned()),
                     )
                 })
-                .child(editor)
+                .child(
+                    h_flex()
+                        .items_start()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(Textarea::new(&pick.comment).small()),
+                        )
+                        .child(
+                            PushButton::new(
+                                "browser-note-attach",
+                                tr!("Attach"),
+                                tr!("Attach to this thread's draft"),
+                            )
+                            .small()
+                            .disabled(pick.target.is_none())
+                            .render(cx, attach),
+                        ),
+                )
                 .into_any_element(),
         )
-    }
-
-    pub(crate) fn render_browser_note_review(&self, cx: &App) -> Option<AnyElement> {
-        match &self.browser_pick.as_ref()?.phase {
-            Phase::Review {
-                capture: Some(capture),
-                keep: true,
-            } => Some(
-                img(crate::fit_picture::bytes_source(capture.image.clone()))
-                    .size_full()
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element(),
-            ),
-            Phase::Review { .. } => Some(
-                crate::files::pane_note(tr!("No image will be attached."), palette(cx))
-                    .into_any_element(),
-            ),
-            Phase::Saving => Some(div().into_any_element()),
-            _ => None,
-        }
     }
 }

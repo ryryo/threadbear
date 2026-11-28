@@ -2343,6 +2343,7 @@ export class Runner {
     if (opts.preserveSchedule !== undefined) msg.preserveSchedule = opts.preserveSchedule;
     if (opts.scheduledSince !== undefined) msg.scheduledSince = opts.scheduledSince;
     if (opts.answers?.length) msg.answers = opts.answers;
+    if (opts.pageComments?.length) msg.pageComments = opts.pageComments;
     if (opts.editOf) msg.editOf = opts.editOf;
     // Every message this release queues says its ceiling ('full' for none),
     // so one with none at all is from an older release (legacyCeiling).
@@ -5968,7 +5969,7 @@ for (const part of [looseEndsPart, quietInboxPart, inboxGuessPart, nestedPart, c
 // starts ("14 h later · The app restarted", Mike 19 Nov).
 // `ceiling`: the most access the thread may have when these words reach its
 // agent, for words a thread with less access wrote earlier (runner/ceiling.ts).
-export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; botWorker?: string; scheduledRevision?: number; agentSignal?: AbortSignal };
+export type SendOptions = { ceiling?: PermissionMode; origin?: MessageOrigin; wakeReason?: string; scheduleId?: string; preserveSchedule?: boolean; queue?: boolean; answers?: AskAnswer[]; editOf?: number; pageComments?: import("./page-comments.ts").PageCommentRef[]; messageId?: string; scheduledSince?: number; botSource?: BotInputSource; botRequest?: NonNullable<BotInputRef['request']>; botTask?: NonNullable<BotInputRef['task']>; botGroup?: NonNullable<BotInputRef['group']>; botWorker?: string; scheduledRevision?: number; agentSignal?: AbortSignal };
 
 type ScheduledDelivery = { seq: number; started: boolean; text: string; images: ImageRef[]; scheduledRevision?: number; superseded?: false } | { superseded: true; started: true };
 

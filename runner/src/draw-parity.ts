@@ -72,6 +72,7 @@ export const DRAWN: Record<string, DrawRow> = {
   'message.answers': { what: "The user's answers to a card, each under its question", ios: 'yes', android: NOT_YET, web: NOT_YET },
   'message.editOf': { what: 'An edited message', ios: NOT_YET, android: NOT_YET, web: NOT_YET },
   'message.reviewId': { what: "The user's answer to a design review", ios: 'yes', android: 'yes', web: NOT_YET, sign: { ios: 'ReviewAnswer', android: 'ReviewAnswer' } },
+  'message.pageComments': { what: "Inline page comment details in a sent message", ios: NOT_YET, android: NOT_YET, web: NOT_YET },
   'message.reviewResponse': { what: "A design review answer's picks and notes", ios: 'yes', android: 'yes', web: NOT_YET, sign: { ios: 'ReviewAnswer', android: 'ReviewLines' } },
   'message.summary': { what: "The turn's summary reply, with the rest folded", ios: 'yes', android: 'yes', web: 'yes' },
   'message.narration': { what: 'Narration (a paraphrase of what the agent wrote)', ios: NOT_YET, android: NOT_YET, web: NOT_YET },

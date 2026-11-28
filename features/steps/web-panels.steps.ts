@@ -44,6 +44,13 @@ When(/^the agent pins( and shows)? the page server as "([^"]+)"$/, async functio
   await this.app.do({ cmd: 'mock', method: 'pin', params: { threadId: await threadId(this), url: sites().home, title, show: Boolean(shows) } });
 });
 
+When('a reply links to the page server and asks for a decision', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'mock', method: 'stream', params: {
+    threadId: await threadId(this), hz: 60, text: `Review [the page](${sites().home})`,
+    completed: { needs: 'you', asks: [{ action: 'Where should this go?', options: ['Draft', 'Review'] }] },
+  } });
+});
+
 Then('the Browser panel shows the page {string}', async function (this: ThreadbearWorld, title: string) {
   await this.until(`the Browser panel showing "${title}"`, (d) => {
     const browser = pane(d) as { section?: string; browserUrl?: string } | undefined;
@@ -107,6 +114,7 @@ type BrowserPick = {
   ready?: boolean;
   target?: string | null;
   comment?: string;
+  attaching?: boolean;
 };
 const pick = (dump: Dump) => (pane(dump) as { pick?: BrowserPick } | undefined)?.pick;
 
@@ -243,7 +251,7 @@ When('I put the chat cursor between {string} and {string}', async function (this
   for (const _ of after) await this.app.do({ cmd: 'menu-key', key: 'left' });
 });
 
-type DraftPageComment = { comment: string; target: string; title: string; image: boolean; offset: number };
+type DraftPageComment = { comment: string; target: string; title: string; image: boolean; offset: number; bounds?: XYWH };
 type CommentDetail = DraftPageComment & { crop?: { width: number; height: number; pixel: number[] } | null };
 const pageComments = (d: Dump) => (d.composer as { pageComments?: DraftPageComment[] }).pageComments ?? [];
 const commentDetail = (d: Dump) => (d.composer as { pageCommentDetail?: CommentDetail }).pageCommentDetail;
@@ -268,7 +276,11 @@ When('I undo removing the page comment chip', async function (this: ThreadbearWo
 });
 
 When('I open the page comment chip', async function (this: ThreadbearWorld) {
-  await this.app.do({ cmd: 'click', title: 'Show page comment' });
+  const note = await this.until('the editor laid out its annotation token',
+    d => pageComments(d).at(-1)?.bounds, LOADED_MS);
+  const [x, y, width, height] = note;
+  assert.ok(width > 0 && height > 0, 'the token must have a clickable area');
+  await this.app.do({ cmd: 'click-at', x: x + width / 2, y: y + height / 2 });
 });
 
 When('I remove the page comment picture', async function (this: ThreadbearWorld) {
@@ -280,14 +292,42 @@ Then('the page comment detail says {string} and has a picture', async function (
     commentDetail(d)?.comment === value && commentDetail(d)?.image === true, LOADED_MS);
 });
 
+type SentRequest = { threadId: string; text: string; images: unknown[]; pageComments: { image?: number }[] };
+async function sentRequests(world: ThreadbearWorld): Promise<SentRequest[]> {
+  return JSON.parse(okValue(await world.app.do({ cmd: 'mock', method: 'sentRequests' }))) as SentRequest[];
+}
+
 Then('the page comment has not sent a message', async function (this: ThreadbearWorld) {
-  const d = await this.app.dump();
-  assert.ok(!d.transcript.rows.some((row) => row.kind === 'user' && row.text.includes('本文内の注釈')));
+  assert.deepEqual(await sentRequests(this), []);
+});
+
+When('the runner refuses the next page comment picture', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'mock', method: 'pageCommentMedia', params: { reject: true } });
+});
+
+When('the runner takes a moment to import the page comment picture', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'mock', method: 'pageCommentMedia', params: { delay: 1600 } });
+});
+
+Then('the page comment is still attaching', async function (this: ThreadbearWorld) {
+  assert.equal(pick(await this.app.dump())?.attaching, true);
+});
+
+When('I add a line to the page comment', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'return', shift: true });
+});
+
+Then('the page comment field has a new line', async function (this: ThreadbearWorld) {
+  const selected = pick(await this.app.dump());
+  assert.ok(selected?.comment?.endsWith('\n'));
+});
+
+When(/^I confirm and send the page comment with (Command|Control)-Enter$/, async function (this: ThreadbearWorld, modifier: string) {
+  await this.app.do({ cmd: 'menu-key', key: 'enter', modifiers: [modifier === 'Command' ? 'cmd' : 'ctrl'] });
 });
 
 When('I send the chat composer', async function (this: ThreadbearWorld) {
-  await this.app.do({ cmd: 'type', text: '' });
-  await this.app.do({ cmd: 'return' });
+  await this.app.do({ cmd: 'click', title: 'Send' });
 });
 
 Then('the sent page comment contains {string} and its picture', async function (this: ThreadbearWorld, value: string) {
@@ -295,7 +335,29 @@ Then('the sent page comment contains {string} and its picture', async function (
     const matching = d.transcript.rows.filter((r) => r.kind === 'user' && r.text.includes(value));
     return matching.length === 1 && (matching[0]?.chips ?? []).includes('Page comment');
   }, LOADED_MS);
+  const sent = await sentRequests(this);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.threadId, await threadId(this));
+  assert.ok(sent[0]?.text.includes(value));
+  assert.equal(sent[0]?.images.length, 1);
+  assert.equal(sent[0]?.pageComments.length, 1);
+  assert.equal(sent[0]?.pageComments[0]?.image, 0);
 });
+When('I open the sent page comment chip {string}', async function (this: ThreadbearWorld, label: string) {
+  await this.app.do({ cmd: 'click', title: label });
+});
+
+Then('I can open the original crop from the sent page comment', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'click', title: 'Open the picture' });
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const viewer = await this.app.do({ cmd: 'viewer' });
+    if (viewer.includes('showing 1 of 1')) return;
+    assert.ok(Date.now() < deadline, viewer);
+    await sleep(120);
+  }
+});
+
 Then('no page selection is in progress', async function (this: ThreadbearWorld) {
   assert.ok(!pick(await this.app.dump()));
 });

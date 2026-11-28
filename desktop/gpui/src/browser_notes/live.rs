@@ -14,13 +14,13 @@ static NEXT_PICKER: AtomicU32 = AtomicU32::new(1);
 
 pub(super) struct Capture {
     pub(super) image: Arc<Image>,
-    #[cfg(feature = "automation")]
-    pub(super) proof: Value,
 }
 
 #[derive(Deserialize)]
 pub(super) struct Selection {
     target: Option<String>,
+    #[serde(rename = "selectionVersion")]
+    pub(super) version: u32,
     pub(super) anchor: Option<Anchor>,
     #[serde(default)]
     pub(super) moved: bool,
@@ -64,6 +64,8 @@ struct Stamp {
     view: View,
     rect: CssRect,
     target: String,
+    #[serde(rename = "selectionVersion")]
+    selection_version: u32,
 }
 
 #[derive(Deserialize, PartialEq)]
@@ -187,21 +189,18 @@ impl LivePicker {
         }
     }
 
-    pub(super) fn resume(&self) {
-        if let Some(params) = self.command("resume()") {
-            drop(self.page.devtools("Runtime.evaluate", params));
-        }
-    }
-
     pub(super) fn switch_mode(&self, element: bool) {
         if let Some(params) = self.command(&format!("switchMode({element})")) {
             drop(self.page.devtools("Runtime.evaluate", params));
         }
     }
 
-    pub(super) async fn capture(&self, cx: &AsyncApp) -> Option<Capture> {
+    pub(super) async fn capture(&self, version: u32, cx: &AsyncApp) -> Option<Capture> {
         let before: Stamp =
             serde_json::from_value(self.eval(self.command("prepare()")?, cx).await?).ok()?;
+        if before.selection_version != version {
+            return None;
+        }
         let picture = call(
             &self.page,
             "Page.captureScreenshot",
@@ -255,11 +254,5 @@ fn crop(bytes: &[u8], rect: Rect) -> Option<Capture> {
     picture.write_with_encoder(encoder).ok()?;
     Some(Capture {
         image: Arc::new(Image::from_bytes(ImageFormat::Png, out)),
-        #[cfg(feature = "automation")]
-        proof: {
-            use image::GenericImageView as _;
-            let edge = picture.get_pixel(w / 8, h / 8).0;
-            json!({"width": w, "height": h, "pixel": edge})
-        },
     })
 }

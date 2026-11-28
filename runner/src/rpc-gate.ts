@@ -221,8 +221,8 @@ export class CallerGate {
     }
     // Words a thread sends are never the runner's note or the phone's, at
     // any access (Codex's review, 25 Nov): only the owner's tools say so.
-    if (method === 'threads.send') {
-      const { origin: _o, wakeReason: _w, ...rest } = p;
+    if (method === 'threads.send' || method === 'threads.edit') {
+      const { origin: _o, wakeReason: _w, pageComments: _p, ...rest } = p;
       p = rest;
     }
     const coordinatorInput = (input: Params): Params => {

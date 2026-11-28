@@ -48,6 +48,7 @@
   shadow.append(layer, box);
 
   let selected = null;
+  let selectionVersion = 0;
   let region = null;
   let regionViewport = null;
   let dragStart = null;
@@ -144,7 +145,7 @@
   function stamp() {
     const view = viewport();
     const rect = targetRect(view);
-    return rect && isUsableRect(rect) ? { view, rect, target: targetName() } : null;
+    return rect && isUsableRect(rect) ? { view, rect, target: targetName(), selectionVersion } : null;
   }
 
   // A clipped target in visual-viewport fractions lets the app place its
@@ -163,7 +164,8 @@
   function publishTarget(current, flags = {}) {
     const anchor = editorAnchor(current);
     lastAnchor = JSON.stringify(anchor);
-    publish({ target: targetName(), anchor, ...flags });
+    if (!flags.moved) selectionVersion += 1;
+    publish({ target: targetName(), anchor, selectionVersion, ...flags });
   }
 
   function drawnFrame() {
@@ -313,12 +315,6 @@
     return before;
   }
 
-  function resume() {
-    suspended = false;
-    box.style.visibility = "";
-    raiseOverlay();
-  }
-
   function switchMode(useElement) {
     elementMode = useElement;
     selected = region = regionViewport = dragStart = null;
@@ -326,7 +322,7 @@
     publishTarget(null);
   }
 
-  globalThis.threadbearPicker = { id, next, stop, stamp, prepare, resume, switchMode };
+  globalThis.threadbearPicker = { id, next, stop, stamp, prepare, switchMode };
   detachObserver.observe(document.documentElement, { childList: true, subtree: true });
   raiseOverlay();
   frame = requestAnimationFrame(drawnFrame);

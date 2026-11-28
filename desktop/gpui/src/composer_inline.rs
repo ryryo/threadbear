@@ -220,14 +220,21 @@ impl Composer {
         target: &Entity<TextareaState>,
         cx: &App,
     ) -> Vec<(std::ops::Range<usize>, BoxChip)> {
-        target
-            .read(cx)
-            .tokens()
+        self.serialized_tokens(target.read(cx).tokens())
+    }
+
+    pub(crate) fn serialized_tokens(
+        &self,
+        tokens: &[gpui_kit::component::input::InlineTokenSpan],
+    ) -> Vec<(std::ops::Range<usize>, BoxChip)> {
+        tokens
             .iter()
             .map(|span| {
                 let id = span.token().id();
                 let chip = if Self::is_mention_token(id) {
                     BoxChip::Mention
+                } else if id.starts_with("page-comment-") {
+                    BoxChip::PageComment(id.to_string())
                 } else {
                     BoxChip::Picture(self.pictures.get(id).and_then(|c| c.image.clone()))
                 };
@@ -389,7 +396,43 @@ impl Composer {
             ClipboardEntry::String(s) => s.metadata_json::<serde_json::Value>(),
             _ => None,
         });
-        if let Some(clip) = note.and_then(|note| Clip::from_clipboard(&words, &note)) {
+        if let Some((clip, metadata)) = note.and_then(|metadata| {
+            Clip::from_clipboard(&words, &metadata).map(|clip| (clip, metadata))
+        }) {
+            let page_comments = threadbear_core::page_comments::PageCommentRef::decode(
+                &metadata["pageComments"],
+                &clip.plain,
+                clip.images.len(),
+            );
+            if target == &self.input && !page_comments.is_empty() {
+                let draft = crate::composer_page_comments::draft_from_sent(
+                    &clip.plain,
+                    &clip.images,
+                    &page_comments,
+                );
+                let base = self.content_for(&draft.text, &draft.images);
+                let content = self.comment_content(base, draft.page_notes);
+                target.update(cx, |s, cx| {
+                    if !s.selected_range().is_empty() {
+                        s.replace("", window, cx);
+                    }
+                    let text = content.text().as_ref();
+                    let mut at = 0;
+                    for span in content.tokens() {
+                        let range = span.range();
+                        if at < range.start {
+                            s.insert(text[at..range.start].to_owned(), window, cx);
+                        }
+                        let _ = s.replace_with_token(span.token().clone(), window, cx);
+                        at = range.end;
+                    }
+                    if at < text.len() {
+                        s.insert(text[at..].to_owned(), window, cx);
+                    }
+                });
+                self.page_notes_changed(cx);
+                return true;
+            }
             let pieces = inline::draft_pieces(&clip.text, clip.images.len());
             self.insert_pieces_in(target, pieces, &clip.images, window, cx);
             return true;
@@ -452,13 +495,26 @@ impl Composer {
         {
             return false;
         }
-        let text = target.read(cx).value().to_string();
-        let (draft, images) = inline::draft_in(&text, &chips, selection);
-        if images.is_empty() {
+        let draft = self.draft_from_range(target.read(cx).content(), selection);
+        if !draft.page_notes.is_empty() {
+            let expanded = crate::composer_page_comments::expand_comments(
+                &draft.text,
+                draft.images.into_iter(),
+                &draft.page_notes,
+                0,
+            );
+            let serialized_text = expanded.text.clone();
+            let (plain, images, page_comments) = expanded.for_clipboard();
+            let mut metadata = Clip::new(serialized_text, images).metadata();
+            metadata["pageComments"] = serde_json::json!(page_comments);
+            cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
+                plain, metadata,
+            ));
+        } else if draft.images.is_empty() {
             // Cards alone copy as their links.
-            cx.write_to_clipboard(ClipboardItem::new_string(draft));
+            cx.write_to_clipboard(ClipboardItem::new_string(draft.text));
         } else {
-            let clip = Clip::new(draft, images);
+            let clip = Clip::new(draft.text, draft.images);
             cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(
                 clip.plain.clone(),
                 clip.metadata(),

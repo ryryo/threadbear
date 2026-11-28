@@ -34,6 +34,7 @@ export function userMessage(msg: QueuedSend): EventBody {
     type: 'user.message',
     text: msg.text,
     images: msg.images,
+    ...(msg.pageComments?.length ? { pageComments: msg.pageComments } : {}),
     ...(msg.origin ? { origin: msg.origin } : {}),
     ...(msg.wakeReason ? { wakeReason: msg.wakeReason } : {}),
     ...(msg.scheduleId ? { scheduleId: msg.scheduleId } : {}),

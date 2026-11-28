@@ -66,3 +66,27 @@ The first implementation used a screenshot for selection and queried the live DO
   harmless file outside the app that the browser process may read. Verify
   the page still renders, element selection works, and attaching a comment
   and crop leaves them in the originating draft.
+
+### Attach a page comment directly to the conversation
+
+- The reference for attaching, rather than reviewing and attaching again, is
+  T3 Code commit `c2fcbd79523e0731a6d0ed354c3ec1e36713bb88`.
+  Its `apps/desktop/src/preview/AnnotationKeyboard.ts` (blob
+  `2f598c9c4c`) supplies the modifier and IME rules. Its
+  `apps/web/src/lib/composerContextRecords.ts` (blob `be398923ee`)
+  supplies the annotation label's whitespace and UTF-16 limit.
+  `PickPreload.submitAnnotation`, `PreviewView.handlePickElement`,
+  and `composerDraftStore.addPreviewAnnotation` supply capture completion,
+  the originating draft boundary, and the inline reference behavior.
+  See [the MIT notice](third-party/t3-code-MIT.txt).
+- Preserve GPUI focus isolation and the existing CEF hit testing, outline
+  and crop. Compare the accepted selection and capture generations. Use the
+  editor's existing inline tokens, Undo, and the existing atomic draft
+  store. A missing image leaves the comment in the original draft.
+- The runner still receives readable words and the same picture references.
+  Its optional page-comment ranges let a new desktop render the same inline
+  details after sending. Without those ranges a client shows the original
+  words and pictures. See [the protocol](protocol/threads.md#page-comments-in-a-message).
+- Keep investigation of agent access to the actual embedded tab, exclusive
+  input handoff, and the local versus streamed runtime on record. BrowserBear
+  login handoff continues on its existing route.

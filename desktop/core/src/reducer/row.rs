@@ -149,6 +149,7 @@ pub enum Pending {
 pub struct UserMessage {
     pub text: String,
     pub images: Vec<ImageRef>,
+    pub page_comments: Vec<crate::page_comments::PageCommentRef>,
     /// "runner" when the runner sent it by itself, "schedule" when a
     /// schedule did, None when a person or a client did.
     pub origin: Option<String>,

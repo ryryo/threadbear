@@ -2370,6 +2370,7 @@ impl Threadbear {
             "creating": self.selected.is_none() && self.new_thread.creating,
         });
         if let Some(composer) = composer {
+            composer.dump_page_comments(&mut out, cx);
             let data = composer.chip_data(cx);
             if let Some(t) = &data.summary {
                 out["cwd"] = json!(t.cwd);

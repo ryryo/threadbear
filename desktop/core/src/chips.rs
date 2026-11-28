@@ -543,6 +543,7 @@ pub enum Piece {
     /// The message's picture at this index (`[Picture index+1]`).
     Picture(usize),
     Mention(Mention),
+    PageComment(crate::page_comments::PageComment),
 }
 
 /// `text`'s pieces with its pictures placed (of `image_count`) and its card
@@ -573,6 +574,36 @@ pub fn message_pieces(text: &str, image_count: usize) -> Vec<Piece> {
         at = range.end;
     }
     words(&text[at..], &mut pieces);
+    pieces
+}
+
+/// Replace the readable annotation blocks with the inline references
+/// while keeping all other message pieces in order.
+pub fn message_pieces_with_comments(
+    text: &str,
+    image_count: usize,
+    comments: &[crate::page_comments::PageCommentRef],
+) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    let mut at = 0;
+    for reference in comments {
+        let [start, end] = reference.block;
+        let Some(comment) = reference.fields(text, image_count).filter(|_| start >= at) else {
+            return message_pieces(text, image_count);
+        };
+        let before = &text[at..start];
+        pieces.extend(message_pieces(
+            before.strip_suffix("\n\n").unwrap_or(before),
+            image_count,
+        ));
+        pieces.push(Piece::PageComment(comment));
+        at = if text[end..].starts_with("\n\n") {
+            end + 2
+        } else {
+            end
+        };
+    }
+    pieces.extend(message_pieces(&text[at..], image_count));
     pieces
 }
 

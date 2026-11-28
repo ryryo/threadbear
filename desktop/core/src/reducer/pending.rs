@@ -13,6 +13,7 @@ pub struct PendingMessage {
     pub id: String,
     pub text: String,
     pub images: Vec<ImageRef>,
+    pub page_comments: Vec<crate::page_comments::PageCommentRef>,
     pub answers: Vec<AskAnswer>,
     /// The thread's last seq when it was sent. Only a `user.message` after
     /// it can be this one: an older "yes" in the history isn't.
@@ -67,6 +68,7 @@ impl PendingMessage {
         let message = UserMessage {
             text: self.text.clone(),
             images: self.images.clone(),
+            page_comments: self.page_comments.clone(),
             answers: self.answers.clone(),
             pending: Some(pending),
             ..UserMessage::default()

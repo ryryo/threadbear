@@ -36,6 +36,7 @@ fn send(thread: &str, text: &str) -> Send<Draft> {
         thread: thread.into(),
         text: text.into(),
         images: Vec::new(),
+        page_comments: Vec::new(),
         after_seq: 10,
         remote: false,
         holding: false,
@@ -60,6 +61,7 @@ fn user_message(thread: &str, seq: i64, text: &str) -> ThreadEvent {
         EventPayload::UserMessage {
             text: text.into(),
             images: Vec::new(),
+            page_comments: Vec::new(),
             origin: None,
             wake_reason: None,
             answers: Vec::new(),
@@ -1122,6 +1124,7 @@ impl Both {
                 let s = Send {
                     thread: thread.clone(),
                     text: format!("m{}", self.sent),
+                    page_comments: Vec::new(),
                     images: Vec::new(),
                     after_seq: 10,
                     remote,

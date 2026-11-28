@@ -2196,6 +2196,7 @@ pub enum EventPayload {
     UserMessage {
         text: String,
         images: Vec<ImageRef>,
+        page_comments: Vec<crate::page_comments::PageCommentRef>,
         origin: Option<String>,
         wake_reason: Option<String>,
         answers: Vec<AskAnswer>,
@@ -2402,9 +2403,13 @@ fn decode_payload(type_: &str, c: &Object) -> Result<EventPayload, ()> {
             let f = TextFields::decode(c);
             let review =
                 ReviewAnswer::parse(&f.text, f.review_id.as_deref(), f.review_response.as_ref());
+            let page_comments = c.get("pageComments").map_or_else(Vec::new, |value| {
+                crate::page_comments::PageCommentRef::decode(value, &f.text, f.images.len())
+            });
             EventPayload::UserMessage {
                 text: f.text,
                 images: f.images,
+                page_comments,
                 origin: f.origin,
                 wake_reason: f.wake_reason,
                 answers: f.answers,

@@ -233,6 +233,7 @@ pub(crate) fn thread_card(
 enum ChipKind {
     /// The message's picture at this index.
     Picture(usize),
+    PageComment(threadbear_core::page_comments::PageComment),
     Card {
         title: String,
         url: String,
@@ -252,6 +253,10 @@ impl ChipKind {
     fn label(&self) -> String {
         match self {
             ChipKind::Picture(index) => format!("Picture {}", index + 1),
+            ChipKind::PageComment(comment) => {
+                threadbear_core::page_comments::label(&comment.comment, &comment.title)
+                    .unwrap_or_else(|| threadbear_core::tr!("Page comment").into())
+            }
             ChipKind::Card { title, .. } | ChipKind::Thread { title, .. } => title.clone(),
             ChipKind::File { name, .. } => name.clone(),
         }
@@ -262,6 +267,7 @@ impl ChipKind {
     fn symbol(&self) -> &'static str {
         match self {
             ChipKind::Picture(_) => "photo",
+            ChipKind::PageComment(_) => "cursorarrow.click",
             ChipKind::Card { .. } => "square.text.square",
             ChipKind::Thread { .. } => "bubble.left",
             ChipKind::File { name, .. } => crate::composer_inline::file_symbol(name),
@@ -273,6 +279,7 @@ impl ChipKind {
     fn described(&self) -> String {
         let kind = match self {
             ChipKind::Picture(_) => "picture",
+            ChipKind::PageComment(_) => return "Page comment".to_owned(),
             ChipKind::Card { .. } => "card",
             ChipKind::Thread { .. } => "thread",
             ChipKind::File { .. } => "file",
@@ -310,14 +317,19 @@ pub(crate) fn described(message: &UserMessage) -> Option<Vec<String>> {
     if message.shows_as_note() || message.agent_header().is_some() {
         return None;
     }
-    let chips: Vec<String> = found::message_pieces(&message.text, message.images.len())
-        .iter()
-        .filter_map(|p| match p {
-            Piece::Picture(index) => Some(ChipKind::Picture(*index).described()),
-            Piece::Mention(mention) => Some(chip_kind(mention).described()),
-            Piece::Words(_) => None,
-        })
-        .collect();
+    let chips: Vec<String> = found::message_pieces_with_comments(
+        &message.text,
+        message.images.len(),
+        &message.page_comments,
+    )
+    .iter()
+    .filter_map(|p| match p {
+        Piece::Picture(index) => Some(ChipKind::Picture(*index).described()),
+        Piece::Mention(mention) => Some(chip_kind(mention).described()),
+        Piece::PageComment(comment) => Some(ChipKind::PageComment(comment.clone()).described()),
+        Piece::Words(_) => None,
+    })
+    .collect();
     (!chips.is_empty()).then_some(chips)
 }
 
@@ -408,6 +420,11 @@ fn lay_out(pieces: Vec<Piece>, max: Pixels, window: &Window) -> Vec<Vec<Token>> 
                 let width = chip_width(&kind, window);
                 add(&mut lines, &mut used, Token::Chip(kind), width, width);
             }
+            Piece::PageComment(comment) => {
+                let kind = ChipKind::PageComment(comment);
+                let width = chip_width(&kind, window);
+                add(&mut lines, &mut used, Token::Chip(kind), width, width);
+            }
         }
     }
     lines
@@ -458,7 +475,11 @@ impl ThreadPane {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<(Pixels, AnyElement)> {
-        let pieces = found::message_pieces(&message.text, message.images.len());
+        let pieces = found::message_pieces_with_comments(
+            &message.text,
+            message.images.len(),
+            &message.page_comments,
+        );
         if pieces.iter().all(|p| matches!(p, Piece::Words(_))) {
             return None;
         }
@@ -589,6 +610,55 @@ impl ThreadPane {
         let origin = self.origin();
         let name = kind.label();
         let chip = match kind {
+            ChipKind::PageComment(comment) => {
+                let shown = (self.open_page_comment.as_ref() == Some(&key)).then(|| {
+                    let image = comment.image.filter(|&i| i < images.len());
+                    let crop = match image {
+                        Some(index) if origin == Origin::ThisMac => Some(
+                            crate::composer_page_comments::comment_crop(&images[index].path),
+                        ),
+                        None => Some(crate::composer_page_comments::missing_crop()),
+                        Some(_) => None,
+                    };
+                    let mut card = crate::composer_page_comments::comment_detail(
+                        &comment.comment,
+                        &comment.title,
+                        &comment.url,
+                        &comment.target,
+                        crop,
+                        cx,
+                    );
+                    if let Some(index) = image {
+                        let runner = self.summary.runner_id.clone();
+                        let images = images.to_vec();
+                        card = card.child(
+                            crate::push_button::PushButton::new(
+                                "page-comment-open-picture",
+                                threadbear_core::tr!("Open picture"),
+                                crate::viewer::TILE_TIP,
+                            )
+                            .small()
+                            .render(cx, move |_, window, cx| {
+                                crate::viewer::open_from_tile(
+                                    &images,
+                                    index,
+                                    runner.as_deref(),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                        );
+                    }
+                    under_chip(card.into_any_element())
+                });
+                chip.tip(threadbear_core::tr!("Show sent page comment"))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.open_page_comment =
+                            (this.open_page_comment.as_ref() != Some(&key)).then(|| key.clone());
+                        cx.notify();
+                    }))
+                    .children(shown)
+            }
             // Another Mac's picture: its path names a file on that Mac, and
             // read here it's whatever this Mac has at that path (Codex's review
             // of the drags, 12 Nov), so it opens no card. The viewer asks that
@@ -699,7 +769,7 @@ fn page_title(words: &str, url: &str) -> String {
 /// words between its chips, as `chip_lines` hands them to `bubble_words`.
 #[cfg(feature = "automation")]
 pub(crate) fn bubble_links(message: &UserMessage) -> Vec<String> {
-    found::message_pieces(&message.text, message.images.len())
+    found::message_pieces_with_comments(&message.text, message.images.len(), &message.page_comments)
         .into_iter()
         .filter_map(|p| match p {
             Piece::Words(words) => Some(
@@ -755,14 +825,18 @@ pub(crate) fn peek_command(
         };
         (ix, rows[ix].id.clone(), message.clone())
     };
-    let chips: Vec<ChipKind> = found::message_pieces(&message.text, message.images.len())
-        .iter()
-        .filter_map(|p| match p {
-            Piece::Picture(i) => Some(ChipKind::Picture(*i)),
-            Piece::Mention(m) => Some(chip_kind(m)),
-            Piece::Words(_) => None,
-        })
-        .collect();
+    let chips: Vec<ChipKind> = found::message_pieces_with_comments(
+        &message.text,
+        message.images.len(),
+        &message.page_comments,
+    )
+    .iter()
+    .filter_map(|p| match p {
+        Piece::Picture(i) => Some(ChipKind::Picture(*i)),
+        Piece::Mention(m) => Some(chip_kind(m)),
+        Piece::Words(_) | Piece::PageComment(_) => None,
+    })
+    .collect();
     let Some(words) = cmd["words"].as_str() else {
         let lines: Vec<String> = chips
             .iter()
@@ -773,7 +847,7 @@ pub(crate) fn peek_command(
                     .map(|image| format!("{}={}", kind.label(), image.path)),
                 ChipKind::Card { url, .. } => Some(format!("{}={url}", kind.label())),
                 ChipKind::File { path, .. } => Some(format!("{}={path}", kind.label())),
-                ChipKind::Thread { .. } => None,
+                ChipKind::Thread { .. } | ChipKind::PageComment(_) => None,
             })
             .collect();
         return Ok(json!(if lines.is_empty() {

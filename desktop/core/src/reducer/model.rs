@@ -969,6 +969,7 @@ impl TranscriptModel {
             EventPayload::UserMessage {
                 text,
                 images,
+                page_comments,
                 origin,
                 wake_reason,
                 answers,
@@ -982,6 +983,7 @@ impl TranscriptModel {
                 let mut message = UserMessage {
                     text: text.clone(),
                     images: images.clone(),
+                    page_comments: page_comments.clone(),
                     origin: origin.clone(),
                     wake_reason: wake_reason.clone(),
                     answers: answers.clone(),

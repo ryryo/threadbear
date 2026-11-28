@@ -875,6 +875,9 @@ let pendingRestart;
 // starts its turn (and its user.message) that much later, as a message
 // queued behind a running turn is. Both 0 by default.
 let slow = { ms: 0, queueMs: 0 };
+const sentRequests = [];
+let pagePictureDelay = 0;
+let rejectPagePicture = false;
 // The runner's own update (protocol "Runner updates"), set by mock.updates.
 let updates = { state: 'idle', oldRunners: [] };
 
@@ -1402,6 +1405,7 @@ async function dispatch(client, method, p) {
     }
     case 'threads.send': {
       const t = need(p.threadId);
+      sentRequests.push({ threadId: p.threadId, text: p.text ?? '', images: p.images ?? [], pageComments: p.pageComments ?? [] });
       // A message declines any secret card still open, first (docs/
       // protocol/threads.md, "Secrets"), as the real runner does.
       const resolved = new Set(t.events.filter((e) => e.type === 'approval.resolved').map((e) => e.approvalId));
@@ -1413,7 +1417,10 @@ async function dispatch(client, method, p) {
       }
       const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
       // Answers from the card go on the user.message, as the runner keeps them.
-      const extra = Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {};
+      const extra = {
+        ...(Array.isArray(p.answers) && p.answers.length ? { answers: p.answers } : {}),
+        ...(Array.isArray(p.pageComments) && p.pageComments.length ? { pageComments: p.pageComments } : {}),
+      };
       // As the runner has it once the CLI starts a session (the app's
       // Finish setting up counts that as a login that works).
       t.summary.nativeSessionId ??= 'mock-session-' + t.summary.id;
@@ -1437,7 +1444,7 @@ async function dispatch(client, method, p) {
       const rewound = persist(t.summary.id, { type: 'thread.rewound', fromSeq: p.seq, toSeq: t.summary.lastSeq, files });
       setStatus(t.summary.id, 'idle');
       const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
-      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, { editOf: p.seq }), 10);
+      setTimeout(() => fakeTurn(t.summary.id, p.text ?? '', p.images ?? [], turnId, undefined, { editOf: p.seq, ...(p.pageComments ? { pageComments: p.pageComments } : {}) }), 10);
       return { turnId, rewound: { seq: rewound.seq, fromSeq: rewound.fromSeq, toSeq: rewound.toSeq, files } };
     }
     case 'threads.delete': {
@@ -2038,6 +2045,8 @@ async function dispatch(client, method, p) {
     }
     case 'media.import': {
       const source = String(p.path ?? '');
+      if (pagePictureDelay) await sleep(pagePictureDelay);
+      if (rejectPagePicture) throw rpcError(-32602, 'The test runner refused the imported image.');
       if (!fs.existsSync(source)) throw rpcError(-32602, `No file at ${source}`);
       const ext = path.extname(source).toLowerCase() || '.png';
       const dest = path.join(dataDir, 'inbox', crypto.randomBytes(8).toString('hex') + ext);
@@ -2607,6 +2616,13 @@ async function dispatch(client, method, p) {
       broadcastSummary(p.threadId);
       return { ok: true };
     }
+    case 'mock.pageCommentMedia': {
+      pagePictureDelay = Number(p.delay ?? 0);
+      rejectPagePicture = p.reject === true;
+      return { ok: true };
+    }
+    case 'mock.sentRequests':
+      return sentRequests.slice();
     case 'mock.slow': {
       slow = { ms: Math.max(0, Number(p.ms ?? 0)), queueMs: Math.max(0, Number(p.queueMs ?? 0)) };
       return slow;

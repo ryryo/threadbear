@@ -3,6 +3,7 @@
 // runner stays the source of truth and this is never read back by it.
 // Only what a phone needs: no transcripts or tool output, and the only images
 // are what an agent showed Mike on purpose or he pasted (replyImages), or a shared thread's.
+import { pageComments } from './pageComments';
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { botScheduleRevision, botScheduleTarget } from './botScheduleValues';
@@ -795,6 +796,7 @@ export const appSchema = defineSchema({
     wokeBy: v.optional(v.array(v.object({ kind: v.string(), description: v.string() }))), // what finished and woke this turn, on its first row (since API 33)
     buttons: v.optional(v.array(messageButton)), // the reply buttons its text links, as they are now (since API 59)
     pictures: v.optional(v.number()), // how many pictures a user's message came with (since API 87), for another Mac's relay
+    pageComments: v.optional(pageComments), // API 113: display ranges into the text above
     // The open card's asks a user's message answered, each its question and
     // the pick (since API 89), so the phone draws them as answers, as the Mac does.
     answers: v.optional(v.array(v.object({ action: v.string(), answer: v.string() }))),

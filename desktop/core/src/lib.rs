@@ -57,6 +57,7 @@ pub mod older_pages;
 pub mod open_anything;
 pub mod open_policy;
 pub mod outbox;
+pub mod page_comments;
 pub mod panel_requests;
 pub mod pinned_panels;
 pub mod pools;

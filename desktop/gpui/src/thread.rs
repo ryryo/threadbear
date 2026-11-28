@@ -306,10 +306,7 @@ pub(crate) fn held_drafts(thread_id: &str, cx: &App) -> Vec<crate::composer::Res
         o.held_drafts(thread_id)
             .into_iter()
             // Their words as they went, a card's answers included.
-            .map(|draft| {
-                let (text, images) = draft.for_saving();
-                crate::composer::RestoreDraft::plain(text, images)
-            })
+            .map(|draft| draft.for_saving())
             .collect()
     })
 }
@@ -373,6 +370,12 @@ pub struct ThreadPane {
     /// The find bar over the transcript, while it's up (find.rs).
     pub(crate) find: Option<find::ThreadFind>,
     _subs: Vec<Subscription>,
+    pub(crate) open_page_comment: Option<SharedString>,
+}
+
+pub(crate) struct MessageContext {
+    pub(crate) answers: Value,
+    pub(crate) page_comments: Vec<threadbear_core::page_comments::PageCommentRef>,
 }
 
 impl ThreadPane {
@@ -391,6 +394,7 @@ impl ThreadPane {
         });
         let app = composer.read(cx).app.clone();
         let mut pane = ThreadPane {
+            open_page_comment: None,
             client,
             app,
             summary,
@@ -439,6 +443,7 @@ impl ThreadPane {
         let scroller = cx.new(|cx| TranscriptList::new(0, cx));
         let app = composer.read(cx).app.clone();
         let mut pane = ThreadPane {
+            open_page_comment: None,
             client,
             app,
             summary,
@@ -576,9 +581,13 @@ impl ThreadPane {
         if !message.editable || !self.can_rewind(cx) {
             return;
         }
-        let (seq, text, images) = (row.seq, message.text.clone(), message.images.clone());
+        let draft = crate::composer_page_comments::draft_from_sent(
+            &message.text,
+            &message.images,
+            &message.page_comments,
+        );
         self.composer
-            .update(cx, |c, cx| c.start_editing(seq, &text, &images, window, cx));
+            .update(cx, |c, cx| c.start_editing(row.seq, draft, window, cx));
     }
 
     /// Its entry in the thread's list of sub-agents, as the summary has it now.
@@ -1369,7 +1378,10 @@ impl ThreadPane {
         self.send_message(
             text,
             Vec::new(),
-            answers.unwrap_or(Value::Null),
+            MessageContext {
+                answers: answers.unwrap_or(Value::Null),
+                page_comments: Vec::new(),
+            },
             None,
             WeakEntity::new_invalid(),
             cx,
@@ -1420,11 +1432,15 @@ impl ThreadPane {
         &mut self,
         text: String,
         images: Vec<ImageRef>,
-        answers: Value,
+        context: MessageContext,
         draft: Option<crate::composer::RestoreDraft>,
         composer: WeakEntity<Composer>,
         cx: &mut Context<Self>,
     ) {
+        let MessageContext {
+            answers,
+            page_comments,
+        } = context;
         // Sending moves on from whatever went wrong before; a send that
         // fails says so again.
         self.error = None;
@@ -1458,20 +1474,18 @@ impl ThreadPane {
         // given back (`RestoreDraft::for_saving`).
         let mut draft = draft;
         if let Some(draft) = draft.as_mut().filter(|d| d.card.is_some()) {
-            let (words, order) = threadbear_core::composer::edit_draft(&text, images.len());
-            draft.as_sent = Some((
-                words,
-                order
-                    .into_iter()
-                    .filter_map(|i| images.get(i).cloned())
-                    .collect(),
-            ));
+            draft.as_sent = Some(Box::new(crate::composer_page_comments::draft_from_sent(
+                &text,
+                &images,
+                &page_comments,
+            )));
         }
         // Shown straight away and put right when the runner echoes it back.
         let sending = Sending {
             thread: thread_id.clone(),
             text: text.clone(),
             images: images.clone(),
+            page_comments: page_comments.clone(),
             after_seq,
             remote,
             holding,
@@ -1501,6 +1515,9 @@ impl ThreadPane {
         }
         if !answers.is_null() {
             params["answers"] = answers;
+        }
+        if !page_comments.is_empty() {
+            params["pageComments"] = json!(page_comments);
         }
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<SendStep>();
         let told = tx.clone();

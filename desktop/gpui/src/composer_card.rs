@@ -291,7 +291,10 @@ impl Composer {
     /// Hands the picks to the reducer, so the rest of the app reads them off
     /// the row as the Swift app's does (setAskPicks and friends), and puts the
     /// picks back after the pane has been remade.
-    pub(crate) fn push_card_state(&self, cx: &mut App) {
+    pub(crate) fn push_card_state(&mut self, cx: &mut App) {
+        // An answer picked, edited, or removed invalidates a browser send
+        // already waiting for a crop, even if the same answer is restored.
+        self.send_context_revision = self.send_context_revision.wrapping_add(1);
         let (Some(pane), Some(seq)) = (self.pane.upgrade(), self.card.seq) else {
             return;
         };

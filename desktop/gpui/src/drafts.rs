@@ -282,6 +282,19 @@ impl Threadbear {
         self.drafts.pending = Some(task);
     }
 
+    pub(crate) fn persist_page_comment(&mut self, cx: &mut Context<Self>) -> bool {
+        if crate::handover::waiting() {
+            return false;
+        }
+        self.save_drafts(cx);
+        if self.drafts.failed {
+            // Keep the accepted comment in memory and retry the usual
+            // atomic write once, without authorizing a deferred send.
+            self.drafts_changed(cx);
+        }
+        !self.drafts.failed
+    }
+
     /// Writes now: what every box has, and what the file had for boxes not
     /// made yet this run.
     pub(crate) fn save_drafts(&mut self, cx: &App) {
@@ -303,13 +316,17 @@ impl Threadbear {
         }
         for (key, composer) in boxes {
             let composer = composer.read(cx);
-            let (text, images) = composer.draft_for_saving(cx);
+            let RestoreDraft {
+                text,
+                images,
+                page_notes,
+                ..
+            } = composer.draft_for_saving(cx);
             if key != NEW_THREAD {
                 merge_thread(&mut all, &key, composer.box_drafts(cx));
             }
             let key_notes = format!("page-notes:{key}");
-            let notes = composer.notes_for_saving();
-            if let Some(notes) = picks_draft(&notes, notes.is_empty()) {
+            if let Some(notes) = picks_draft(&page_notes, page_notes.is_empty()) {
                 all.insert(key_notes, notes);
             } else {
                 all.remove(&key_notes);

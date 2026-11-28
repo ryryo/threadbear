@@ -227,6 +227,7 @@ struct Message<D> {
     thread: String,
     text: String,
     images: Vec<ImageRef>,
+    page_comments: Vec<crate::page_comments::PageCommentRef>,
     /// The thread's last seq when it was sent: only a `user.message` after
     /// it can be this one. Moved on by the transcript when an earlier
     /// message with the same words lands.
@@ -248,6 +249,7 @@ impl<D> Message<D> {
             id: self.id.clone(),
             text: self.text.clone(),
             images: self.images.clone(),
+            page_comments: self.page_comments.clone(),
             answers: Vec::new(),
             after_seq: self.after_seq,
             queued: bubble == Pending::Queued,
@@ -278,6 +280,7 @@ pub struct Send<D> {
     pub thread: String,
     pub text: String,
     pub images: Vec<ImageRef>,
+    pub page_comments: Vec<crate::page_comments::PageCommentRef>,
     /// The thread's last seq as the pane knows it.
     pub after_seq: i64,
     /// Another Mac's thread, sent through this Mac's runner and Convex: it
@@ -515,6 +518,7 @@ impl<D: Clone> Outbox<D> {
             thread: send.thread,
             text: send.text,
             images: send.images,
+            page_comments: send.page_comments,
             after_seq: send.after_seq,
             draft: send.draft,
             // Not yet on its way: held for a restart, or waiting behind
