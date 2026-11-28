@@ -36,7 +36,8 @@
 #                 or not
 #   --all         don't skip the Swift app, dock and deploy tests (below),
 #                 nor anything that passed before (next)
-#   --fresh       don't skip anything that passed before, and nothing more
+#   --fresh       don't skip anything that passed before (or the docs/skills
+#                 fast path), and nothing more
 #   --no-records  neither read nor write pass records
 #
 # A step, or one of the runner's unit test files, that passed in the last
@@ -336,6 +337,60 @@ needed() {
   [ "$ALL" = 1 ] || [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -qE "$1|^check\.sh$"
 }
 
+# Skill and documentation-only changes (.agents/skills/, .claude/skills/,
+# docs/, or top-level *.md — not runtime markdown under runner/src/ or code/
+# config files): skip heavy code typechecks and unrelated runner unit tests
+# unless --all, --fresh, --runner, --app, --e2e, or --only was asked for.
+# Doc-specific checks (site build, feature pairing, and the targeted unit tests
+# that validate AGENTS.md and specific docs/) still run for what they cover.
+DOCS_OR_SKILLS_ONLY=0
+DOC_UNIT_TESTS=()
+if [ "$ALL" = 0 ] && [ "$FRESH" = 0 ] && [ "$RUNNER_ONLY" = 0 ] && [ "$APP_ONLY" = 0 ] && [ "$E2E" = 0 ] && [ -z "$ONLY" ] && [ -n "$CHANGED" ]; then
+  docs_or_skills_re='^(\.agents/skills/|\.claude/skills/|docs/|[^/]+\.md$)'
+  docs_seen=0
+  docs_all=1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    docs_seen=1
+    if ! [[ "$f" =~ $docs_or_skills_re ]]; then
+      docs_all=0
+      break
+    fi
+  done <<<"$CHANGED"
+  if [ "$docs_seen" = 1 ] && [ "$docs_all" = 1 ]; then
+    DOCS_OR_SKILLS_ONLY=1
+    add_doc_unit_test() {
+      local tf="$1" existing
+      [ -f "$ROOT/runner/$tf" ] || return 0
+      if [ "${#DOC_UNIT_TESTS[@]}" -gt 0 ]; then
+        for existing in "${DOC_UNIT_TESTS[@]}"; do
+          [ "$existing" = "$tf" ] && return 0
+        done
+      fi
+      DOC_UNIT_TESTS+=("$tf")
+    }
+    if printf '%s\n' "$CHANGED" | grep -E '^(AGENTS\.md|docs/)' >/dev/null; then
+      add_doc_unit_test "test/unit/agents-md.test.ts"
+    fi
+    if printf '%s\n' "$CHANGED" | grep -E '^docs/experiments\.md$' >/dev/null; then
+      add_doc_unit_test "test/unit/experiment-docs.test.ts"
+    fi
+    if printf '%s\n' "$CHANGED" | grep -E '^docs/forking\.md$' >/dev/null; then
+      add_doc_unit_test "test/unit/forking-doc.test.ts"
+    fi
+    if printf '%s\n' "$CHANGED" | grep -E '^docs/parity\.md$' >/dev/null; then
+      add_doc_unit_test "test/unit/parity.test.ts"
+    fi
+    if printf '%s\n' "$CHANGED" | grep -E '^docs/machines\.md$' >/dev/null; then
+      add_doc_unit_test "test/unit/machine-docs.test.ts"
+    fi
+    if printf '%s\n' "$CHANGED" | grep -E '^docs/protocol(\.md|/)' >/dev/null; then
+      add_doc_unit_test "test/unit/protocol-split.test.ts"
+      add_doc_unit_test "test/unit/runner-access.test.ts"
+    fi
+  fi
+fi
+
 # swift_needed [<regex>]: whether the frozen Swift app's build and tests
 # should run: with --app or --all, or when something it builds from changed
 # (<regex>, else SWIFT_NEEDS). Unlike needed, not on main with nothing
@@ -588,6 +643,9 @@ runner_unit_tests() {
   # doesn't have can't fail here: tb land runs a group's failed files on each
   # of its landings alone, and another landing's new test isn't in this one.
   local targets=("test/unit/**/*.test.ts") asked f
+  if [ "$DOCS_OR_SKILLS_ONLY" = 1 ] && [ "${#DOC_UNIT_TESTS[@]}" -gt 0 ]; then
+    targets=("${DOC_UNIT_TESTS[@]}")
+  fi
   asked="$(only_entry "$name")"
   if [ "$asked" != "${asked#*=}" ]; then
     targets=()
@@ -726,28 +784,39 @@ record_test_passes() {
 }
 
 if [ "$APP_ONLY" = 0 ]; then
-  if [ ! -d "$ROOT/runner/node_modules" ]; then
-    step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
+  if [ "$DOCS_OR_SKILLS_ONLY" = 1 ]; then
+    skip "runner typecheck" "only skills or docs changed"
+  else
+    if [ ! -d "$ROOT/runner/node_modules" ]; then
+      step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
+    fi
+    # The runner's tests load convex/server and the state machines library from
+    # the root's packages (test/helpers/convex-memory.ts), --runner too.
+    if [ "$RUNNER_ONLY" = 1 ] && [ ! -d "$ROOT/node_modules" ]; then
+      step "convex packages" "$ROOT" npm ci --no-audit --no-fund
+    fi
+    step "runner typecheck" "$ROOT/runner" npm run typecheck
   fi
-  # The runner's tests load convex/server and the state machines library from
-  # the root's packages (test/helpers/convex-memory.ts), --runner too.
-  if [ "$RUNNER_ONLY" = 1 ] && [ ! -d "$ROOT/node_modules" ]; then
-    step "convex packages" "$ROOT" npm ci --no-audit --no-fund
-  fi
-  step "runner typecheck" "$ROOT/runner" npm run typecheck
 fi
 if [ "$APP_ONLY" = 0 ] && [ "$RUNNER_ONLY" = 0 ]; then
-  # The app's Node tools (the tour's end-to-end test, the mock runner)
-  # aren't typechecked or run here: at least they have to parse. A quote
-  # slip in tour-e2e.mjs went unnoticed until it was next run (2 Nov).
-  step "app tools parse" "$ROOT" bash -c 'for f in app/Tools/*.mjs mock-runner/*.mjs; do node --check "$f" || exit 1; done'
-  # The Convex functions (convex/), against the generated types in git.
-  if [ ! -d "$ROOT/node_modules" ]; then
-    step "convex packages" "$ROOT" npm ci --no-audit --no-fund
+  if [ "$DOCS_OR_SKILLS_ONLY" = 1 ]; then
+    skip "app tools parse" "only skills or docs changed"
+    skip "convex typecheck" "only skills or docs changed"
+    skip "web typecheck" "only skills or docs changed"
+    skip "web tests" "only skills or docs changed"
+  else
+    # The app's Node tools (the tour's end-to-end test, the mock runner)
+    # aren't typechecked or run here: at least they have to parse. A quote
+    # slip in tour-e2e.mjs went unnoticed until it was next run (2 Nov).
+    step "app tools parse" "$ROOT" bash -c 'for f in app/Tools/*.mjs mock-runner/*.mjs; do node --check "$f" || exit 1; done'
+    # The Convex functions (convex/), against the generated types in git.
+    if [ ! -d "$ROOT/node_modules" ]; then
+      step "convex packages" "$ROOT" npm ci --no-audit --no-fund
+    fi
+    step "convex typecheck" "$ROOT" npm run convex:typecheck
+    step "web typecheck" "$ROOT" npm run web:typecheck
+    step "web tests" "$ROOT" npm run web:test
   fi
-  step "convex typecheck" "$ROOT" npm run convex:typecheck
-  step "web typecheck" "$ROOT" npm run web:typecheck
-  step "web tests" "$ROOT" npm run web:test
   # ESLint with mikecann-lint's rules (eslint.config.mjs; old problems are
   # recorded in eslint-suppressions.json). The whole thing takes about 40 s
   # and 3 GB, so a landing lints only the code files it changed, and all of
@@ -823,7 +892,19 @@ if [ "$APP_ONLY" = 0 ] && [ "$RUNNER_ONLY" = 0 ]; then
   fi
 fi
 if [ "$APP_ONLY" = 0 ]; then
-  runner_unit_tests
+  if [ "$DOCS_OR_SKILLS_ONLY" = 1 ] && [ "${#DOC_UNIT_TESTS[@]}" = 0 ]; then
+    skip "runner unit tests" "only skills or docs changed"
+  else
+    if [ "$DOCS_OR_SKILLS_ONLY" = 1 ]; then
+      if [ ! -d "$ROOT/runner/node_modules" ]; then
+        step "runner packages" "$ROOT/runner" npm ci --no-audit --no-fund
+      fi
+      if [ ! -d "$ROOT/node_modules" ]; then
+        step "convex packages" "$ROOT" npm ci --no-audit --no-fund
+      fi
+    fi
+    runner_unit_tests
+  fi
   if [ "$QUICK" = 0 ]; then
     if needed '^runner/(scripts/|launch\.mjs$|launcher/|test/deploy/)'; then
       step "runner deploy tests" "$ROOT/runner" bash test/deploy/run.sh
