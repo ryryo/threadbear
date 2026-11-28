@@ -93,9 +93,7 @@ Then('the page server was opened outside the app', async function (this: Threadb
 });
 
 Then('my draft has no page comment', async function (this: ThreadbearWorld) {
-  const { composer } = await this.app.dump();
-  assert.ok(!composer.text.includes('Page comment on'));
-  assert.equal(composer.images ?? 0, 0);
+  assert.deepEqual(pageComments(await this.app.dump()), []);
 });
 
 When('I press the browser control {string}', async function (this: ThreadbearWorld, title: string) {
@@ -109,8 +107,6 @@ type BrowserPick = {
   ready?: boolean;
   target?: string | null;
   comment?: string;
-  review?: boolean;
-  crop?: { width: number; height: number; pixel: number[] } | null;
 };
 const pick = (dump: Dump) => (pane(dump) as { pick?: BrowserPick } | undefined)?.pick;
 
@@ -238,15 +234,73 @@ When('I resize the window with a browser element selected', async function (this
     await sleep(100);
   }
 });
-When('I review the selected page area', async function (this: ThreadbearWorld) {
-  await this.app.do({ cmd: 'click', title: 'Review selected page area' });
-  await this.until('crop review', (d) => pick(d)?.review === true, LOADED_MS);
+When('I confirm the page comment with Enter', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'return' });
+});
+
+When('I put the chat cursor between {string} and {string}', async function (this: ThreadbearWorld, before: string, after: string) {
+  await this.app.do({ cmd: 'type', text: before + after, replace: true });
+  for (const _ of after) await this.app.do({ cmd: 'menu-key', key: 'left' });
+});
+
+type DraftPageComment = { comment: string; target: string; title: string; image: boolean; offset: number };
+type CommentDetail = DraftPageComment & { crop?: { width: number; height: number; pixel: number[] } | null };
+const pageComments = (d: Dump) => (d.composer as { pageComments?: DraftPageComment[] }).pageComments ?? [];
+const commentDetail = (d: Dump) => (d.composer as { pageCommentDetail?: CommentDetail }).pageCommentDetail;
+
+Then('one page comment chip appears between {string} and {string}', async function (this: ThreadbearWorld, before: string, after: string) {
+  await this.until('one annotation token at the original insertion point', (d) =>
+    pageComments(d).length === 1
+    && pageComments(d)[0]?.offset === Buffer.byteLength(before)
+    && (d.composer as { words?: string }).words === before + after, LOADED_MS);
+});
+
+When('I delete the page comment chip', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'type', text: '' });
+  await this.app.do({ cmd: 'menu-key', key: 'left', modifiers: ['cmd'] });
+  await this.app.do({ cmd: 'menu-key', key: 'right' });
+  await this.app.do({ cmd: 'menu-key', key: 'right' });
+  await this.app.do({ cmd: 'native-keys', text: '\u007f' });
+});
+
+When('I undo removing the page comment chip', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'menu-key', key: 'z', modifiers: ['cmd'] });
+});
+
+When('I open the page comment chip', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'click', title: 'Show page comment' });
+});
+
+When('I remove the page comment picture', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'click', title: 'Remove picture from page comment' });
+});
+
+Then('the page comment detail says {string} and has a picture', async function (this: ThreadbearWorld, value: string) {
+  await this.until('the comment and its crop in chip detail', (d) =>
+    commentDetail(d)?.comment === value && commentDetail(d)?.image === true, LOADED_MS);
+});
+
+Then('the page comment has not sent a message', async function (this: ThreadbearWorld) {
+  const d = await this.app.dump();
+  assert.ok(!d.transcript.rows.some((row) => row.kind === 'user' && row.text.includes('本文内の注釈')));
+});
+
+When('I send the chat composer', async function (this: ThreadbearWorld) {
+  await this.app.do({ cmd: 'type', text: '' });
+  await this.app.do({ cmd: 'return' });
+});
+
+Then('the sent page comment contains {string} and its picture', async function (this: ThreadbearWorld, value: string) {
+  await this.until('one echoed user message with the comment', (d) => {
+    const matching = d.transcript.rows.filter((r) => r.kind === 'user' && r.text.includes(value));
+    return matching.length === 1 && (matching[0]?.chips ?? []).includes('Page comment');
+  }, LOADED_MS);
 });
 Then('no page selection is in progress', async function (this: ThreadbearWorld) {
   assert.ok(!pick(await this.app.dump()));
 });
-Then('the reviewed crop contains the selected button', async function (this: ThreadbearWorld) {
-  const crop = pick(await this.app.dump())?.crop;
+Then('the attached crop contains the selected button', async function (this: ThreadbearWorld) {
+  const crop = commentDetail(await this.app.dump())?.crop;
   assert.ok(crop, 'a real crop should be shown');
   const expected = buttonPaint.get(this);
   assert.ok(expected, 'read the painted target before selecting');
@@ -257,12 +311,11 @@ Then('the reviewed crop contains the selected button', async function (this: Thr
   assert.deepEqual(crop.pixel, expected.pixel, 'the crop uses the same pixel as the untouched Chromium page');
 });
 Then('my draft includes the page comment text {string}', async function (this: ThreadbearWorld, value: string) {
-  await this.until('the typed page comment in the draft', (d) => d.composer.text.includes(value), LOADED_MS);
+  await this.until('the typed page comment in the draft', (d) => pageComments(d).some((n) => n.comment === value), LOADED_MS);
 });
 Then('my page comment describes a button without a picture', async function (this: ThreadbearWorld) {
-  const d = await this.app.dump();
-  assert.ok(d.composer.text.includes('Element: <button>'));
-  assert.equal(d.composer.images ?? 0, 0);
+  await this.until('the annotation remains without its picture', (d) =>
+    pageComments(d).some((n) => n.target === 'Element: <button>' && !n.image), LOADED_MS);
 });
 Then("the page's colored button was never activated", async function (this: ThreadbearWorld) {
   const page = pages(await this.app.dump()).find((p) => p.key.startsWith('browser:'));
@@ -271,9 +324,7 @@ Then("the page's colored button was never activated", async function (this: Thre
 });
 Then('my draft contains a page comment about {string} with a picture', async function (this: ThreadbearWorld, target: string) {
   await this.until('page comment in the draft', (dump) =>
-    dump.composer.text.includes('Page comment on Panel home')
-      && dump.composer.text.includes(target)
-      && dump.composer.images === 1,
+    pageComments(dump).some((n) => n.title === 'Panel home' && n.target === target && n.image),
   LOADED_MS);
 });
 

@@ -25,7 +25,6 @@ Feature: Web pages in a thread's panels
     When I press the browser control "Mark an element for this thread"
     And I select the first link on the live browser page
     And I enter the page comment "Keep the renderer isolated"
-    And I review the selected page area
     And I press the browser control "Attach to this thread's draft"
     Then my draft includes the page comment text "Keep the renderer isolated"
     And my draft contains a page comment about "Element: <a>" with a picture
@@ -76,10 +75,10 @@ Feature: Web pages in a thread's panels
     When I press the browser control "Mark an element for this thread"
     And I select the first link on the live browser page
     And I enter the page comment "リンクの色を変えてください"
-    And I review the selected page area
-    And I press the browser control "Attach to this thread's draft"
+    And I confirm the page comment with Enter
     Then my draft includes the page comment text "リンクの色を変えてください"
-    Then my draft contains a page comment about "Element: <a>" with a picture
+    And no page selection is in progress
+    And my draft contains a page comment about "Element: <a>" with a picture
     And the Browser panel shows the page "Panel home"
     And nothing was opened in another app
 
@@ -92,7 +91,6 @@ Feature: Web pages in a thread's panels
     Then the Browser panel shows the page "Panel home"
     When I press the browser control "Mark a region for this thread"
     And I draw a box on the live browser page
-    And I review the selected page area
     And I press the browser control "Attach to this thread's draft"
     Then my draft contains a page comment about "Selected region" with a picture
     When I open the thread "Add dark mode to the dashboard"
@@ -102,7 +100,7 @@ Feature: Web pages in a thread's panels
     Then my draft contains a page comment about "Selected region" with a picture
 
   @panel.web @web-runtime @swift-pending @browser.comment
-  Scenario: A comment survives choosing another element and omitting the picture
+  Scenario: A comment keeps its crop through selection changes and can omit only the picture
     Given the web runtime is installed
     When I open the thread "Morning brief"
     And a reply linking "the page" to the page server streams in
@@ -114,13 +112,13 @@ Feature: Web pages in a thread's panels
     And I enter the page comment "このボタンを青に"
     And I select the colored button after scrolling
     And I resize the window with a browser element selected
-    And I review the selected page area
-    Then the reviewed crop contains the selected button
-    And my draft has no page comment
-    When I press the browser control "Choose whether the cutout is attached"
     And I press the browser control "Attach to this thread's draft"
     Then my draft includes the page comment text "このボタンを青に"
-    And my page comment describes a button without a picture
+    When I open the page comment chip
+    Then the attached crop contains the selected button
+    When I remove the page comment picture
+    Then my page comment describes a button without a picture
+    And my draft includes the page comment text "このボタンを青に"
     And the page's colored button was never activated
 
   @panel.web @web-runtime @swift-pending @browser.comment
@@ -145,7 +143,7 @@ Feature: Web pages in a thread's panels
     And the page comment still says "このボタンを青に"
 
   @panel.web @web-runtime @swift-pending @browser.comment
-  Scenario: Switching threads discards a comment awaiting review
+  Scenario: Switching threads discards a comment that was not confirmed
     Given the web runtime is installed
     When I open the thread "Morning brief"
     And a reply linking "the page" to the page server streams in
@@ -154,12 +152,38 @@ Feature: Web pages in a thread's panels
     When I press the browser control "Mark an element for this thread"
     And I select the first link on the live browser page
     And I enter the page comment "Discard this draft"
-    And I review the selected page area
     And I open the thread "Add dark mode to the dashboard"
     Then my draft has no page comment
     When I open the thread "Morning brief"
     Then my draft has no page comment
     And no page selection is in progress
+
+  @panel.web @web-runtime @swift-pending @browser.comment
+  Scenario: Confirming adds one comment between the words already in the draft
+    Given the web runtime is installed
+    When I open the thread "Morning brief"
+    And a reply linking "the page" to the page server streams in
+    And I choose "Open in Panel" from the menu of the link "the page"
+    Then the Browser panel shows the page "Panel home"
+    When I put the chat cursor between "前" and "後"
+    And I press the browser control "Mark an element for this thread"
+    And I select the first link on the live browser page
+    And I enter the page comment "本文内の注釈"
+    And I confirm the page comment with Enter
+    Then one page comment chip appears between "前" and "後"
+    And no page selection is in progress
+    And the page comment has not sent a message
+    When I delete the page comment chip
+    Then my draft has no page comment
+    When I undo removing the page comment chip
+    Then one page comment chip appears between "前" and "後"
+    When the app is quit and opened again
+    And I open the thread "Morning brief"
+    Then one page comment chip appears between "前" and "後"
+    When I open the page comment chip
+    Then the page comment detail says "本文内の注釈" and has a picture
+    When I send the chat composer
+    Then the sent page comment contains "本文内の注釈" and its picture
 
   @panel.web @swift-pending
   Scenario: The globe is available without BrowserBear
