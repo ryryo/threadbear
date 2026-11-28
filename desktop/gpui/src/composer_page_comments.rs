@@ -646,7 +646,8 @@ impl Composer {
 #[cfg(test)]
 mod tests {
     use super::{
-        draft_from_sent, expand_comments, ImageRef, PageNote, RestoreDraft, PICTURE_MARK_STR,
+        draft_from_sent, expand_comments, ImageRef, PageNote, RestoreDraft, PICTURE_MARK,
+        PICTURE_MARK_STR,
     };
 
     fn image(path: &str) -> ImageRef {
