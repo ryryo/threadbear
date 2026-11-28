@@ -62,10 +62,12 @@ function desktopKinds(): string[] {
   const row = read('reducer/row.rs');
   const event = read('reducer/event.rs');
   const sidebar = read('sidebar.rs');
+  const payload = block(event, /fn decode_payload\(/, 'reducer/event.rs');
+  const userMessage = block(payload, /"user\.message" => \{/, 'reducer/event.rs user.message');
   const kinds: Record<string, string[]> = {
     row: all(block(row, /impl RowKind \{/, 'reducer/row.rs'), /RowKind::\w+ => "(\w+)"/g),
     origin: all(row, /origin\.as_deref\(\) == Some\("(\w+)"\)/g),
-    message: decodedKeys(block(event, /impl TextFields \{/, 'reducer/event.rs')),
+    message: [...decodedKeys(block(event, /impl TextFields \{/, 'reducer/event.rs')), ...decodedKeys(userMessage)],
     ask: decodedKeys(block(block(event, /impl Ask \{/, 'reducer/event.rs'), /pub fn decode\(/, 'reducer/event.rs Ask::decode')),
     // A turn's end: the footer, the needs-you and done cards, and the done
     // card's loose ends (which come on the thread's summary, not the event).

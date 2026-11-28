@@ -433,19 +433,8 @@ impl ThreadPane {
                 self.chip_lines(ix, &row.id, message, max_text, window, cx)
             };
             let answer_chips = answered_words.as_mut().and_then(|words| {
-                if message.page_comments.is_empty() {
-                    return None;
-                }
-                let prefix = message.text.strip_suffix(&words.extra)?.len();
-                let mut extra = message.clone();
-                extra.text = words.extra.clone();
-                extra.page_comments.retain(|note| note.block[0] >= prefix);
-                for note in &mut extra.page_comments {
-                    note.shift(prefix, 0);
-                }
-                let body = self
-                    .chip_lines(ix, &row.id, &extra, max_text, window, cx)?
-                    .1;
+                let extra = answered_comment_message(message, &words.extra)?;
+                let (_, body) = self.chip_lines(ix, &row.id, &extra, max_text, window, cx)?;
                 words.extra.clear();
                 Some(body)
             });
@@ -1303,6 +1292,21 @@ pub(crate) fn answered_words(message: &UserMessage) -> Option<AnsweredWords> {
         extra,
         review: false,
     })
+}
+
+/// Rebases the inline comment ranges onto the words below the answers.
+fn answered_comment_message(message: &UserMessage, words: &str) -> Option<UserMessage> {
+    if message.page_comments.is_empty() {
+        return None;
+    }
+    let prefix = message.text.strip_suffix(words)?.len();
+    let mut extra = message.clone();
+    extra.text = words.to_owned();
+    extra.page_comments.retain(|note| note.block[0] >= prefix);
+    for note in &mut extra.page_comments {
+        note.shift(prefix, 0);
+    }
+    Some(extra)
 }
 
 /// The body of a message that answered asks or a review (`userWords`): each

@@ -645,7 +645,9 @@ impl Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        draft_from_sent, expand_comments, ImageRef, PageNote, RestoreDraft, PICTURE_MARK_STR,
+    };
 
     fn image(path: &str) -> ImageRef {
         ImageRef::decode(&serde_json::json!({"path": path, "mediaType": "image/png"})).unwrap()

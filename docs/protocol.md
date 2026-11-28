@@ -42,7 +42,7 @@ It was all this one file once. Work made on that comes across by itself in `tb l
 | [needs-you.md](protocol/needs-you.md) | Needs you, The reply phase, Wait state |
 | [updates.md](protocol/updates.md) | Runner updates, Mike's releases, Your changes to the old app, Restarts, App restarts, Handovers, Stopped background work, Stuck background jobs, Background wait loops, A thread's CLI, Frozen CLIs, A dialog on a Mac's screen |
 | [settings.md](protocol/settings.md) | ACP agents, Settings and models, Standing instructions, Shared memory, Explain, Hibernate in words, Usage history, Sandboxed threads (taken out), Pools |
-| [threads.md](protocol/threads.md) | Pictures in a message, Queued calls, Plan first, Slash commands, Context breakdown, Editing a message, Who started a thread, Who archived a thread, Search, Searching Agent Archive, What Mike last asked, What Mike first asked (taken out), Loose ends, Nested threads, A quiet inbox, Inbox guess, Secrets |
+| [threads.md](protocol/threads.md) | Pictures in a message, Queued calls, Plan first, Slash commands, Context breakdown, Page comments in a message, Editing a message, Who started a thread, Who archived a thread, Search, Searching Agent Archive, What Mike last asked, What Mike first asked (taken out), Loose ends, Nested threads, A quiet inbox, Inbox guess, Secrets |
 | [patches.md](protocol/patches.md) | Patches, The Convex panel |
 | [trust.md](protocol/trust.md) | Trusting a folder's patches, What changed, Trusting a folder's Claude Code hooks |
 | [panels.md](protocol/panels.md) | Highlights, Worktrees, Showing panels, The Browser panel, Pull requests, Connectors |

@@ -105,6 +105,7 @@ pasted (`Desktop only for now.` for all three) is left out of this table.
 | The user's answers to a card, each under its question | `message.answers` | Yes | No: Not drawn yet. | No: Not drawn yet. |
 | A summary that gives way to a longer reply | `message.givesWay` | No: Not drawn yet. | Yes | No: Not drawn yet. |
 | An edited message | `message.editOf` | No: Not drawn yet. | No: Not drawn yet. | No: Not drawn yet. |
+| Inline page comment details in a sent message | `message.pageComments` | No: Not drawn yet. | No: Not drawn yet. | No: Not drawn yet. |
 | Narration (a paraphrase of what the agent wrote) | `message.narration` | No: Not drawn yet. | No: Not drawn yet. | No: Not drawn yet. |
 | One reply's reply | `message.final` | No: Not drawn yet. | No: Not drawn yet. | No: Not drawn yet. |
 
